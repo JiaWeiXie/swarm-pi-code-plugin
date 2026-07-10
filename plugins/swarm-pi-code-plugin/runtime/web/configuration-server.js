@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import http, {} from "node:http";
 import { once } from "node:events";
 import { resolveModelConfigurationFile } from "../state/model-config.js";
-import { discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, previewProviderConnection, saveConfigurationSubmission, } from "./configuration-service.js";
+import { discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, previewProviderConnection, saveConfigurationSubmission, saveProjectProfileSubmission, } from "./configuration-service.js";
 import { EndpointDiscoveryError } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
 const LOOPBACK_HOST = "127.0.0.1";
@@ -34,7 +34,7 @@ export async function startConfigurationServer(cwd, options = {}) {
                 const nonce = randomBytes(18).toString("base64");
                 response.setHeader("Content-Security-Policy", `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`);
                 response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-                response.end(renderConfigurationPage(view, nonce));
+                response.end(renderConfigurationPage(view, nonce, options.mode ?? "full"));
                 return;
             }
             if (request.method === "POST" && url.pathname === "/api/save") {
@@ -44,6 +44,15 @@ export async function startConfigurationServer(cwd, options = {}) {
                 response.setHeader("Connection", "close");
                 response.once("finish", () => void finish("saved"));
                 json(response, 200, { saved: true, configuration: view.configuration });
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/save-profile") {
+                assertJsonRequest(request, origin);
+                const body = await readJsonBody(request);
+                const profile = await saveProjectProfileSubmission(cwd, normalizeProfileSubmission(body));
+                response.setHeader("Connection", "close");
+                response.once("finish", () => void finish("saved"));
+                json(response, 200, { saved: true, profile });
                 return;
             }
             if (request.method === "POST" && url.pathname === "/api/discover") {
@@ -126,6 +135,17 @@ export async function startConfigurationServer(cwd, options = {}) {
         completion,
         close: () => finish("cancelled"),
     };
+}
+function normalizeProfileSubmission(value) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new HttpError(400, "Project profile request must be a JSON object");
+    }
+    const record = value;
+    const profile = record.profile;
+    if (typeof profile !== "object" || profile === null || Array.isArray(profile)) {
+        throw new HttpError(400, "Project profile is required");
+    }
+    return profile;
 }
 function normalizeDiscoveryRequest(value) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {

@@ -11,7 +11,9 @@ import {
   loadConfigurationView,
   previewProviderConnection,
   saveConfigurationSubmission,
+  saveProjectProfileSubmission,
   type ConfigurationSubmission,
+  type ProjectProfileSubmission,
 } from "./configuration-service.js";
 import { EndpointDiscoveryError, type EndpointDiscoveryRequest } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
@@ -33,6 +35,7 @@ export interface ConfigurationServerOptions {
   timeoutMs?: number | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   openUrl?: ((url: string) => Promise<void> | void) | undefined;
+  mode?: "full" | "project" | undefined;
 }
 
 export interface ConfigurationServerSession {
@@ -71,7 +74,7 @@ export async function startConfigurationServer(
           `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
         );
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        response.end(renderConfigurationPage(view, nonce));
+        response.end(renderConfigurationPage(view, nonce, options.mode ?? "full"));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/save") {
@@ -81,6 +84,15 @@ export async function startConfigurationServer(
         response.setHeader("Connection", "close");
         response.once("finish", () => void finish("saved"));
         json(response, 200, { saved: true, configuration: view.configuration });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/save-profile") {
+        assertJsonRequest(request, origin);
+        const body = await readJsonBody(request);
+        const profile = await saveProjectProfileSubmission(cwd, normalizeProfileSubmission(body));
+        response.setHeader("Connection", "close");
+        response.once("finish", () => void finish("saved"));
+        json(response, 200, { saved: true, profile });
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/discover") {
@@ -162,6 +174,18 @@ export async function startConfigurationServer(
     completion,
     close: () => finish("cancelled"),
   };
+}
+
+function normalizeProfileSubmission(value: unknown): ProjectProfileSubmission {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HttpError(400, "Project profile request must be a JSON object");
+  }
+  const record = value as Record<string, unknown>;
+  const profile = record.profile;
+  if (typeof profile !== "object" || profile === null || Array.isArray(profile)) {
+    throw new HttpError(400, "Project profile is required");
+  }
+  return profile as unknown as ProjectProfileSubmission;
 }
 
 function normalizeDiscoveryRequest(value: unknown): EndpointDiscoveryRequest {

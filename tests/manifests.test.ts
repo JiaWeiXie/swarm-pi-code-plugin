@@ -22,7 +22,7 @@ test("Claude and Codex manifests use the swarm-pi-code-plugin identity", () => {
 
 test("plugin package contains both host adapters and a self-contained runner", () => {
   const pluginRoot = path.join(repoRoot, "plugins/swarm-pi-code-plugin");
-  const skills = ["configure", "ask", "review", "plan", "implement", "orchestrate"];
+  const skills = ["configure", "project", "ask", "review", "plan", "implement", "orchestrate"];
   for (const skill of skills) {
     const file = path.join(
       pluginRoot,
@@ -65,6 +65,17 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(configure, /pi-runner\.mjs" configure --host "\$HOST"/);
   assert.match(configure, /model\.json/);
   assert.match(configure, /Never ask the user to paste an API key/i);
+  assert.doesNotMatch(configure, /Ask for a replacement project goal/i);
+
+  const project = fs.readFileSync(
+    path.join(pluginRoot, "skills/swarm-pi-code-plugin-project/SKILL.md"),
+    "utf8",
+  );
+  assert.match(project, /configure --host "\$HOST" --section project/);
+  assert.match(project, /safe to run repeatedly/i);
+  assert.equal(fs.existsSync(path.join(pluginRoot, "commands/project.md")), true);
+  const initCommand = fs.readFileSync(path.join(pluginRoot, "commands/init.md"), "utf8");
+  assert.doesNotMatch(initCommand, /Ask for replacement project goal/i);
 
   const pluginPackage = readJson("plugins/swarm-pi-code-plugin/package.json") as {
     dependencies: Record<string, string>;

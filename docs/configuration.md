@@ -1,8 +1,13 @@
-# Provider and Model Web Configuration
+# Configuration Reference
 
-## Decision
+This reference describes the temporary browser setup used by Claude Code and
+Codex. For installation, common workflows, and troubleshooting, start with
+the [README](../README.md). For runtime ownership and worker safety, see the
+[architecture reference](architecture.md).
 
-`swarm-pi-code-plugin` will provide a temporary local web application for
+## Product Model
+
+`swarm-pi-code-plugin` provides a temporary local web application for
 provider and model setup. Claude Code and Codex both launch the same shared
 configuration server during first-run setup and reconfiguration.
 
@@ -118,8 +123,12 @@ setup session, not a daemon.
    inventory. Technical overrides remain under an Advanced disclosure.
 7. The user chooses a primary model and optional ordered fallbacks from models
    on usable connections.
-8. The server validates the complete draft, writes `model.json` atomically,
-   updates the compatibility priority mirror, reports success, and exits.
+8. Project setup asks for one project goal, whole-project or selected-folder
+   scope, and one or more delegated task types using separate controls.
+9. Review shows the complete model and project profile before save.
+10. The server validates the complete draft, writes `model.json` atomically,
+    updates the shared project profile and compatibility priority mirror,
+    reports success, and exits.
 
 Provider identifiers are internal implementation details. Rediscovering the
 same canonical endpoint and protocol refreshes the existing connection instead
@@ -133,9 +142,44 @@ only on the Connections step and confirms that unsaved changes will be lost.
 After save or close, the page renders an explicit completion state with the
 next action instead of leaving a disabled form on screen.
 
+`/swarm-pi-code-plugin:project` and `$swarm-pi-code-plugin-project` launch the
+same page in project-only mode. This mode starts at **Project setup**, shows a
+profile-only Review, and writes only `state.config.profile`. It pre-populates
+the current goal, directories, and task types and is safe to run repeatedly;
+Provider, model priority, credentials, and jobs are not rewritten.
+
 Reconfiguration opens the connection overview instead of the raw provider
 form. Existing connections can be refreshed, edited, or removed. Refreshing a
 connection preserves explicit user model-metadata overrides.
+
+## Screenshots
+
+The screenshots below use a local mock endpoint and contain no credentials.
+They document the current four-step flow and the repeatable project-only flow:
+
+### Empty connections
+
+![Empty connections](assets/setup/01-empty-connections.png)
+
+### Endpoint discovery
+
+![Endpoint discovery](assets/setup/02-endpoint-discovery.png)
+
+### Project setup
+
+![Project setup](assets/setup/03-project-setup.png)
+
+### Full review
+
+![Full review](assets/setup/04-review.png)
+
+### Saved completion
+
+![Saved completion](assets/setup/05-saved.png)
+
+### Project-only setup
+
+![Project-only setup](assets/setup/06-project-only.png)
 
 ## Endpoint Discovery
 

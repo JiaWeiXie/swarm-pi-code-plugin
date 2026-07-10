@@ -53,6 +53,9 @@ export function parseArguments(argv) {
             case "--port":
                 parsed.port = parsePort(readValue(argv, ++index, argument));
                 break;
+            case "--section":
+                parsed.configurationSection = parseConfigurationSection(readValue(argv, ++index, argument));
+                break;
             case "--base":
                 parsed.base = readValue(argv, ++index, argument);
                 break;
@@ -82,11 +85,19 @@ export function parseArguments(argv) {
         !parsed.host) {
         throw new Error(`--host is required for ${command}`);
     }
+    if (parsed.configurationSection && command !== "configure") {
+        throw new Error("--section is only supported by configure");
+    }
     if ((command === "ask" || command === "plan" || command === "implement" || command === "orchestrate") &&
         !parsed.promptFile) {
         throw new Error(`--prompt-file is required for ${command}`);
     }
     return parsed;
+}
+function parseConfigurationSection(value) {
+    if (value === "project")
+        return value;
+    throw new Error(`Invalid configuration section: ${value}`);
 }
 function parsePort(value) {
     const port = Number(value);

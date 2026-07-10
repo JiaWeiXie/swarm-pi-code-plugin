@@ -66,6 +66,19 @@ test("argument parsing requires host and prompt file for ask", () => {
     },
   );
   assert.throws(() => parseArguments(["review", "--host", "codex", "--scope", "bad"]), /scope/);
+  assert.deepEqual(
+    parseArguments(["configure", "--host", "codex", "--section", "project"]),
+    {
+      command: "configure",
+      host: "codex",
+      configurationSection: "project",
+      reconfigure: false,
+      reset: false,
+      json: false,
+    },
+  );
+  assert.throws(() => parseArguments(["configure", "--section", "models"]), /configuration section/);
+  assert.throws(() => parseArguments(["init", "--section", "project"]), /only supported by configure/);
 });
 
 test("model helpers expose stable provider/model identifiers", () => {

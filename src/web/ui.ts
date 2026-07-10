@@ -1,7 +1,11 @@
 import type { ConfigurationView } from "./configuration-service.js";
 
-export function renderConfigurationPage(view: ConfigurationView, nonce: string): string {
-  const bootstrap = JSON.stringify(view)
+export function renderConfigurationPage(
+  view: ConfigurationView,
+  nonce: string,
+  mode: "full" | "project" = "full",
+): string {
+  const bootstrap = JSON.stringify({ ...view, setupMode: mode })
     .replaceAll("&", "\\u0026")
     .replaceAll("<", "\\u003c")
     .replaceAll(">", "\\u003e")
@@ -12,7 +16,7 @@ export function renderConfigurationPage(view: ConfigurationView, nonce: string):
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Swarm Pi - AI setup</title>
+  <title>Swarm Pi - ${mode === "project" ? "Project setup" : "AI setup"}</title>
   <style nonce="${nonce}">${styles}</style>
 </head>
 <body>
@@ -32,12 +36,19 @@ export function renderConfigurationPage(view: ConfigurationView, nonce: string):
       <div class="local-status"><span></span>Local setup</div>
     </header>
 
-    <nav class="steps" aria-label="Setup progress">
+    <nav id="full-steps" class="steps" aria-label="Setup progress">
       <button type="button" data-step="1"><span>1</span>Connect</button>
       <div class="step-line"></div>
       <button type="button" data-step="2"><span>2</span>Choose models</button>
       <div class="step-line"></div>
-      <button type="button" data-step="3"><span>3</span>Review</button>
+      <button type="button" data-step="3"><span>3</span>Project setup</button>
+      <div class="step-line"></div>
+      <button type="button" data-step="4"><span>4</span>Review</button>
+    </nav>
+    <nav id="project-steps" class="steps project-steps" aria-label="Project setup progress" hidden>
+      <button type="button" data-step="3"><span>1</span>Project setup</button>
+      <div class="step-line"></div>
+      <button type="button" data-step="4"><span>2</span>Review</button>
     </nav>
 
     <main class="workspace">
@@ -86,11 +97,49 @@ export function renderConfigurationPage(view: ConfigurationView, nonce: string):
         </div>
       </section>
 
+      <section id="project-screen" class="screen" hidden>
+        <div class="screen-heading"><div><h1>Project setup</h1><p>Tell Pi what this project is for and where it may help.</p></div></div>
+        <div id="profile-error" class="notice error-notice" role="alert" hidden></div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Project goal</h2><p>A short description Pi can use to understand the desired outcome.</p></div>
+          <div class="form-control">
+            <label for="project-goal">What should this project accomplish?</label>
+            <textarea id="project-goal" rows="5" maxlength="4000" placeholder="For example: Build a reliable internal tool for managing customer support requests."></textarea>
+            <span class="field-hint">Describe the product or outcome, not an individual coding task.</span>
+          </div>
+        </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Working area</h2><p>Limit the folders Pi should consider when work is delegated.</p></div>
+          <div class="form-control">
+            <div class="scope-toggle" role="radiogroup" aria-label="Project working area">
+              <button id="scope-all" type="button" role="radio">Whole project</button>
+              <button id="scope-selected" type="button" role="radio">Selected folders</button>
+            </div>
+            <div id="directory-options" class="check-list" hidden></div>
+            <p id="directory-empty" class="field-hint" hidden>No top-level project folders were found.</p>
+          </div>
+        </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Delegated work</h2><p>Choose the kinds of tasks Pi may handle for this project.</p></div>
+          <div class="form-control">
+            <div id="task-options" class="check-list task-list"></div>
+            <details class="project-advanced">
+              <summary>Additional task types</summary>
+              <label for="custom-tasks">Other task types <span class="optional">optional</span></label>
+              <input id="custom-tasks" placeholder="Comma-separated, for example: documentation, testing">
+            </details>
+          </div>
+        </div>
+      </section>
+
       <section id="review-screen" class="screen" hidden>
-        <div class="screen-heading"><div><h1>Review setup</h1><p>Confirm what Swarm Pi will use in this project.</p></div></div>
-        <div class="review-section"><h2>Primary model</h2><div id="review-primary" class="review-value"></div></div>
-        <div class="review-section"><h2>Fallback order</h2><div id="review-fallbacks" class="review-list"></div></div>
-        <div class="review-section"><h2>Connections</h2><div id="review-connections" class="review-list"></div></div>
+        <div class="screen-heading"><div><h1 id="review-title">Review setup</h1><p>Confirm what Swarm Pi will use in this project.</p></div></div>
+        <div class="review-section full-only"><h2>Primary model</h2><div id="review-primary" class="review-value"></div></div>
+        <div class="review-section full-only"><h2>Fallback order</h2><div id="review-fallbacks" class="review-list"></div></div>
+        <div class="review-section full-only"><h2>Connections</h2><div id="review-connections" class="review-list"></div></div>
+        <div class="review-section"><h2>Project goal</h2><div id="review-goal" class="review-value review-text"></div></div>
+        <div class="review-section"><h2>Working area</h2><div id="review-directories" class="review-list"></div></div>
+        <div class="review-section"><h2>Delegated work</h2><div id="review-tasks" class="review-list"></div></div>
       </section>
 
       <section id="closed-screen" class="screen completion-screen" hidden>
@@ -188,7 +237,7 @@ const styles = String.raw`
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; min-width: 320px; background: #f4f6f5; }
-button, input, select { font: inherit; letter-spacing: 0; }
+button, input, select, textarea { font: inherit; letter-spacing: 0; }
 button { cursor: pointer; }
 .app-shell { min-height: 100vh; display: grid; grid-template-rows: 64px 76px minmax(0, 1fr) 76px; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 28px; border-bottom: 1px solid var(--border); background: var(--surface); }
@@ -201,7 +250,8 @@ button { cursor: pointer; }
 .logo-handoff { stroke: var(--coral); stroke-width: 3.4; stroke-linecap: square; }
 .local-status { display: flex; align-items: center; gap: 8px; color: #47524f; font-size: 13px; }
 .local-status span { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
-.steps { display: grid; grid-template-columns: auto minmax(40px, 150px) auto minmax(40px, 150px) auto; align-items: center; justify-content: center; gap: 18px; padding: 0 24px; border-bottom: 1px solid var(--border); background: #fbfcfb; }
+.steps { display: grid; grid-template-columns: auto minmax(28px, 110px) auto minmax(28px, 110px) auto minmax(28px, 110px) auto; align-items: center; justify-content: center; gap: 14px; padding: 0 24px; border-bottom: 1px solid var(--border); background: #fbfcfb; }
+.project-steps { grid-template-columns: auto minmax(40px, 150px) auto; gap: 18px; }
 .steps button { display: flex; align-items: center; gap: 9px; padding: 8px 0; border: 0; background: transparent; color: #7a8481; font-weight: 650; }
 .steps button span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #e7eae8; color: #68716f; }
 .steps button.active { color: var(--teal); }
@@ -223,6 +273,7 @@ h2 { letter-spacing: 0; }
 .primary-button:disabled, .secondary-button:disabled { opacity: .5; cursor: not-allowed; }
 .notice { margin-bottom: 20px; padding: 11px 13px; border-radius: 6px; font-size: 13px; }
 .warning { color: #73500d; border: 1px solid #e3c37f; background: var(--amber-soft); }
+.error-notice { margin-top: 20px; color: #913a31; border: 1px solid #e1aaa3; background: #fff3f1; }
 .hero-empty { display: grid; justify-items: center; padding: 66px 24px 54px; text-align: center; }
 .hero-empty svg { width: 64px; height: 64px; margin-bottom: 16px; fill: #fff; stroke: var(--teal); stroke-width: 3; }
 .hero-empty h2 { margin: 0 0 7px; font-size: 24px; }
@@ -243,8 +294,9 @@ h2 { letter-spacing: 0; }
 .form-band { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 50px; padding: 28px 0; border-bottom: 1px solid var(--border); }
 .form-copy h2, .review-section h2 { margin: 0 0 4px; font-size: 16px; }
 label { display: block; margin: 0 0 7px; color: #34413e; font-size: 13px; font-weight: 680; }
-input, select { width: 100%; height: 43px; padding: 0 12px; border: 1px solid #c8d0cd; border-radius: 6px; color: var(--ink); background: #fff; outline: none; }
-input:focus, select:focus, button:focus-visible, summary:focus-visible { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(8,127,120,.14); outline: none; }
+input, select, textarea { width: 100%; min-height: 43px; padding: 0 12px; border: 1px solid #c8d0cd; border-radius: 6px; color: var(--ink); background: #fff; outline: none; }
+textarea { padding-top: 10px; padding-bottom: 10px; resize: vertical; }
+input:focus, select:focus, textarea:focus, button:focus-visible, summary:focus-visible { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(8,127,120,.14); outline: none; }
 .model-details { margin-top: 12px; padding: 14px; border-left: 3px solid var(--teal); background: #f4f8f7; }
 .model-title { font-weight: 720; }
 .model-reference { margin-top: 2px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
@@ -257,8 +309,20 @@ input:focus, select:focus, button:focus-visible, summary:focus-visible { border-
 .fallback-list { display: grid; gap: 7px; margin-bottom: 10px; }
 .fallback-row { display: grid; grid-template-columns: minmax(0, 1fr) 36px 36px 36px; align-items: center; gap: 5px; }
 .fallback-row button { width: 36px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 6px; color: #586360; background: #fff; }
+.scope-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 16px; padding: 4px; border-radius: 7px; background: #e9eeec; }
+.scope-toggle button { min-height: 40px; border: 0; border-radius: 5px; color: #59635f; background: transparent; font-weight: 680; }
+.scope-toggle button.active { color: #183b36; background: #fff; box-shadow: 0 1px 2px rgba(21,35,32,.08); }
+.check-list { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; border-top: 1px solid var(--border); }
+.check-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start; padding: 11px 0; border-bottom: 1px solid var(--border); font-weight: 650; cursor: pointer; }
+.check-row input { width: 17px; min-height: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--teal); }
+.check-row span { display: block; }
+.check-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.project-advanced { margin-top: 16px; }
+.project-advanced summary { color: #345b55; font-weight: 670; cursor: pointer; }
+.project-advanced label { margin-top: 14px; }
 .review-section { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 50px; padding: 25px 0; border-bottom: 1px solid var(--border); }
 .review-value { font-weight: 700; }
+.review-text { white-space: pre-wrap; }
 .review-list { display: grid; gap: 7px; }
 .review-item { padding: 10px 12px; border-left: 3px solid #9fb7b3; background: #f5f7f6; }
 .completion-screen { display: grid; justify-items: center; align-content: center; min-height: 100%; padding: 60px 20px; text-align: center; }
@@ -298,8 +362,10 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 @media (max-width: 760px) {
   .app-shell { grid-template-rows: 58px 68px minmax(0, 1fr) auto; }
   .topbar { padding: 0 16px; }
-  .steps { grid-template-columns: auto 26px auto 26px auto; gap: 8px; padding: 0 12px; }
-  .steps button { font-size: 12px; }
+  .steps { grid-template-columns: auto 22px auto 22px auto 22px auto; gap: 6px; padding: 0 12px; }
+  .project-steps { grid-template-columns: auto 36px auto; gap: 8px; }
+  .steps button { gap: 0; font-size: 0; }
+  .project-steps button { gap: 7px; font-size: 12px; }
   .steps button span { width: 26px; height: 26px; }
   .workspace { width: min(100% - 28px, 1040px); padding-top: 24px; }
   .screen-heading { align-items: stretch; flex-direction: column; }
@@ -307,6 +373,7 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
   .connection-row { grid-template-columns: 40px minmax(0, 1fr); }
   .status-pill, .row-actions { grid-column: 2; }
   .form-band, .review-section { grid-template-columns: 1fr; gap: 14px; }
+  .check-list { grid-template-columns: 1fr; }
   .actionbar { padding: 12px 14px; flex-wrap: wrap; }
   .save-status { width: 100%; order: 2; }
   .actions { width: 100%; }
@@ -314,12 +381,12 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 }
 @media (max-width: 480px) {
   .local-status { font-size: 0; }
-  .steps button { gap: 0; font-size: 0; }
   .steps button span { font-size: 12px; }
   .empty-actions, .section-actions { align-items: stretch; flex-direction: column; width: 100%; }
   .empty-actions button { width: 100%; }
   .limit-grid, .advanced-grid, .model-editor-body { grid-template-columns: 1fr; }
   .fallback-row { grid-template-columns: minmax(0, 1fr) 34px 34px 34px; }
+  .scope-toggle { grid-template-columns: 1fr; }
 }
 `;
 
@@ -327,8 +394,25 @@ const clientScript = String.raw`
 (() => {
   const boot = window.__SWARM_CONFIG__;
   const token = new URLSearchParams(location.search).get("token") || "";
+  const taskTypes = [
+    {value:"implementation",label:"Implementation",description:"Edit code and complete approved changes."},
+    {value:"planning",label:"Planning",description:"Explore approaches and prepare implementation plans."},
+    {value:"code-review",label:"Code review",description:"Inspect changes for bugs, risks, and missing tests."},
+    {value:"analysis",label:"Analysis",description:"Investigate behavior, architecture, and technical questions."},
+  ];
+  const setupMode = boot.setupMode === "project" ? "project" : "full";
+  const initialPhase = setupMode === "project" ? 3 : 1;
+  const savedProfile = boot.profile || null;
+  const knownTasks = new Set(taskTypes.map(item => item.value));
+  const savedTasks = savedProfile?.tasks || [];
+  function canonicalTask(value) {
+    const normalized = String(value).trim().toLowerCase().replace(/[ _]+/g, "-");
+    return ({implement:"implementation",implementation:"implementation",coding:"implementation",plan:"planning",planning:"planning",review:"code-review","code-review":"code-review",analysis:"analysis",analyze:"analysis"})[normalized] || null;
+  }
+  const savedKnownTasks = savedTasks.map(canonicalTask).filter(Boolean);
   const state = {
-    phase: 1,
+    phase: initialPhase,
+    setupMode,
     connections: structuredClone(boot.providers),
     providerCatalog: boot.providerCatalog,
     models: structuredClone(boot.models),
@@ -340,6 +424,13 @@ const clientScript = String.raw`
     editingCustomIndex: -1,
     dialogMode: "cloud",
     closed: false,
+    profile: {
+      goal: savedProfile?.goal || "",
+      scope: savedProfile?.dirs?.length ? "selected" : "all",
+      dirs: [...(savedProfile?.dirs || [])],
+      tasks: savedProfile ? [...new Set(savedKnownTasks.filter(task => knownTasks.has(task)))] : taskTypes.map(item => item.value),
+      customTasks: savedTasks.filter(task => !canonicalTask(task)),
+    },
   };
   const $ = id => document.getElementById(id);
 
@@ -418,7 +509,7 @@ const clientScript = String.raw`
     document.querySelectorAll("[data-step]").forEach(button => {
       const step = Number(button.dataset.step);
       button.className = step === state.phase ? "active" : step < state.phase ? "complete" : "";
-      button.disabled = step > state.phase || (step > 1 && usableModels().length === 0);
+      button.disabled = step > state.phase || step < initialPhase || (setupMode === "full" && step > 1 && usableModels().length === 0);
     });
   }
   function renderConnections() {
@@ -531,6 +622,65 @@ const clientScript = String.raw`
   function iconButton(title, text, handler) {
     const button = document.createElement("button"); button.type = "button"; button.title = title; button.setAttribute("aria-label", title); button.textContent = text; button.addEventListener("click", handler); return button;
   }
+  function renderProject() {
+    $("project-goal").value = state.profile.goal;
+    const selectedScope = state.profile.scope === "selected";
+    $("scope-all").className = selectedScope ? "" : "active";
+    $("scope-selected").className = selectedScope ? "active" : "";
+    $("scope-all").setAttribute("aria-checked", String(!selectedScope));
+    $("scope-selected").setAttribute("aria-checked", String(selectedScope));
+
+    const directoryOptions = [...new Set([...(boot.directoryOptions || []), ...state.profile.dirs])];
+    const directories = $("directory-options"); directories.hidden = !selectedScope || directoryOptions.length === 0; directories.replaceChildren();
+    $("directory-empty").hidden = !selectedScope || directoryOptions.length > 0;
+    directoryOptions.forEach(value => directories.append(checkRow({
+      value,
+      label:value,
+      checked:state.profile.dirs.includes(value),
+      onChange:checked => {
+        state.profile.dirs = checked ? [...new Set([...state.profile.dirs, value])] : state.profile.dirs.filter(item => item !== value);
+        clearProfileError();
+      },
+    })));
+
+    const tasks = $("task-options"); tasks.replaceChildren();
+    taskTypes.forEach(item => tasks.append(checkRow({
+      value:item.value,
+      label:item.label,
+      description:item.description,
+      checked:state.profile.tasks.includes(item.value),
+      onChange:checked => {
+        state.profile.tasks = checked ? [...new Set([...state.profile.tasks, item.value])] : state.profile.tasks.filter(value => value !== item.value);
+        clearProfileError();
+      },
+    })));
+    $("custom-tasks").value = state.profile.customTasks.join(", ");
+  }
+  function checkRow({value,label,description,checked,onChange}) {
+    const row = document.createElement("label"), input = document.createElement("input"), copy = document.createElement("span");
+    row.className = "check-row"; input.type = "checkbox"; input.value = value; input.checked = checked;
+    const title = document.createElement("span"); title.textContent = label; copy.append(title);
+    if (description) { const detail = document.createElement("small"); detail.textContent = description; copy.append(detail); }
+    input.addEventListener("change", () => onChange(input.checked)); row.append(input, copy); return row;
+  }
+  function projectProfile() {
+    return {
+      goal: state.profile.goal,
+      dirs: state.profile.scope === "selected" ? [...state.profile.dirs] : [],
+      tasks: [...new Set([...state.profile.tasks, ...state.profile.customTasks])],
+    };
+  }
+  function validateProject() {
+    const profile = projectProfile(), error = $("profile-error");
+    let message = "";
+    if (!profile.goal.trim()) message = "Add a project goal before continuing.";
+    else if (state.profile.scope === "selected" && profile.dirs.length === 0) message = "Choose at least one project folder, or use Whole project.";
+    else if (profile.tasks.length === 0) message = "Choose at least one type of delegated work.";
+    error.hidden = !message; error.textContent = message;
+    if (message) { $("project-screen").scrollIntoView({behavior:"smooth",block:"start"}); return false; }
+    return true;
+  }
+  function clearProfileError() { $("profile-error").hidden = true; $("profile-error").textContent = ""; }
   function renderReview() {
     const primary = modelById(state.primary);
     $("review-primary").textContent = primary ? providerName(primary.provider) + " / " + modelLabel(primary) : "No primary model";
@@ -539,16 +689,26 @@ const clientScript = String.raw`
     state.fallbacks.forEach((id, index) => { const item = modelById(id), row = document.createElement("div"); row.className = "review-item"; row.textContent = (index + 1) + ". " + (item ? providerName(item.provider) + " / " + modelLabel(item) : id); fallbacks.append(row); });
     const connections = $("review-connections"); connections.replaceChildren();
     state.connections.filter(item => item.ready).forEach(item => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = item.name + " - " + item.availableModelCount + " models"; connections.append(row); });
+    $("review-title").textContent = setupMode === "project" ? "Review project setup" : "Review setup";
+    document.querySelectorAll(".full-only").forEach(element => element.hidden = setupMode === "project");
+    const profile = projectProfile(); $("review-goal").textContent = profile.goal;
+    const directories = $("review-directories"); directories.replaceChildren();
+    if (profile.dirs.length === 0) directories.textContent = "Whole project";
+    profile.dirs.forEach(value => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = value; directories.append(row); });
+    const tasks = $("review-tasks"); tasks.replaceChildren();
+    profile.tasks.forEach(value => { const known = taskTypes.find(item => item.value === value), row = document.createElement("div"); row.className = "review-item"; row.textContent = known?.label || value; tasks.append(row); });
   }
   function render() {
-    renderSteps(); renderConnections(); renderPrimary(); renderFallbacks(); renderReview();
-    $("connections-screen").hidden = state.phase !== 1; $("models-screen").hidden = state.phase !== 2; $("review-screen").hidden = state.phase !== 3;
-    $("cancel-button").hidden = state.phase !== 1; $("back-button").hidden = state.phase === 1; $("next-button").hidden = state.phase === 3; $("save-button").hidden = state.phase !== 3;
-    $("next-button").textContent = state.phase === 1 ? "Choose models" : "Review";
-    $("next-button").disabled = usableModels().length === 0 || (state.phase === 2 && !state.primary);
+    $("full-steps").hidden = setupMode !== "full"; $("project-steps").hidden = setupMode !== "project";
+    renderSteps(); renderConnections(); renderPrimary(); renderFallbacks(); renderProject(); renderReview();
+    $("connections-screen").hidden = state.phase !== 1; $("models-screen").hidden = state.phase !== 2; $("project-screen").hidden = state.phase !== 3; $("review-screen").hidden = state.phase !== 4;
+    $("cancel-button").hidden = state.phase !== initialPhase; $("back-button").hidden = state.phase === initialPhase; $("next-button").hidden = state.phase === 4; $("save-button").hidden = state.phase !== 4;
+    $("next-button").textContent = state.phase === 1 ? "Choose models" : state.phase === 2 ? "Project setup" : "Review";
+    $("next-button").disabled = setupMode === "full" && (usableModels().length === 0 || (state.phase === 2 && !state.primary));
+    $("save-button").textContent = setupMode === "project" ? "Save project setup" : "Save configuration";
     const warning = $("registry-warning"); warning.hidden = !boot.registryError; warning.textContent = boot.registryError ? "Pi model registry: " + boot.registryError : "";
   }
-  function setPhase(phase) { if (phase > 1 && usableModels().length === 0) return; state.phase = phase; render(); window.scrollTo({top: 0, behavior: "smooth"}); }
+  function setPhase(phase) { if (setupMode === "full" && phase > 1 && usableModels().length === 0) return; state.phase = phase; render(); window.scrollTo({top: 0, behavior: "smooth"}); }
 
   function populateProviderCatalog() {
     const select = $("cloud-provider"), preferred = ["openai", "anthropic", "google", "openrouter", "deepseek", "mistral", "groq", "xai"];
@@ -669,13 +829,23 @@ const clientScript = String.raw`
   ["endpoint-name","endpoint-canonical-url","endpoint-api"].forEach(id => $(id).addEventListener("change", syncDraftFields));
   $("primary-model").addEventListener("change", () => { state.primary = $("primary-model").value; renderModelDetails(); renderFallbacks(); });
   $("add-fallback").addEventListener("click", () => { const next = usableModels().find(item => item.id !== state.primary && !state.fallbacks.includes(item.id)); if (next) { state.fallbacks.push(next.id); renderFallbacks(); } });
-  $("next-button").addEventListener("click", () => setPhase(Math.min(3, state.phase + 1))); $("back-button").addEventListener("click", () => setPhase(Math.max(1, state.phase - 1)));
-  document.querySelectorAll("[data-step]").forEach(button => button.addEventListener("click", () => { const step = Number(button.dataset.step); if (step <= state.phase) setPhase(step); }));
+  $("project-goal").addEventListener("input", () => { state.profile.goal = $("project-goal").value; clearProfileError(); });
+  $("scope-all").addEventListener("click", () => { state.profile.scope = "all"; clearProfileError(); renderProject(); });
+  $("scope-selected").addEventListener("click", () => { state.profile.scope = "selected"; clearProfileError(); renderProject(); });
+  $("custom-tasks").addEventListener("input", () => {
+    state.profile.customTasks = $("custom-tasks").value.split(",").map(value => value.trim()).filter(Boolean);
+    clearProfileError();
+  });
+  $("next-button").addEventListener("click", () => { if (state.phase === 3 && !validateProject()) return; setPhase(Math.min(4, state.phase + 1)); });
+  $("back-button").addEventListener("click", () => setPhase(Math.max(initialPhase, state.phase - 1)));
+  document.querySelectorAll("[data-step]").forEach(button => button.addEventListener("click", () => { const step = Number(button.dataset.step); if (step >= initialPhase && step <= state.phase) setPhase(step); }));
   $("save-button").addEventListener("click", async () => {
     const status = $("save-status"), button = $("save-button"); status.className = "save-status"; status.textContent = "Saving configuration..."; button.disabled = true;
     try {
-      await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,credentials:Object.entries(state.credentials).map(([provider,apiKey])=>({provider,apiKey}))});
-      showCompletion("Configuration saved", "Swarm Pi will use this configuration for the project. You can close this tab.", true);
+      const profile = projectProfile();
+      if (setupMode === "project") await post("/api/save-profile", {profile});
+      else await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,credentials:Object.entries(state.credentials).map(([provider,apiKey])=>({provider,apiKey})),profile});
+      showCompletion(setupMode === "project" ? "Project setup saved" : "Configuration saved", "Swarm Pi will use these project settings for delegated work. You can close this tab.", true);
     } catch (error) { status.className = "save-status error"; status.textContent = error.message; button.disabled = false; }
   });
   $("cancel-button").addEventListener("click", async () => {
@@ -688,7 +858,7 @@ const clientScript = String.raw`
 
   function showCompletion(title, message, saved) {
     state.closed = true;
-    $("connections-screen").hidden = true; $("models-screen").hidden = true; $("review-screen").hidden = true; $("closed-screen").hidden = false;
+    $("connections-screen").hidden = true; $("models-screen").hidden = true; $("project-screen").hidden = true; $("review-screen").hidden = true; $("closed-screen").hidden = false;
     $("completion-mark").textContent = saved ? "✓" : "–"; $("completion-mark").className = saved ? "completion-mark" : "completion-mark neutral";
     $("completion-title").textContent = title; $("completion-message").textContent = message;
     $("action-buttons").hidden = true; $("save-status").className = saved ? "save-status success" : "save-status"; $("save-status").textContent = saved ? "Saved successfully." : "Closed without saving.";

@@ -1,7 +1,9 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { createPiEnvironment } from "../pi/environment.js";
 import { createModelCatalog, describeProviders, modelId } from "../pi/models.js";
 import { loadModelConfiguration, modelPriority, parseModelConfiguration, saveModelConfiguration, } from "../state/model-config.js";
-import { loadState, setModelPriority } from "../state/state.js";
+import { loadState, resolveWorkspaceRoot, saveProfile, setModelPriority, } from "../state/state.js";
 import { discoverEndpoint, discoverLocalEndpoints, } from "./model-discovery.js";
 export async function previewProviderConnection(cwd, credential, env = process.env) {
     const normalized = normalizeCredential(credential);
@@ -65,6 +67,8 @@ export async function loadConfigurationView(cwd, env = process.env) {
     const providerIds = [...new Set(all.map((model) => model.provider))];
     return {
         configuration,
+        profile: state.config.profile ?? null,
+        directoryOptions: await projectDirectoryOptions(cwd, state.config.profile?.dirs ?? []),
         providers: describeProviders(catalog, configuration),
         providerCatalog: providerIds
             .map((id) => ({ id, name: catalog.displayName?.(id) ?? id }))
@@ -104,6 +108,9 @@ function browserModel(model, available, configuration) {
 }
 export async function saveConfigurationSubmission(cwd, submission, env = process.env) {
     const current = await loadConfigurationView(cwd, env);
+    const profile = submission.profile
+        ? await normalizeProjectProfile(cwd, submission.profile)
+        : undefined;
     const candidate = parseModelConfiguration({
         version: 1,
         primary: submission.primary,
@@ -139,7 +146,79 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
     }
     const saved = await saveModelConfiguration(cwd, candidate);
     await setModelPriority(cwd, modelPriority(saved));
+    if (profile)
+        await saveProfile(cwd, profile);
     return loadConfigurationView(cwd, env);
+}
+export async function saveProjectProfileSubmission(cwd, submission) {
+    const profile = await normalizeProjectProfile(cwd, submission);
+    const state = await saveProfile(cwd, profile);
+    return state.config.profile;
+}
+async function projectDirectoryOptions(cwd, selected) {
+    const root = await resolveWorkspaceRoot(cwd);
+    const entries = await fs.readdir(root, { withFileTypes: true });
+    const discovered = entries
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules")
+        .map((entry) => entry.name);
+    return [...new Set([...discovered, ...selected])].sort((left, right) => left.localeCompare(right));
+}
+async function normalizeProjectProfile(cwd, submission) {
+    if (typeof submission !== "object" || submission === null || Array.isArray(submission)) {
+        throw new Error("Project profile must be a JSON object");
+    }
+    if (typeof submission.goal !== "string" || !submission.goal.trim()) {
+        throw new Error("Project goal is required");
+    }
+    if (submission.goal.length > 4_000)
+        throw new Error("Project goal is too long");
+    if (!Array.isArray(submission.dirs) || !submission.dirs.every((entry) => typeof entry === "string")) {
+        throw new Error("Project directories must be a string array");
+    }
+    if (!Array.isArray(submission.tasks) || !submission.tasks.every((entry) => typeof entry === "string")) {
+        throw new Error("Delegated task types must be a string array");
+    }
+    if (submission.dirs.length > 128)
+        throw new Error("Too many project directories were selected");
+    if (submission.tasks.length === 0)
+        throw new Error("Choose at least one delegated task type");
+    if (submission.tasks.length > 32)
+        throw new Error("Too many delegated task types were selected");
+    const root = await fs.realpath(await resolveWorkspaceRoot(cwd));
+    const dirs = [];
+    for (const raw of [...new Set(submission.dirs.map((entry) => entry.trim()).filter(Boolean))]) {
+        if (path.isAbsolute(raw))
+            throw new Error(`Project directory must be relative: ${raw}`);
+        const normalized = path.normalize(raw);
+        if (normalized === ".." || normalized.startsWith(`..${path.sep}`)) {
+            throw new Error(`Project directory is outside the workspace: ${raw}`);
+        }
+        let absolute;
+        try {
+            absolute = await fs.realpath(path.resolve(root, normalized));
+        }
+        catch {
+            throw new Error(`Project directory does not exist: ${raw}`);
+        }
+        const relative = path.relative(root, absolute);
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+            throw new Error(`Project directory is outside the workspace: ${raw}`);
+        }
+        if (!(await fs.stat(absolute)).isDirectory())
+            throw new Error(`Project scope is not a directory: ${raw}`);
+        dirs.push(relative.split(path.sep).join("/"));
+    }
+    const tasks = [...new Set(submission.tasks.map((entry) => entry.trim()).filter(Boolean))];
+    if (tasks.length === 0)
+        throw new Error("Choose at least one delegated task type");
+    if (tasks.some((entry) => entry.length > 80))
+        throw new Error("Delegated task type is too long");
+    return {
+        goal: submission.goal,
+        dirs,
+        tasks,
+        configuredAt: new Date().toISOString(),
+    };
 }
 function assertNoBuiltInProviderOverride(current, candidate) {
     const currentCustom = new Set(current.configuration.customProviders.map((provider) => provider.id));

@@ -1,6 +1,6 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.1.0+codex.20260710053850",
+  "version": "0.1.0+codex.20260710120410",
   "description": "Dual-host agent swarm adapter backed by the embedded Pi coding-agent SDK.",
   "author": {
     "name": "JiaWei Xie"

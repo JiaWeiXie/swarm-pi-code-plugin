@@ -9,10 +9,11 @@ export async function main(argv = process.argv.slice(2)) {
                 host: args.host,
                 port: args.port,
                 openBrowser: !args.noOpen,
+                mode: args.configurationSection === "project" ? "project" : "full",
             });
             process.stdout.write(args.json
                 ? `${JSON.stringify({ event: "ready", url: session.url })}\n`
-                : `Swarm Pi model setup is available at:\n${session.url}\n\nWaiting for the browser configuration to finish...\n`);
+                : `Swarm Pi setup is available at:\n${session.url}\n\nWaiting for the browser configuration to finish...\n`);
             const completion = await session.completion;
             process.stdout.write(`${JSON.stringify(completion, null, args.json ? 2 : 0)}\n`);
             return completion.status === "timed-out" ? 1 : 0;

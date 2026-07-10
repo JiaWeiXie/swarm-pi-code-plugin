@@ -1,55 +1,62 @@
 # swarm-pi-code-plugin
 
-Dual-host plugin project for Claude Code and Codex. The host agent owns intent,
-approvals, validation, and delivery; an embedded Pi coding-agent session performs
-bounded read-only or implementation work.
+`swarm-pi-code-plugin` connects Claude Code and Codex to a bounded Pi coding
+worker for repository-grounded analysis, planning, review, and implementation.
+It is designed for teams that want a second coding-agent perspective without
+giving that worker unrestricted shell access or ownership of Git delivery.
 
-This repository is a clean rewrite of `swarm-code-plugin`. Pi is the only
-delegated worker engine.
+The host remains in control of intent, approvals, verification, commits, and
+pushes. Pi receives only the tools and worktree that the current task allows.
 
-The original plugin concept and host workflow were informed by
-[apoapps/swarm-code-plugin](https://github.com/apoapps/swarm-code-plugin). This
-rewrite replaces its delegated worker runtime with the embedded Pi SDK and uses
-an independent implementation.
+## Architecture
 
-## Development
-
-The project pins Node.js through mise:
-
-```bash
-mise install
-mise run install
-mise run check
+```mermaid
+flowchart LR
+    H[Claude Code or Codex] --> A[Host adapter]
+    A --> R[Shared Pi runner]
+    R --> P[Embedded Pi session]
+    P --> W[Assigned Git worktree]
+    R --> S[Shared state and job artifacts]
+    H --> V[Host-owned review and verification]
+    W --> V
 ```
 
-Runtime baseline:
+Claude Code and Codex are host surfaces, not worker engines. Both invoke the
+same runner and share model configuration, project profile, job history, and
+worktree-aware state.
 
-- Node.js 24.15.0
-- `@earendil-works/pi-coding-agent` 0.80.6
-- TypeScript strict mode
+Read-only jobs use Pi sessions with repository inspection tools. Explicit
+implementation jobs add scoped write and edit tools, require a clean worktree,
+and return the changed-file list and diff summary. Pi never receives a generic
+shell tool and never commits, pushes, changes branches, or runs host-owned
+verification commands.
 
-Installed plugins require Node.js 22.19.0 or newer, matching the pinned Pi SDK.
-The repository itself develops and verifies with the mise-pinned Node 24.15.0.
+Provider configuration is stored in `.swarm-pi-code-plugin/model.json`. Project
+profile, migration metadata, and job history are stored in
+`.swarm-pi-code-plugin/state.json`; credentials stay in Pi's user credential
+store and never enter project artifacts.
+
+See the [architecture reference](docs/architecture.md) and
+[configuration reference](docs/configuration.md) for implementation details.
 
 ## Install
 
+### Requirements
+
+- Node.js 22.19.0 or newer for installed plugins.
+- A supported Claude Code or Codex installation.
+- A Git repository for worktree-aware implementation jobs.
+
 ### Claude Code
 
-Add the GitHub repository as a marketplace, then install the named plugin:
+Add the GitHub repository as a marketplace and install the plugin:
 
 ```bash
 claude plugin marketplace add https://github.com/JiaWeiXie/swarm-pi-code-plugin
 claude plugin install swarm-pi-code-plugin@swarm-pi-code-plugin
 ```
 
-Restart Claude Code or run `/reload`, then configure the project:
-
-```text
-/swarm-pi-code-plugin:init
-/swarm-pi-code-plugin:init --reconfigure
-```
-
-For local development:
+Restart Claude Code or run `/reload`. For local development:
 
 ```bash
 claude --plugin-dir /absolute/path/to/swarm-pi-code-plugin/plugins/swarm-pi-code-plugin
@@ -57,18 +64,18 @@ claude --plugin-dir /absolute/path/to/swarm-pi-code-plugin/plugins/swarm-pi-code
 
 ### Codex
 
-This repository contains a non-default local marketplace. Add its repository
-root once, then install by plugin and marketplace name:
+This repository contains a local marketplace:
 
 ```bash
 codex plugin marketplace add /absolute/path/to/swarm-pi-code-plugin
 codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 ```
 
-Start a new Codex task so skills are reloaded. Available skills are:
+Start a new Codex task so skills are reloaded. The available skills are:
 
 ```text
 $swarm-pi-code-plugin-configure
+$swarm-pi-code-plugin-project
 $swarm-pi-code-plugin-ask
 $swarm-pi-code-plugin-review
 $swarm-pi-code-plugin-plan
@@ -76,113 +83,183 @@ $swarm-pi-code-plugin-implement
 $swarm-pi-code-plugin-orchestrate
 ```
 
-The first runner invocation installs the exact plugin-local production
-dependencies from `package-lock.json`. Credential discovery uses Pi's supported
-auth storage and provider environment variables; project files never store
-credentials. Confirm authenticated models with:
+## Usage
 
-```bash
-node plugins/swarm-pi-code-plugin/scripts/pi-runner.mjs models --json
-```
+### Choose the right workflow
 
-## Configure Providers and Models
+| Situation | Claude Code | Codex |
+| --- | --- | --- |
+| First provider, model, and project setup | `/swarm-pi-code-plugin:init` | `$swarm-pi-code-plugin-configure` |
+| Change Provider or model priority | `/swarm-pi-code-plugin:init --reconfigure` | `$swarm-pi-code-plugin-configure` |
+| Repeatedly change project goal, folders, or task types | `/swarm-pi-code-plugin:project` | `$swarm-pi-code-plugin-project` |
+| Ask a repository question or request analysis | Ask Claude Code to use the Pi worker | `$swarm-pi-code-plugin-ask` |
+| Create a read-only implementation plan | Ask Claude Code for a Pi plan | `$swarm-pi-code-plugin-plan` |
+| Review working-tree or branch changes | Ask Claude Code to review with Pi | `$swarm-pi-code-plugin-review` |
+| Make an explicit scoped code change | Ask Claude Code to implement the requested change | `$swarm-pi-code-plugin-implement` |
+| Run multiple read-only perspectives | Use the runner orchestrate command | `$swarm-pi-code-plugin-orchestrate` |
 
-Both host entry points launch the same temporary local setup page:
+### First setup
+
+Run the host-specific setup entry point. The browser walks through four steps:
+
+1. Connect usable cloud or local AI services.
+2. Choose a primary model and ordered fallbacks.
+3. Describe the project goal, working area, and delegated task types.
+4. Review and save the complete setup.
+
+The connection list is intentionally empty when no usable service is detected.
+Custom endpoints can be tested before the provider ID, API protocol, model
+limits, or model IDs are shown.
+
+### Setup preview
+
+![Empty AI connections state](docs/assets/setup/01-empty-connections.png)
+
+![Guided project setup](docs/assets/setup/03-project-setup.png)
+
+![Review before saving](docs/assets/setup/04-review.png)
+
+### Reconfigure
+
+Provider and model settings can be reopened with `--reconfigure` or the Codex
+configure skill. Project settings have a separate repeatable flow:
 
 ```text
-/swarm-pi-code-plugin:init --reconfigure
-$swarm-pi-code-plugin-configure
+/swarm-pi-code-plugin:project
+$swarm-pi-code-plugin-project
 ```
 
-The runner binds only to `127.0.0.1` on a random port, opens the browser, and
-prints a one-time URL as a fallback. Setup follows three familiar steps:
-**Connections**, **Models**, and **Routing**. The Connections page contains only
-services that are already usable, detected from Pi-supported credentials, or
-saved by the user. A new project with no usable service starts with an empty
-list instead of a catalog of unfinished providers.
+The project flow reads the current profile, lets the user change the goal,
+scope, or task types, and updates only `state.json`. It does not rewrite model
+configuration, credentials, or job history.
 
-Known Pi OAuth subscriptions and documented provider environment variables are
-detected without exposing their secret values. Users can also explicitly scan
-for a running Ollama or LM Studio instance, connect a known cloud provider, or
-enter a custom HTTP(S) endpoint. Custom setup initially asks only for the URL
-and optional API key; **Test and find models** detects supported OpenAI,
-Anthropic, Gemini, Ollama, and LM Studio model-list APIs. Context-window and
-maximum-output values are filled from endpoint metadata or Pi's model catalog
-when known. Unknown values remain **Automatic**, with manual overrides kept in
-an Advanced section.
+### Non-interactive runner
 
-The setup server shuts down after save, cancel, or ten minutes of inactivity.
-
-Provider and model choices are saved atomically to the shared, gitignored
-`.swarm-pi-code-plugin/model.json`. Reconfiguration reads this file and
-pre-populates connections, models, and routing. An API key entered in the page
-goes directly to Pi's user credential store (`~/.pi/agent/auth.json` by
-default); it is never written to `model.json`, state, job artifacts, logs,
-URLs, or browser responses. A blank key field preserves the existing
-credential.
-
-For a terminal without automatic browser launch:
+The shared runner is useful for automation and host integration:
 
 ```bash
-node scripts/pi-runner.mjs configure --host codex --no-open
-```
-
-Provider inventory is also available to automation:
-
-```bash
-node scripts/pi-runner.mjs providers --json
-node scripts/pi-runner.mjs models --provider anthropic --all --json
-```
-
-## Status
-
-The runtime currently provides Pi SDK loading, explicit read-only and
-implementation tool profiles, dual-host manifests, model discovery, shared
-worktree-aware state, and a testable runner for `ask`, `plan`, and guarded
-`implement` jobs.
-
-```bash
-mise run build
 node scripts/pi-runner.mjs models --json
 node scripts/pi-runner.mjs providers --json
-node scripts/pi-runner.mjs configure --host codex --no-open
+node scripts/pi-runner.mjs configure --host codex --section project --no-open
 node scripts/pi-runner.mjs init --json
-node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/prompt.md --json
+node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/question.md --json
 node scripts/pi-runner.mjs review --host codex --scope working-tree --json
 node scripts/pi-runner.mjs plan --host codex --prompt-file /path/to/plan.md --json
 node scripts/pi-runner.mjs implement --host codex --prompt-file /path/to/task.md --json
 node scripts/pi-runner.mjs orchestrate --host codex --prompt-file /path/to/task.md --json
 ```
 
-`implement` requires a clean Git worktree, exposes no shell tool to Pi, confines
-all writes and edits to the assigned worktree (including symlink checks), and
-returns the exact changed-file list plus a diff summary. Verification remains a
-host responsibility, so the Pi result reports verification as `not-run`.
+`implement` is guarded by a clean-worktree preflight. The host must inspect the
+result and run verification before delivery.
 
-Provider and model configuration is stored in
-`.swarm-pi-code-plugin/model.json`; job history and the project profile remain
-in `.swarm-pi-code-plugin/state.json`. Linked worktrees resolve the main
-repository through Git's common directory and share both files. Set
-`SWARM_PI_CODE_PLUGIN_DATA_DIR` for an explicit override. A first read fully
-migrates existing `.swarm-pi-code/` config and Pi jobs. It can also migrate the
-older project profile and model preference from `.swarm-code/`; predecessor job
-history and provider data are deliberately excluded from that older format.
+## Troubleshooting
 
-The runner stores each request, raw prompt, result, and implementation patch in
-`.swarm-pi-code-plugin/jobs/<job-id>/`. State updates use an inter-process lock and an
-atomic rename, so concurrent read-only jobs do not overwrite job history.
+### The command or skill is not visible
 
-The browser is the recommended setup path. Automation may still configure a
-complete primary/fallback chain atomically:
+Restart the host or run `/reload` in Claude Code. In Codex, start a new task so
+the installed skill cache is refreshed. For local plugin development, use the
+`--plugin-dir` path for Claude Code or reinstall the local Codex marketplace
+plugin after changing the manifest or skills.
+
+### The browser does not open
+
+The runner prints a one-time loopback URL. Open that URL manually, or run the
+runner with `--no-open` when launching it from a terminal.
+
+### No provider is detected
+
+Pi only displays services that it can use. Check Pi's credential store or the
+documented provider environment variables, then reopen setup. For local AI
+applications, use **Find local AI apps**. The plugin does not scan `.env` files
+or copy private Claude Code or Codex credentials.
+
+### Endpoint discovery fails
+
+Confirm the URL is an HTTP(S) model server endpoint, not a browser dashboard
+URL. Check the optional API key, then use **Test and find models** again. The
+server reports whether the failure is authentication, timeout, unreachable
+server, malformed response, redirect, or unsupported endpoint.
+
+### A selected model is unavailable
+
+Reopen Provider and model setup and choose a model that Pi currently reports as
+available. Keep a fallback model configured when the primary provider may be
+temporarily unavailable.
+
+### Setup was canceled or timed out
+
+No changes are saved. Run the same setup command again. The project-only flow
+is safe to repeat when only the goal, folders, or delegated task types need to
+change.
+
+### Implementation is rejected because the worktree is dirty
+
+Pi implementation requires a clean assigned worktree so unrelated user changes
+cannot be confused with worker edits. Review or safely commit the existing
+changes first, then retry in the intended worktree.
+
+### A linked worktree cannot see the configuration
+
+State is resolved through Git's common directory, so linked worktrees normally
+share `.swarm-pi-code-plugin/`. Check that the worktree belongs to the expected
+repository and that `SWARM_PI_CODE_PLUGIN_DATA_DIR` is not pointing elsewhere.
+
+## Development
+
+The repository uses mise to provide the pinned Node.js environment:
 
 ```bash
-node scripts/pi-runner.mjs init \
-  --set-model-priority '["provider/primary","provider/fallback"]' \
-  --save-profile '{"goal":"Ship the migration","dirs":["src"],"tasks":["Implementation"]}' \
-  --json
+mise install
+mise run install
+mise run check
 ```
 
-`--reset` clears `model.json`, model inventory, priority, and project profile
-while preserving Pi credentials, job history, and artifacts. The plugin package includes the compiled runner,
-Claude command/agents, and six shared host-aware skills. Architecture and safety
-details are documented in [`docs/architecture.md`](docs/architecture.md).
+Development uses Node.js `24.15.0` from mise. Installed plugin packages support
+Node.js `22.19.0` or newer to match the Pi SDK engine requirement.
+
+Useful individual checks are:
+
+```bash
+mise run typecheck
+mise run test
+mise run build
+```
+
+`npm test` runs the built Node test suite, including mocked Pi sessions,
+state migration, manifest validation, endpoint discovery, and loopback web
+server tests. `npm run build` compiles the source and copies the production
+runtime into the self-contained plugin package. Local host testing uses:
+
+```bash
+claude --plugin-dir /absolute/path/to/swarm-pi-code-plugin/plugins/swarm-pi-code-plugin
+codex plugin marketplace add /absolute/path/to/swarm-pi-code-plugin
+codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
+```
+
+Validate packaged JavaScript with `node --check` on the two plugin scripts and
+validate the Codex manifest and skills with the Codex plugin validation tool
+when it is available in the local development environment.
+
+After changing Codex skills or the plugin manifest, update the Codex plugin
+cachebuster and start a new task. Keep runtime changes in `src/` and rebuild
+before validating the packaged plugin.
+
+## Built With and References
+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
+- [Codex](https://developers.openai.com/codex/)
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.80.6`
+- [Node.js](https://nodejs.org/)
+- [TypeScript](https://www.typescriptlang.org/)
+- [mise](https://mise.jdx.dev/)
+- [Git worktrees](https://git-scm.com/docs/git-worktree)
+
+The original plugin concept and host workflow were informed by
+[apoapps/swarm-code-plugin](https://github.com/apoapps/swarm-code-plugin).
+That project is a reference for architecture and delegation ideas; this
+repository is an independent rewrite and does not reuse its source code.
+
+## License
+
+This project is released under the [MIT License](LICENSE). Copyright (c) 2026
+Jason Hsieh.

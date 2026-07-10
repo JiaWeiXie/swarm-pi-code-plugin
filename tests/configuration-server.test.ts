@@ -9,6 +9,7 @@ import { defaultModelConfiguration } from "../src/state/model-config.js";
 import {
   loadConfigurationView,
   saveConfigurationSubmission,
+  saveProjectProfileSubmission,
 } from "../src/web/configuration-service.js";
 import { startConfigurationServer } from "../src/web/configuration-server.js";
 import { renderConfigurationPage } from "../src/web/ui.js";
@@ -47,6 +48,8 @@ function fixture() {
 test("configuration page starts from connections and uses the original Swarm Pi mark", () => {
   const html = renderConfigurationPage({
     configuration: defaultModelConfiguration(),
+    profile: null,
+    directoryOptions: [],
     providers: [],
     providerCatalog: [{ id: "openai", name: "OpenAI" }],
     models: [],
@@ -63,8 +66,50 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   assert.doesNotMatch(html, /Provider ID/);
 });
 
+test("project-only page starts from the guided project setup", () => {
+  const html = renderConfigurationPage({
+    configuration: defaultModelConfiguration(),
+    profile: { goal: "Maintain the product", dirs: ["src"], tasks: ["implementation"] },
+    directoryOptions: ["docs", "src"],
+    providers: [],
+    providerCatalog: [],
+    models: [],
+    registryError: null,
+  }, "test-nonce", "project");
+
+  assert.match(html, /"setupMode":"project"/);
+  assert.match(html, /What should this project accomplish/);
+  assert.match(html, /Selected folders/);
+  assert.match(html, /Delegated work/);
+  assert.match(html, /\/api\/save-profile/);
+});
+
+test("project profile save validates scope and does not create model configuration", async () => {
+  const { workspace } = fixture();
+  fs.mkdirSync(path.join(workspace, "src"));
+  const profile = await saveProjectProfileSubmission(workspace, {
+    goal: "Ship a dependable project setup flow",
+    dirs: ["src"],
+    tasks: ["implementation", "code-review"],
+  });
+
+  assert.equal(profile.goal, "Ship a dependable project setup flow");
+  assert.deepEqual(profile.dirs, ["src"]);
+  assert.deepEqual(profile.tasks, ["implementation", "code-review"]);
+  assert.equal(fs.existsSync(path.join(workspace, ".swarm-pi-code-plugin", "model.json")), false);
+  await assert.rejects(
+    () => saveProjectProfileSubmission(workspace, { goal: "Invalid", dirs: ["../outside"], tasks: ["analysis"] }),
+    /outside/,
+  );
+  await assert.rejects(
+    () => saveProjectProfileSubmission(workspace, { goal: "Invalid", dirs: [], tasks: [" "] }),
+    /at least one delegated task type/,
+  );
+});
+
 test("configuration service stores credentials outside model and state files", async () => {
   const { workspace, privateDir, env, customProviders } = fixture();
+  fs.mkdirSync(path.join(workspace, "src"));
   const secret = "test-secret-that-must-not-leak";
   const view = await saveConfigurationSubmission(
     workspace,
@@ -73,6 +118,11 @@ test("configuration service stores credentials outside model and state files", a
       fallbacks: [],
       customProviders,
       credential: { provider: "local-test", apiKey: secret },
+      profile: {
+        goal: "Maintain a guided setup experience",
+        dirs: ["src"],
+        tasks: ["implementation", "code-review"],
+      },
     },
     env,
   );
@@ -88,6 +138,8 @@ test("configuration service stores credentials outside model and state files", a
   assert.doesNotMatch(JSON.stringify(view), new RegExp(secret));
   assert.equal(fs.statSync(authFile).mode & 0o777, 0o600);
   assert.deepEqual((await loadState(workspace)).config.modelPriority, ["local-test/test-model"]);
+  assert.equal((await loadState(workspace)).config.profile?.goal, "Maintain a guided setup experience");
+  assert.deepEqual(view.directoryOptions, ["src"]);
 });
 
 test("custom models keep unknown limits automatic in the browser view", async () => {
@@ -232,5 +284,35 @@ test("cancel closes the setup session without creating model.json", async () => 
   });
   assert.equal(response.status, 200);
   assert.equal((await server.completion).status, "cancelled");
+  assert.equal(fs.existsSync(path.join(workspace, ".swarm-pi-code-plugin", "model.json")), false);
+});
+
+test("project-only server saves profile without changing model configuration", async () => {
+  const { workspace, env } = fixture();
+  fs.mkdirSync(path.join(workspace, "src"));
+  const server = await startConfigurationServer(workspace, {
+    env,
+    mode: "project",
+    openBrowser: false,
+    timeoutMs: 10_000,
+  });
+  const url = new URL(server.url);
+  const documentResponse = await fetch(server.url);
+  assert.match(await documentResponse.text(), /"setupMode":"project"/);
+
+  const response = await fetch(`${url.origin}/api/save-profile`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-swarm-token": url.searchParams.get("token")!,
+      origin: url.origin,
+    },
+    body: JSON.stringify({
+      profile: { goal: "Guide repeated setup", dirs: ["src"], tasks: ["planning", "analysis"] },
+    }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await server.completion).status, "saved");
+  assert.deepEqual((await loadState(workspace)).config.profile?.tasks, ["planning", "analysis"]);
   assert.equal(fs.existsSync(path.join(workspace, ".swarm-pi-code-plugin", "model.json")), false);
 });

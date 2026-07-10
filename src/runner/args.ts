@@ -20,6 +20,7 @@ export interface RunnerArguments {
   allModels?: boolean;
   noOpen?: boolean;
   port?: number;
+  configurationSection?: "project";
   json: boolean;
 }
 
@@ -80,6 +81,9 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--port":
         parsed.port = parsePort(readValue(argv, ++index, argument));
         break;
+      case "--section":
+        parsed.configurationSection = parseConfigurationSection(readValue(argv, ++index, argument));
+        break;
       case "--base":
         parsed.base = readValue(argv, ++index, argument);
         break;
@@ -112,6 +116,9 @@ export function parseArguments(argv: string[]): RunnerArguments {
   ) {
     throw new Error(`--host is required for ${command}`);
   }
+  if (parsed.configurationSection && command !== "configure") {
+    throw new Error("--section is only supported by configure");
+  }
   if (
     (command === "ask" || command === "plan" || command === "implement" || command === "orchestrate") &&
     !parsed.promptFile
@@ -120,6 +127,11 @@ export function parseArguments(argv: string[]): RunnerArguments {
   }
 
   return parsed;
+}
+
+function parseConfigurationSection(value: string): "project" {
+  if (value === "project") return value;
+  throw new Error(`Invalid configuration section: ${value}`);
 }
 
 function parsePort(value: string): number {
