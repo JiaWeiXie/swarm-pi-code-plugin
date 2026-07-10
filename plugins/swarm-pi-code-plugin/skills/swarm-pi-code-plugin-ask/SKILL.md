@@ -1,5 +1,5 @@
 ---
-name: swarm-pi-code-ask
+name: swarm-pi-code-plugin-ask
 description: Delegate a focused codebase question, explanation, or read-only analysis to an embedded Pi worker from Codex or Claude Code. Use when a second repository-grounded analysis pass is useful. Do not use for edits.
 ---
 

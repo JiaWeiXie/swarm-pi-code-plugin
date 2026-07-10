@@ -3,7 +3,7 @@
   "compilerOptions": {
     "noEmit": false,
     "rootDir": "src",
-    "outDir": "plugins/swarm-pi-code/runtime",
+    "outDir": "plugins/swarm-pi-code-plugin/runtime",
     "declaration": false,
     "sourceMap": false
   },

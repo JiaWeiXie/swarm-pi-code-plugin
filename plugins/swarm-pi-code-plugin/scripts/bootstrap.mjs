@@ -18,7 +18,7 @@ const installLock = path.join(pluginRoot, ".installing-runtime");
 export function ensureRuntime() {
   assertNodeVersion();
   if (existsSync(dependency)) return;
-  if (process.env.SWARM_PI_CODE_SKIP_BOOTSTRAP === "1") {
+  if (process.env.SWARM_PI_CODE_PLUGIN_SKIP_BOOTSTRAP === "1") {
     throw new Error(`Pi runtime dependencies are missing in ${pluginRoot}`);
   }
 
@@ -26,7 +26,7 @@ export function ensureRuntime() {
   if (!ownsLock) return;
 
   try {
-    process.stderr.write("swarm-pi-code: installing pinned Pi runtime dependencies...\n");
+    process.stderr.write("swarm-pi-code-plugin: installing pinned Pi runtime dependencies...\n");
     const result = spawnSync(
       "npm",
       ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"],
@@ -34,7 +34,7 @@ export function ensureRuntime() {
     );
     if (result.status !== 0) {
       if (result.stderr) process.stderr.write(result.stderr);
-      throw new Error("Unable to install swarm-pi-code runtime dependencies.");
+      throw new Error("Unable to install swarm-pi-code-plugin runtime dependencies.");
     }
   } finally {
     rmSync(installLock, { recursive: true, force: true });
@@ -64,7 +64,9 @@ function acquireInstallLock() {
 function assertNodeVersion() {
   const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
   if (major < 22 || (major === 22 && minor < 19)) {
-    throw new Error(`swarm-pi-code requires Node.js 22.19.0 or newer; found ${process.versions.node}`);
+    throw new Error(
+      `swarm-pi-code-plugin requires Node.js 22.19.0 or newer; found ${process.versions.node}`,
+    );
   }
 }
 

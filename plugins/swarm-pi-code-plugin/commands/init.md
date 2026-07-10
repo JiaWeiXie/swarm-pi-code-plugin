@@ -1,10 +1,10 @@
 ---
-description: Configure or reconfigure swarm-pi-code models and project task profile
+description: Configure or reconfigure swarm-pi-code-plugin models and project task profile
 argument-hint: '[--reconfigure] [--reset] [--json]'
 allowed-tools: Bash, AskUserQuestion, Read, Write
 ---
 
-# swarm-pi-code init
+# swarm-pi-code-plugin init
 
 Raw arguments: `$ARGUMENTS`
 

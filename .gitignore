@@ -5,8 +5,10 @@ dist/
 coverage/
 *.tsbuildinfo
 
-# swarm-pi-code runtime state
+# Current and legacy runtime state
+.swarm-pi-code-plugin/
 .swarm-pi-code/
+.swarm-code/
 .installing-runtime/
 
 # Logs and package-manager diagnostics

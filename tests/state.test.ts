@@ -34,28 +34,59 @@ function repositoryFixture(): { repository: string; worktree: string } {
 }
 
 async function withDataDir<T>(value: string | undefined, run: () => Promise<T>): Promise<T> {
-  const previous = process.env.SWARM_PI_CODE_DATA_DIR;
-  if (value === undefined) delete process.env.SWARM_PI_CODE_DATA_DIR;
-  else process.env.SWARM_PI_CODE_DATA_DIR = value;
+  const previous = process.env.SWARM_PI_CODE_PLUGIN_DATA_DIR;
+  if (value === undefined) delete process.env.SWARM_PI_CODE_PLUGIN_DATA_DIR;
+  else process.env.SWARM_PI_CODE_PLUGIN_DATA_DIR = value;
   try {
     return await run();
   } finally {
-    if (previous === undefined) delete process.env.SWARM_PI_CODE_DATA_DIR;
-    else process.env.SWARM_PI_CODE_DATA_DIR = previous;
+    if (previous === undefined) delete process.env.SWARM_PI_CODE_PLUGIN_DATA_DIR;
+    else process.env.SWARM_PI_CODE_PLUGIN_DATA_DIR = previous;
   }
 }
 
 test("linked worktrees resolve one shared state directory", async () => {
   const { repository, worktree } = repositoryFixture();
   await withDataDir(undefined, async () => {
-    assert.equal(await resolveStateDir(repository), path.join(repository, ".swarm-pi-code"));
-    assert.equal(await resolveStateDir(worktree), path.join(repository, ".swarm-pi-code"));
+    assert.equal(await resolveStateDir(repository), path.join(repository, ".swarm-pi-code-plugin"));
+    assert.equal(await resolveStateDir(worktree), path.join(repository, ".swarm-pi-code-plugin"));
 
     await setModelPriority(repository, ["test/primary", "test/fallback"]);
     assert.deepEqual((await loadState(worktree)).config.modelPriority, [
       "test/primary",
       "test/fallback",
     ]);
+  });
+});
+
+test("previous swarm-pi-code state migrates with configuration and Pi jobs", async () => {
+  const { repository } = repositoryFixture();
+  const previousDir = path.join(repository, ".swarm-pi-code");
+  fs.mkdirSync(previousDir);
+  fs.writeFileSync(
+    path.join(previousDir, "state.json"),
+    JSON.stringify({
+      version: 1,
+      config: {
+        modelPriority: ["test/model"],
+        availableModels: ["test/model"],
+        availableModelsCheckedAt: "2026-07-10T00:00:00.000Z",
+        profile: { goal: "existing Pi project", tasks: ["Implementation"] },
+      },
+      jobs: [{ id: "pi-job-1", status: "succeeded" }],
+    }),
+  );
+
+  await withDataDir(undefined, async () => {
+    const state = await loadState(repository);
+    assert.deepEqual(state.config.modelPriority, ["test/model"]);
+    assert.equal(state.config.profile?.goal, "existing Pi project");
+    assert.deepEqual(state.jobs, [{ id: "pi-job-1", status: "succeeded" }]);
+    assert.equal(state.migration?.source, ".swarm-pi-code");
+    assert.equal(
+      fs.existsSync(path.join(repository, ".swarm-pi-code-plugin", "state.json")),
+      true,
+    );
   });
 });
 

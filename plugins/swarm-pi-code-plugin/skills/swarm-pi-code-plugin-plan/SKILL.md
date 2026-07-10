@@ -1,5 +1,5 @@
 ---
-name: swarm-pi-code-plan
+name: swarm-pi-code-plugin-plan
 description: Delegate an implementation, migration, or architecture plan to an embedded read-only Pi worker from Codex or Claude Code. Use when the user wants planning rather than code changes.
 ---
 

@@ -30,7 +30,7 @@ export interface SwarmState {
   version: 1;
   config: SwarmConfig;
   jobs: JobRecord[];
-  migration?: { source: ".swarm-code"; migratedAt: string };
+  migration?: { source: ".swarm-pi-code" | ".swarm-code"; migratedAt: string };
 }
 
 export function defaultState(): SwarmState {
@@ -72,8 +72,10 @@ export async function resolveStateDir(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
-  if (env.SWARM_PI_CODE_DATA_DIR) return path.resolve(cwd, env.SWARM_PI_CODE_DATA_DIR);
-  return path.join(await resolveSharedWorkspaceRoot(cwd), ".swarm-pi-code");
+  if (env.SWARM_PI_CODE_PLUGIN_DATA_DIR) {
+    return path.resolve(cwd, env.SWARM_PI_CODE_PLUGIN_DATA_DIR);
+  }
+  return path.join(await resolveSharedWorkspaceRoot(cwd), ".swarm-pi-code-plugin");
 }
 
 export async function resolveStateFile(cwd: string): Promise<string> {
@@ -141,9 +143,23 @@ export async function clearConfiguration(cwd: string): Promise<SwarmState> {
 }
 
 async function readLegacyState(cwd: string): Promise<SwarmState | undefined> {
+  const sharedRoot = await resolveSharedWorkspaceRoot(cwd);
+  const workspaceRoot = await resolveWorkspaceRoot(cwd);
+  const previousPiCandidates = new Set([
+    path.join(sharedRoot, ".swarm-pi-code", "state.json"),
+    path.join(workspaceRoot, ".swarm-pi-code", "state.json"),
+  ]);
+  for (const candidate of previousPiCandidates) {
+    const previous = await readJson(candidate);
+    if (!previous) continue;
+    const state = normalizeState(previous);
+    state.migration = { source: ".swarm-pi-code", migratedAt: new Date().toISOString() };
+    return state;
+  }
+
   const candidates = new Set([
-    path.join(await resolveSharedWorkspaceRoot(cwd), ".swarm-code", "state.json"),
-    path.join(await resolveWorkspaceRoot(cwd), ".swarm-code", "state.json"),
+    path.join(sharedRoot, ".swarm-code", "state.json"),
+    path.join(workspaceRoot, ".swarm-code", "state.json"),
   ]);
   for (const candidate of candidates) {
     const legacy = await readJson(candidate);
@@ -197,8 +213,11 @@ function normalizeState(value: Record<string, unknown>): SwarmState {
       )
     : [];
   const migration = asRecord(value.migration);
-  if (migration.source === ".swarm-code" && typeof migration.migratedAt === "string") {
-    state.migration = { source: ".swarm-code", migratedAt: migration.migratedAt };
+  if (
+    (migration.source === ".swarm-pi-code" || migration.source === ".swarm-code") &&
+    typeof migration.migratedAt === "string"
+  ) {
+    state.migration = { source: migration.source, migratedAt: migration.migratedAt };
   }
   return state;
 }

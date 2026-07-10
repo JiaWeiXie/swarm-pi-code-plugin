@@ -1,5 +1,5 @@
 {
-  "name": "swarm-pi-code",
+  "name": "swarm-pi-code-plugin",
   "owner": {
     "name": "JiaWei Xie"
   },
@@ -9,13 +9,13 @@
   },
   "plugins": [
     {
-      "name": "swarm-pi-code",
+      "name": "swarm-pi-code-plugin",
       "description": "Delegate bounded analysis and implementation work to embedded Pi agent sessions.",
       "version": "0.1.0",
       "author": {
         "name": "JiaWei Xie"
       },
-      "source": "./plugins/swarm-pi-code"
+      "source": "./plugins/swarm-pi-code-plugin"
     }
   ]
 }

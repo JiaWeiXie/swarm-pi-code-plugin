@@ -1,13 +1,14 @@
-# swarm-pi-code Architecture and Rewrite Plan
+# swarm-pi-code-plugin Architecture
 
 ## Decision
 
 Rebuild swarm-code around the embedded Pi coding-agent SDK. Do not spawn the Pi
-CLI and do not retain a predecessor-runtime fallback. The embedded SDK gives the project
+CLI and do not retain a predecessor-runtime fallback. The embedded SDK gives the
+project
 ownership of tool exposure, session lifetime, result shape, and testability.
 
-The repository and marketplace package are named `swarm-pi-code-plugin` and
-`swarm-pi-code`; the user-facing product name is **swarm-pi-code**.
+The repository, marketplace package, and user-facing product are all named
+**swarm-pi-code-plugin**.
 
 ## Runtime Boundaries
 
@@ -30,7 +31,7 @@ Git diff capture and host-owned verification
 
 - One in-memory Pi session is created per delegated job. Coding sessions are not
   resumed across worktrees or branches.
-- `.swarm-pi-code/` stores host-neutral configuration, job metadata, prompts,
+- `.swarm-pi-code-plugin/` stores host-neutral configuration, job metadata, prompts,
   output, diff summaries, and verification results. It never stores credentials.
 - Pi `AuthStorage` and `ModelRegistry` use Pi's supported credential and model
   configuration. No predecessor credentials are read or migrated.
@@ -40,7 +41,7 @@ Git diff capture and host-owned verification
 
 ## Public Interfaces
 
-The shared runner will expose:
+The shared runner exposes:
 
 ```text
 node scripts/pi-runner.mjs init --host <claude|codex> --json
@@ -55,9 +56,10 @@ node scripts/pi-runner.mjs orchestrate --host <host> --prompt-file <file> --json
 Every execution result will include `kind`, `status`, `success`, `model`,
 `output`, `changedFiles`, `diffStat`, and structured verification results.
 
-Claude Code will expose `/swarm-pi-code:init`, a read-only Pi worker, and a Pi
+Claude Code exposes `/swarm-pi-code-plugin:init`, a read-only Pi worker, and a Pi
 builder agent. Agent descriptions will contain concrete trigger examples.
-Codex will expose configure, ask, review, plan, implement, and orchestrate skills.
+Codex exposes `$swarm-pi-code-plugin-configure`, ask, review, plan, implement,
+and orchestrate skills under the same prefix.
 The implementation skill only triggers for explicit user mutation intent.
 
 ## Mutation Policy
@@ -74,13 +76,16 @@ The implementation skill only triggers for explicit user mutation intent.
 
 ## State and Migration
 
-Use the Git common directory to resolve one shared `.swarm-pi-code/` state root
-for linked worktrees. `SWARM_PI_CODE_DATA_DIR` remains an explicit override.
+Use the Git common directory to resolve one shared `.swarm-pi-code-plugin/`
+state root for linked worktrees. `SWARM_PI_CODE_PLUGIN_DATA_DIR` remains an
+explicit override.
 
-On first run, state migration may copy project goal, directory scope, delegated
-task types, and recognized `provider/model` preferences from `.swarm-code/`.
-Predecessor caches, sessions, jobs, logs, and provider-specific settings are not
-migrated. Unrecognized models force model reconfiguration.
+On first run after the naming alignment, state migration preserves configuration
+and Pi jobs from `.swarm-pi-code/`. It may also copy project goal, directory
+scope, delegated task types, and recognized `provider/model` preferences from
+the older `.swarm-code/` format. Predecessor caches, sessions, jobs, logs, and
+provider-specific settings are not migrated from that older format.
+Unrecognized models force model reconfiguration.
 
 State writes use a same-directory temporary file followed by an atomic rename.
 For linked worktrees, the state root is the parent of Git's absolute common
@@ -119,7 +124,7 @@ The shared runner now implements all six task surfaces plus configuration:
 
 ## Implemented Host Packaging
 
-- Claude Code loads `/swarm-pi-code:init`, `pi-worker`, and `pi-builder` from the
+- Claude Code loads `/swarm-pi-code-plugin:init`, `pi-worker`, and `pi-builder` from the
   standard command/agent directories.
 - Codex loads configure, ask, review, plan, implement, and orchestrate from the
   validated root `skills/` contract. Skills detect Claude versus Codex before
@@ -167,5 +172,5 @@ The shared runner now implements all six task surfaces plus configuration:
 - The plugin package must be self-contained for both host installers. The SDK
   bundling strategy must pass a clean-machine install test before release.
 - No worker can commit, push, or modify files outside its assigned worktree.
-- The previous worker engine is absent from runtime, manifests, installation requirements, and
-  user-facing documentation.
+- The previous worker engine is absent from runtime, manifests, installation
+  requirements, and user-facing documentation.

@@ -28,8 +28,12 @@ function repositoryFixture(): string {
 
 test("clean preflight ignores state but rejects user changes", async () => {
   const repository = repositoryFixture();
+  fs.mkdirSync(path.join(repository, ".swarm-pi-code-plugin"));
+  fs.writeFileSync(path.join(repository, ".swarm-pi-code-plugin", "state.json"), "{}");
   fs.mkdirSync(path.join(repository, ".swarm-pi-code"));
   fs.writeFileSync(path.join(repository, ".swarm-pi-code", "state.json"), "{}");
+  fs.mkdirSync(path.join(repository, ".swarm-code"));
+  fs.writeFileSync(path.join(repository, ".swarm-code", "state.json"), "{}");
   assert.equal((await inspectWorktree(repository)).clean, true);
   await requireCleanWorktree(repository);
 

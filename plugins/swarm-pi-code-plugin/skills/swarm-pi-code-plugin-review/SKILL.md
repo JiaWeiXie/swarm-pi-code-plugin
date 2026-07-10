@@ -1,5 +1,5 @@
 ---
-name: swarm-pi-code-review
+name: swarm-pi-code-plugin-review
 description: Delegate a Git working-tree or branch review to an embedded read-only Pi worker from Codex or Claude Code. Use for bug, security, regression, and missing-test review. Do not use to modify files.
 ---
 

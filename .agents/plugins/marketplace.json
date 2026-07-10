@@ -1,14 +1,14 @@
 {
-  "name": "swarm-pi-code-local",
+  "name": "swarm-pi-code-plugin-local",
   "interface": {
-    "displayName": "swarm-pi-code local"
+    "displayName": "swarm-pi-code-plugin local"
   },
   "plugins": [
     {
-      "name": "swarm-pi-code",
+      "name": "swarm-pi-code-plugin",
       "source": {
         "source": "local",
-        "path": "./plugins/swarm-pi-code"
+        "path": "./plugins/swarm-pi-code-plugin"
       },
       "policy": {
         "installation": "AVAILABLE",

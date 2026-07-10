@@ -1,5 +1,5 @@
 ---
-name: swarm-pi-code-implement
+name: swarm-pi-code-plugin-implement
 description: Delegate an explicit scoped request to add, fix, change, or refactor files to an embedded Pi worker from Codex or Claude Code. Use only for clear mutation intent and a clean worktree. Do not use for questions, planning, review, commits, or pushes.
 ---
 

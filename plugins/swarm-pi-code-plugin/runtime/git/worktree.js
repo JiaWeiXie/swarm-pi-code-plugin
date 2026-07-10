@@ -21,10 +21,13 @@ async function excludeRuntimeState(cwd, entries) {
     const workspace = await resolveWorkspaceRoot(cwd);
     const stateDir = await resolveStateDir(cwd);
     const relativeStateDir = path.relative(workspace, stateDir);
-    if (relativeStateDir === "" || relativeStateDir.startsWith("..") || path.isAbsolute(relativeStateDir)) {
-        return entries;
+    const runtimeStateDirs = [".swarm-pi-code", ".swarm-code"];
+    if (relativeStateDir !== "" &&
+        !relativeStateDir.startsWith("..") &&
+        !path.isAbsolute(relativeStateDir)) {
+        runtimeStateDirs.push(relativeStateDir);
     }
-    return entries.filter((entry) => entry.path !== relativeStateDir && !entry.path.startsWith(`${relativeStateDir}${path.sep}`));
+    return entries.filter((entry) => runtimeStateDirs.every((directory) => entry.path !== directory && !entry.path.startsWith(`${directory}${path.sep}`)));
 }
 export async function requireCleanWorktree(cwd) {
     const inspection = await inspectWorktree(cwd);

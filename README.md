@@ -7,6 +7,11 @@ bounded read-only or implementation work.
 This repository is a clean rewrite of `swarm-code-plugin`. Pi is the only
 delegated worker engine.
 
+The original plugin concept and host workflow were informed by
+[apoapps/swarm-code-plugin](https://github.com/apoapps/swarm-code-plugin). This
+rewrite replaces its delegated worker runtime with the embedded Pi SDK and uses
+an independent implementation.
+
 ## Development
 
 The project pins Node.js through mise:
@@ -34,20 +39,20 @@ Add the GitHub repository as a marketplace, then install the named plugin:
 
 ```bash
 claude plugin marketplace add https://github.com/JiaWeiXie/swarm-pi-code-plugin
-claude plugin install swarm-pi-code@swarm-pi-code
+claude plugin install swarm-pi-code-plugin@swarm-pi-code-plugin
 ```
 
 Restart Claude Code or run `/reload`, then configure the project:
 
 ```text
-/swarm-pi-code:init
-/swarm-pi-code:init --reconfigure
+/swarm-pi-code-plugin:init
+/swarm-pi-code-plugin:init --reconfigure
 ```
 
 For local development:
 
 ```bash
-claude --plugin-dir /absolute/path/to/swarm-pi-code-plugin/plugins/swarm-pi-code
+claude --plugin-dir /absolute/path/to/swarm-pi-code-plugin/plugins/swarm-pi-code-plugin
 ```
 
 ### Codex
@@ -57,18 +62,18 @@ root once, then install by plugin and marketplace name:
 
 ```bash
 codex plugin marketplace add /absolute/path/to/swarm-pi-code-plugin
-codex plugin add swarm-pi-code@swarm-pi-code-local
+codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 ```
 
 Start a new Codex task so skills are reloaded. Available skills are:
 
 ```text
-$swarm-pi-code-configure
-$swarm-pi-code-ask
-$swarm-pi-code-review
-$swarm-pi-code-plan
-$swarm-pi-code-implement
-$swarm-pi-code-orchestrate
+$swarm-pi-code-plugin-configure
+$swarm-pi-code-plugin-ask
+$swarm-pi-code-plugin-review
+$swarm-pi-code-plugin-plan
+$swarm-pi-code-plugin-implement
+$swarm-pi-code-plugin-orchestrate
 ```
 
 The first runner invocation installs the exact plugin-local production
@@ -77,7 +82,7 @@ auth storage and provider environment variables; project state never stores
 credentials. Confirm authenticated models with:
 
 ```bash
-node plugins/swarm-pi-code/scripts/pi-runner.mjs models --json
+node plugins/swarm-pi-code-plugin/scripts/pi-runner.mjs models --json
 ```
 
 ## Status
@@ -100,17 +105,18 @@ node scripts/pi-runner.mjs orchestrate --host codex --prompt-file /path/to/task.
 
 `implement` requires a clean Git worktree, exposes no shell tool to Pi, confines
 all writes and edits to the assigned worktree (including symlink checks), and
-returns the exact changed-file list plus a diff summary. Host verification is
-still pending, so the result reports verification as `not-run`.
+returns the exact changed-file list plus a diff summary. Verification remains a
+host responsibility, so the Pi result reports verification as `not-run`.
 
-State is stored in `.swarm-pi-code/state.json`. Linked worktrees resolve the
+State is stored in `.swarm-pi-code-plugin/state.json`. Linked worktrees resolve the
 main repository through Git's common directory and share this state. Set
-`SWARM_PI_CODE_DATA_DIR` for an explicit override. A first read can migrate the
-old project profile and model preference from `.swarm-code/`; predecessor job
-history and provider data are deliberately excluded.
+`SWARM_PI_CODE_PLUGIN_DATA_DIR` for an explicit override. A first read fully
+migrates existing `.swarm-pi-code/` config and Pi jobs. It can also migrate the
+older project profile and model preference from `.swarm-code/`; predecessor job
+history and provider data are deliberately excluded from that older format.
 
 The runner stores each request, raw prompt, result, and implementation patch in
-`.swarm-pi-code/jobs/<job-id>/`. State updates use an inter-process lock and an
+`.swarm-pi-code-plugin/jobs/<job-id>/`. State updates use an inter-process lock and an
 atomic rename, so concurrent read-only jobs do not overwrite job history.
 
 Configure a complete primary/fallback chain atomically:
@@ -124,5 +130,5 @@ node scripts/pi-runner.mjs init \
 
 `--reset` clears model inventory, priority, and project profile while preserving
 Pi job history and artifacts. The plugin package includes the compiled runner,
-Claude command/agents, and six shared host-aware skills. Remaining release work
-is tracked in [`docs/architecture.md`](docs/architecture.md).
+Claude command/agents, and six shared host-aware skills. Architecture and safety
+details are documented in [`docs/architecture.md`](docs/architecture.md).

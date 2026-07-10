@@ -1,5 +1,5 @@
 ---
-name: swarm-pi-code-orchestrate
+name: swarm-pi-code-plugin-orchestrate
 description: Run three bounded read-only Pi perspectives from Codex or Claude Code for complex repository analysis, architecture, migration, or risk assessment. Do not use for parallel file modification.
 ---
 
@@ -11,4 +11,4 @@ description: Run three bounded read-only Pi perspectives from Codex or Claude Co
 4. Delete the prompt file.
 5. Reconcile the correctness, architecture/security, and testing/user-experience sections against repository evidence. Present one coherent conclusion and identify disagreements.
 
-All three workers are read-only. Use `$swarm-pi-code-implement` separately only after an explicit implementation request.
+All three workers are read-only. Use `$swarm-pi-code-plugin-implement` separately only after an explicit implementation request.

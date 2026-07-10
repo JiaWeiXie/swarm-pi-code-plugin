@@ -473,10 +473,10 @@ test("orchestrate runs exactly three readonly perspectives and records artifacts
   assert.equal("success" in result && result.success, true);
   assert.match("output" in result ? result.output : "", /Correctness and failure modes/);
   const state = JSON.parse(
-    fs.readFileSync(path.join(workspace, ".swarm-pi-code", "state.json"), "utf8"),
+    fs.readFileSync(path.join(workspace, ".swarm-pi-code-plugin", "state.json"), "utf8"),
   );
   assert.equal(state.jobs.length, 1);
-  const jobDir = path.join(workspace, ".swarm-pi-code", "jobs", state.jobs[0].id);
+  const jobDir = path.join(workspace, ".swarm-pi-code-plugin", "jobs", state.jobs[0].id);
   assert.equal(fs.existsSync(path.join(jobDir, "request.json")), true);
   assert.equal(fs.existsSync(path.join(jobDir, "prompt.md")), true);
   assert.equal(fs.existsSync(path.join(jobDir, "result.json")), true);

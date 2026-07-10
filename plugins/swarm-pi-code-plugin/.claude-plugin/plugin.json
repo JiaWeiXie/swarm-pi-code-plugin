@@ -1,5 +1,5 @@
 {
-  "name": "swarm-pi-code",
+  "name": "swarm-pi-code-plugin",
   "version": "0.1.0",
   "description": "Dual-host agent swarm adapter backed by the embedded Pi coding-agent SDK.",
   "author": {

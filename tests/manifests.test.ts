@@ -9,25 +9,25 @@ function readJson(relativePath: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), "utf8"));
 }
 
-test("Claude and Codex manifests use the swarm-pi-code identity", () => {
-  const claude = readJson("plugins/swarm-pi-code/.claude-plugin/plugin.json");
-  const codex = readJson("plugins/swarm-pi-code/.codex-plugin/plugin.json");
+test("Claude and Codex manifests use the swarm-pi-code-plugin identity", () => {
+  const claude = readJson("plugins/swarm-pi-code-plugin/.claude-plugin/plugin.json");
+  const codex = readJson("plugins/swarm-pi-code-plugin/.codex-plugin/plugin.json");
 
-  assert.equal(claude.name, "swarm-pi-code");
-  assert.equal(codex.name, "swarm-pi-code");
+  assert.equal(claude.name, "swarm-pi-code-plugin");
+  assert.equal(codex.name, "swarm-pi-code-plugin");
   assert.equal(claude.version, "0.1.0");
   assert.equal(codex.version, "0.1.0");
   assert.equal(codex.skills, "./skills/");
 });
 
 test("plugin package contains both host adapters and a self-contained runner", () => {
-  const pluginRoot = path.join(repoRoot, "plugins/swarm-pi-code");
+  const pluginRoot = path.join(repoRoot, "plugins/swarm-pi-code-plugin");
   const skills = ["configure", "ask", "review", "plan", "implement", "orchestrate"];
   for (const skill of skills) {
     const file = path.join(
       pluginRoot,
       "skills",
-      `swarm-pi-code-${skill}`,
+      `swarm-pi-code-plugin-${skill}`,
       "SKILL.md",
     );
     assert.equal(fs.existsSync(file), true, `missing Codex skill: ${skill}`);
@@ -50,14 +50,14 @@ test("plugin package contains both host adapters and a self-contained runner", (
   }
 
   const implementation = fs.readFileSync(
-    path.join(pluginRoot, "skills/swarm-pi-code-implement/SKILL.md"),
+    path.join(pluginRoot, "skills/swarm-pi-code-plugin-implement/SKILL.md"),
     "utf8",
   );
   assert.match(implementation, /explicit mutation intent/i);
   assert.match(implementation, /clean worktree/i);
   assert.match(implementation, /verification from the host/i);
 
-  const pluginPackage = readJson("plugins/swarm-pi-code/package.json") as {
+  const pluginPackage = readJson("plugins/swarm-pi-code-plugin/package.json") as {
     dependencies: Record<string, string>;
   };
   assert.equal(pluginPackage.dependencies["@earendil-works/pi-coding-agent"], "0.80.6");
@@ -67,11 +67,19 @@ test("plugin package contains both host adapters and a self-contained runner", (
 });
 
 test("repo marketplaces point at the shared plugin root", () => {
-  const claude = readJson(".claude-plugin/marketplace.json") as { plugins: Array<{ source: string }> };
+  const claude = readJson(".claude-plugin/marketplace.json") as {
+    name: string;
+    plugins: Array<{ name: string; source: string }>;
+  };
   const codex = readJson(".agents/plugins/marketplace.json") as {
-    plugins: Array<{ source: { path: string } }>;
+    name: string;
+    plugins: Array<{ name: string; source: { path: string } }>;
   };
 
-  assert.equal(claude.plugins[0]?.source, "./plugins/swarm-pi-code");
-  assert.equal(codex.plugins[0]?.source.path, "./plugins/swarm-pi-code");
+  assert.equal(claude.name, "swarm-pi-code-plugin");
+  assert.equal(claude.plugins[0]?.name, "swarm-pi-code-plugin");
+  assert.equal(claude.plugins[0]?.source, "./plugins/swarm-pi-code-plugin");
+  assert.equal(codex.name, "swarm-pi-code-plugin-local");
+  assert.equal(codex.plugins[0]?.name, "swarm-pi-code-plugin");
+  assert.equal(codex.plugins[0]?.source.path, "./plugins/swarm-pi-code-plugin");
 });

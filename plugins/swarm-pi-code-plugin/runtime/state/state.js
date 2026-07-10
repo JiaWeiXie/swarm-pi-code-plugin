@@ -35,9 +35,10 @@ export async function resolveSharedWorkspaceRoot(cwd) {
     }
 }
 export async function resolveStateDir(cwd, env = process.env) {
-    if (env.SWARM_PI_CODE_DATA_DIR)
-        return path.resolve(cwd, env.SWARM_PI_CODE_DATA_DIR);
-    return path.join(await resolveSharedWorkspaceRoot(cwd), ".swarm-pi-code");
+    if (env.SWARM_PI_CODE_PLUGIN_DATA_DIR) {
+        return path.resolve(cwd, env.SWARM_PI_CODE_PLUGIN_DATA_DIR);
+    }
+    return path.join(await resolveSharedWorkspaceRoot(cwd), ".swarm-pi-code-plugin");
 }
 export async function resolveStateFile(cwd) {
     return path.join(await resolveStateDir(cwd), "state.json");
@@ -95,9 +96,23 @@ export async function clearConfiguration(cwd) {
     });
 }
 async function readLegacyState(cwd) {
+    const sharedRoot = await resolveSharedWorkspaceRoot(cwd);
+    const workspaceRoot = await resolveWorkspaceRoot(cwd);
+    const previousPiCandidates = new Set([
+        path.join(sharedRoot, ".swarm-pi-code", "state.json"),
+        path.join(workspaceRoot, ".swarm-pi-code", "state.json"),
+    ]);
+    for (const candidate of previousPiCandidates) {
+        const previous = await readJson(candidate);
+        if (!previous)
+            continue;
+        const state = normalizeState(previous);
+        state.migration = { source: ".swarm-pi-code", migratedAt: new Date().toISOString() };
+        return state;
+    }
     const candidates = new Set([
-        path.join(await resolveSharedWorkspaceRoot(cwd), ".swarm-code", "state.json"),
-        path.join(await resolveWorkspaceRoot(cwd), ".swarm-code", "state.json"),
+        path.join(sharedRoot, ".swarm-code", "state.json"),
+        path.join(workspaceRoot, ".swarm-code", "state.json"),
     ]);
     for (const candidate of candidates) {
         const legacy = await readJson(candidate);
@@ -149,8 +164,9 @@ function normalizeState(value) {
         ? value.jobs.filter((job) => typeof job === "object" && job !== null && typeof job.id === "string")
         : [];
     const migration = asRecord(value.migration);
-    if (migration.source === ".swarm-code" && typeof migration.migratedAt === "string") {
-        state.migration = { source: ".swarm-code", migratedAt: migration.migratedAt };
+    if ((migration.source === ".swarm-pi-code" || migration.source === ".swarm-code") &&
+        typeof migration.migratedAt === "string") {
+        state.migration = { source: migration.source, migratedAt: migration.migratedAt };
     }
     return state;
 }

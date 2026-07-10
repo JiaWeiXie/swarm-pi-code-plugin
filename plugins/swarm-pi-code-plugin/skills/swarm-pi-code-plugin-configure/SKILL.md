@@ -1,9 +1,9 @@
 ---
-name: swarm-pi-code-configure
-description: Configure or fully reconfigure shared swarm-pi-code Pi model priority, project goal, directory scope, and delegated task types for the current repository.
+name: swarm-pi-code-plugin-configure
+description: Configure or fully reconfigure shared swarm-pi-code-plugin Pi model priority, project goal, directory scope, and delegated task types for the current repository.
 ---
 
-# Configure Swarm Pi Code
+# Configure Swarm Pi Code Plugin
 
 1. Resolve the plugin root two directories above this `SKILL.md`. Set host to `claude` when `CLAUDE_PLUGIN_ROOT` is present; otherwise use `codex`.
 2. Run `node "$PLUGIN_ROOT/scripts/pi-runner.mjs" init --host "$HOST" --reconfigure --json` and show current settings.
