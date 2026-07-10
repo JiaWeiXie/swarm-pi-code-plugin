@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { executeSession, type RunnableSession } from "../src/pi/execute.js";
@@ -120,7 +124,47 @@ test("ask runs through injected model and session dependencies", async () => {
   assert.equal("model" in result && result.model, "test-provider/test-model");
 });
 
-test("mutating commands fail closed until the safety boundary exists", async () => {
+test("implement requires a clean worktree and captures Pi changes", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-implement-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
+  execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
+  fs.writeFileSync(path.join(workspace, "file.txt"), "before\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync(
+    "git",
+    ["-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "fixture"],
+    { stdio: "ignore" },
+  );
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Change file.txt",
+    createSession: async (options) => ({
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {
+        assert.equal(options.mode, "implement");
+        fs.writeFileSync(path.join(workspace, "file.txt"), "after\n");
+      },
+      dispose() {},
+    }),
+  };
+  const result = await runCommand(
+    { command: "implement", host: "codex", promptFile: "prompt.md", json: true },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal("status" in result && result.status, "succeeded");
+  assert.deepEqual("changedFiles" in result && result.changedFiles, ["file.txt"]);
+  assert.match("diffStat" in result ? result.diffStat : "", /file\.txt/);
+});
+
+test("implement rejects a dirty worktree before creating Pi session", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-dirty-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  fs.writeFileSync(path.join(workspace, "dirty.txt"), "user change\n");
   const dependencies: RunnerDependencies = {
     catalog: { available: () => [fakeModel] },
     readFile: async () => "unused",
@@ -128,11 +172,12 @@ test("mutating commands fail closed until the safety boundary exists", async () 
       throw new Error("must not create a session");
     },
   };
+
   const result = await runCommand(
     { command: "implement", host: "codex", promptFile: "prompt.md", json: true },
-    "/workspace",
+    workspace,
     dependencies,
   );
-
-  assert.equal("status" in result && result.status, "not-implemented");
+  assert.equal("status" in result && result.status, "failed");
+  assert.match("output" in result ? result.output : "", /clean worktree/i);
 });

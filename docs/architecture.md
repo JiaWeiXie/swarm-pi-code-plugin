@@ -82,6 +82,25 @@ task types, and recognized `provider/model` preferences from `.swarm-code/`.
 OpenCode caches, sessions, jobs, logs, and provider-specific settings are not
 migrated. Unrecognized models force model reconfiguration.
 
+State writes use a same-directory temporary file followed by an atomic rename.
+For linked worktrees, the state root is the parent of Git's absolute common
+directory (normally the primary checkout), not the feature worktree. The
+current worktree remains the Pi session `cwd`, so sharing configuration never
+widens the mutation boundary.
+
+## Implemented Core Boundary
+
+The core runner now enforces these invariants before and after an implementation
+session:
+
+1. `git status --porcelain=v1 -z` must report a clean assigned worktree.
+2. Pi receives read, grep, find, ls, write, and edit, but never bash.
+3. SDK write/edit definitions are replaced with scoped operations that reject
+   lexical path traversal and symlinks resolving outside the worktree.
+4. The host captures tracked and untracked changed files and a diff summary
+   after the session, including partial changes from a failed session.
+5. Verification remains host-owned and is not yet enabled in this milestone.
+
 ## Implementation Milestones
 
 1. **SDK gate**: prove the pinned Pi SDK loads, tool profiles are enforced, model

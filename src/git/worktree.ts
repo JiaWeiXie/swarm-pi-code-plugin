@@ -1,0 +1,101 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+export interface WorktreeInspection {
+  clean: boolean;
+  changedFiles: string[];
+  entries: Array<{ status: string; path: string }>;
+}
+
+export interface WorktreeChanges extends WorktreeInspection {
+  diff: string;
+  diffStat: string;
+}
+
+export class WorktreeDirtyError extends Error {
+  readonly inspection: WorktreeInspection;
+
+  constructor(inspection: WorktreeInspection) {
+    super(`Implementation requires a clean worktree. Existing changes: ${inspection.changedFiles.join(", ")}`);
+    this.name = "WorktreeDirtyError";
+    this.inspection = inspection;
+  }
+}
+
+export async function inspectWorktree(cwd: string): Promise<WorktreeInspection> {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    { cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 },
+  );
+  const entries = parsePorcelain(stdout);
+  const changedFiles = [...new Set(entries.map((entry) => entry.path))].sort();
+  return { clean: entries.length === 0, changedFiles, entries };
+}
+
+export async function requireCleanWorktree(cwd: string): Promise<void> {
+  const inspection = await inspectWorktree(cwd);
+  if (!inspection.clean) throw new WorktreeDirtyError(inspection);
+}
+
+export async function captureWorktreeChanges(cwd: string): Promise<WorktreeChanges> {
+  const inspection = await inspectWorktree(cwd);
+  const [{ stdout: diff }, { stdout: trackedStat }] = await Promise.all([
+    execFileAsync("git", ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], {
+      cwd,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    }),
+    execFileAsync("git", ["diff", "--stat", "HEAD", "--"], {
+      cwd,
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+    }),
+  ]);
+  const untracked = inspection.entries
+    .filter((entry) => entry.status === "??")
+    .map((entry) => entry.path);
+  const untrackedDiffs: string[] = [];
+  for (const file of untracked) {
+    untrackedDiffs.push(await diffUntrackedFile(cwd, file));
+  }
+  return {
+    ...inspection,
+    diff: [diff.trimEnd(), ...untrackedDiffs.map((value) => value.trimEnd())]
+      .filter(Boolean)
+      .join("\n"),
+    diffStat: [trackedStat.trimEnd(), ...untracked.map((file) => `${file} (untracked)`)]
+      .filter(Boolean)
+      .join("\n"),
+  };
+}
+
+async function diffUntrackedFile(cwd: string, file: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["diff", "--no-index", "--binary", "--", "/dev/null", file],
+      { cwd, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+    );
+    return stdout;
+  } catch (error) {
+    const gitError = error as NodeJS.ErrnoException & { code?: number; stdout?: string };
+    if (gitError.code === 1) return gitError.stdout ?? "";
+    throw error;
+  }
+}
+
+export function parsePorcelain(output: string): Array<{ status: string; path: string }> {
+  const records = output.split("\0");
+  const entries: Array<{ status: string; path: string }> = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    const status = record.slice(0, 2);
+    entries.push({ status, path: record.slice(3) });
+    if (status.includes("R") || status.includes("C")) index += 1;
+  }
+  return entries;
+}

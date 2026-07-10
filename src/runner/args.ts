@@ -49,7 +49,10 @@ export function parseArguments(argv: string[]): RunnerArguments {
   if (command !== "models" && !parsed.host) {
     throw new Error(`--host is required for ${command}`);
   }
-  if ((command === "ask" || command === "plan") && !parsed.promptFile) {
+  if (
+    (command === "ask" || command === "plan" || command === "implement" || command === "orchestrate") &&
+    !parsed.promptFile
+  ) {
     throw new Error(`--prompt-file is required for ${command}`);
   }
 

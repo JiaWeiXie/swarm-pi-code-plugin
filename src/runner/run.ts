@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 
 import type { WorkerResult } from "../core/contracts.js";
-import { executeSession, notImplementedResult, type RunnableSession } from "../pi/execute.js";
+import { captureWorktreeChanges, requireCleanWorktree } from "../git/worktree.js";
+import { executeSession, type RunnableSession } from "../pi/execute.js";
 import {
   createModelCatalog,
   describeModels,
@@ -18,7 +19,7 @@ export interface RunnerDependencies {
   readFile(path: string): Promise<string>;
   createSession(options: {
     cwd: string;
-    mode: "readonly";
+    mode: "readonly" | "implement";
     model: PiModel;
   }): Promise<RunnableSession>;
 }
@@ -44,8 +45,8 @@ export async function runCommand(
     return { models: describeModels(available) };
   }
 
-  if (args.command !== "ask" && args.command !== "plan") {
-    return notImplementedResult(args.command);
+  if (args.command === "review" || args.command === "orchestrate") {
+    return failure(args.command, `${args.command} is not implemented yet.`);
   }
 
   const selected = selectModel(available, args.model);
@@ -54,17 +55,33 @@ export async function runCommand(
     return failure(args.command, `No available Pi model${suffix}.`);
   }
 
+  if (args.command === "implement") {
+    try {
+      await requireCleanWorktree(cwd);
+    } catch (error) {
+      return failure(args.command, error instanceof Error ? error.message : String(error));
+    }
+  }
+
   const prompt = await dependencies.readFile(args.promptFile!);
-  const session = await dependencies.createSession({ cwd, mode: "readonly", model: selected });
-  return executeSession({
+  const session = await dependencies.createSession({
+    cwd,
+    mode: args.command === "implement" ? "implement" : "readonly",
+    model: selected,
+  });
+  const result = await executeSession({
     kind: args.command,
     model: modelId(selected),
     prompt,
     session,
   });
+  if (args.command !== "implement") return result;
+
+  const changes = await captureWorktreeChanges(cwd);
+  return { ...result, changedFiles: changes.changedFiles, diffStat: changes.diffStat };
 }
 
-function failure(kind: "ask" | "plan", output: string): WorkerResult {
+function failure(kind: WorkerResult["kind"], output: string): WorkerResult {
   return {
     kind,
     status: "failed",
