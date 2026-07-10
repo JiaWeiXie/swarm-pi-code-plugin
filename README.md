@@ -225,6 +225,11 @@ mise run test
 mise run build
 ```
 
+Follow the [documentation update SOP](docs/documentation-sop.md) when changing
+user-facing guides, technical references, or committed screenshots. It defines
+the product-evidence, screenshot-safety, cross-link, and validation steps for
+documentation work.
+
 `npm test` runs the built Node test suite, including mocked Pi sessions,
 state migration, manifest validation, endpoint discovery, and loopback web
 server tests. `npm run build` compiles the source and copies the production

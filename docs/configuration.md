@@ -3,7 +3,8 @@
 This reference describes the temporary browser setup used by Claude Code and
 Codex. For installation, common workflows, and troubleshooting, start with
 the [README](../README.md). For runtime ownership and worker safety, see the
-[architecture reference](architecture.md).
+[architecture reference](architecture.md). For the process used to keep these
+guides current, see the [documentation update SOP](documentation-sop.md).
 
 ## Product Model
 

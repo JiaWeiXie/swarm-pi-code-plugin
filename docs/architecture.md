@@ -3,7 +3,8 @@
 This document describes the stable runtime boundaries of
 `swarm-pi-code-plugin`. Product onboarding and troubleshooting live in the
 [README](../README.md); provider discovery and browser setup details live in
-the [configuration reference](configuration.md).
+the [configuration reference](configuration.md). Documentation maintenance and
+validation practices live in the [documentation update SOP](documentation-sop.md).
 
 ## System Boundary
 
