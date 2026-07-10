@@ -4,7 +4,19 @@ export type TaskKind = "ask" | "review" | "plan" | "implement" | "orchestrate";
 
 export type WorkerMode = "readonly" | "implement";
 
-export type WorkerStatus = "succeeded" | "failed" | "not-implemented";
+export type ExecutionMode = "supervised" | "background";
+
+export type WorkerStatus =
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "timed-out"
+  | "orphaned"
+  | "not-implemented";
+
+export type JobStatus = "queued" | "running" | WorkerStatus;
+
+export type NotificationStatus = "pending" | "acknowledged";
 
 export interface WorkerRequest {
   host: Host;
@@ -12,6 +24,8 @@ export interface WorkerRequest {
   cwd: string;
   prompt: string;
   mode: WorkerMode;
+  executionMode: ExecutionMode;
+  timeoutMs: number;
   model?: string;
 }
 

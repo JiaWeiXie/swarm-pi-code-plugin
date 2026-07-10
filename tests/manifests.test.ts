@@ -57,6 +57,22 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(implementation, /explicit mutation intent/i);
   assert.match(implementation, /clean worktree/i);
   assert.match(implementation, /verification from the host/i);
+  assert.match(implementation, /--execution-mode supervised/);
+  assert.match(implementation, /background implementation is prohibited/i);
+
+  for (const skill of ["ask", "review", "plan", "implement", "orchestrate"]) {
+    const source = fs.readFileSync(
+      path.join(pluginRoot, "skills", `swarm-pi-code-plugin-${skill}`, "SKILL.md"),
+      "utf8",
+    );
+    assert.match(source, /jobs list --pending-notifications --json/);
+    assert.match(source, /jobs acknowledge --job/);
+    assert.match(source, /--execution-mode/);
+  }
+
+  const workerAgent = fs.readFileSync(path.join(pluginRoot, "agents/pi-worker.md"), "utf8");
+  assert.match(workerAgent, /jobs wait --job/);
+  assert.match(workerAgent, /jobs acknowledge --job/);
 
   const configure = fs.readFileSync(
     path.join(pluginRoot, "skills/swarm-pi-code-plugin-configure/SKILL.md"),

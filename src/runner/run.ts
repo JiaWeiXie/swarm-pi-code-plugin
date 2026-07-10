@@ -14,7 +14,23 @@ import {
   type PiModel,
 } from "../pi/models.js";
 import { createWorkerSession } from "../pi/runtime.js";
-import { finishJob, startJob } from "../state/jobs.js";
+import {
+  acknowledgeJob,
+  attachJobProcess,
+  cancelJob,
+  finishJob,
+  getJob,
+  heartbeatJob,
+  JOB_HEARTBEAT_INTERVAL_MS,
+  listJobs,
+  markJobRunning,
+  readJobPrompt,
+  readJobRequest,
+  startJob,
+  waitForJob,
+  type JobHandle,
+  type JobRequest,
+} from "../state/jobs.js";
 import {
   clearModelConfiguration,
   loadModelConfiguration,
@@ -30,7 +46,9 @@ import {
   setModelPriority,
   type SwarmProfile,
 } from "../state/state.js";
+import type { JobRecord } from "../state/state.js";
 import type { RunnerArguments } from "./args.js";
+import { spawnBackgroundWorker, type SpawnBackgroundWorkerOptions } from "./background.js";
 import { buildWorkerPrompt } from "./prompts.js";
 
 export interface RunnerDependencies {
@@ -45,6 +63,11 @@ export interface RunnerDependencies {
 
 export type RunnerOutput =
   | WorkerResult
+  | { event: "accepted"; jobId: string; status: "queued"; executionMode: "background" }
+  | { event: "wait-timed-out"; jobId: string; status: string }
+  | { jobs: PublicJobRecord[] }
+  | { job: PublicJobRecord; result: WorkerResult | null }
+  | { job: PublicJobRecord }
   | { models: ReturnType<typeof describeModels>; active: string | null; providers: Record<string, number> }
   | { providers: ProviderSummary[]; registryError: string | null }
   | {
@@ -57,6 +80,13 @@ export type RunnerOutput =
       profile: SwarmProfile | null;
       jobs: number;
     };
+
+export interface RunCommandOptions {
+  signal?: AbortSignal;
+  spawnWorker?: (options: SpawnBackgroundWorkerOptions) => Promise<number>;
+}
+
+type PublicJobRecord = Omit<JobRecord, "workerToken">;
 
 export function defaultDependencies(modelConfiguration: ModelConfiguration): RunnerDependencies {
   return {
@@ -73,9 +103,14 @@ export async function runCommand(
   args: RunnerArguments,
   cwd: string,
   dependencies?: RunnerDependencies,
+  options: RunCommandOptions = {},
 ): Promise<RunnerOutput> {
   if (args.command === "configure") {
     throw new Error("configure must be started through the CLI web configuration entry point");
+  }
+  if (args.command === "jobs") return handleJobs(args, cwd);
+  if (args.command === "__worker") {
+    return runBackgroundJob(args, cwd, dependencies, options.signal);
   }
   const state = await loadState(cwd);
   const modelConfiguration = await loadModelConfiguration(cwd, state.config.modelPriority);
@@ -99,7 +134,6 @@ export async function runCommand(
       modelConfiguration,
     );
   }
-
   const host = args.host!;
   const rawPrompt =
     args.command === "review"
@@ -109,59 +143,247 @@ export async function runCommand(
     requested: args.model,
     priority: modelPriority(modelConfiguration),
   });
-  const jobId = await startJob(cwd, { host, kind: args.command, prompt: rawPrompt, cwd });
-
-  if (candidates.length === 0) {
-    const result = withMetadata(
-      failure(args.command, args.model ? `Requested Pi model is unavailable: ${args.model}` : "No configured Pi model is available."),
-      host,
-      jobId,
-      0,
-    );
-    await finishJob(cwd, jobId, result);
-    return result;
-  }
-
-  if (args.command === "orchestrate") {
-    const result = await runOrchestration({ cwd, host, prompt: rawPrompt, profile: state.config.profile, candidates, dependencies: activeDependencies });
-    const final = withMetadata(result, host, jobId, result.attempts ?? 0);
-    await finishJob(cwd, jobId, final);
-    return final;
-  }
-
-  if (args.command === "implement") {
+  const executionMode = args.executionMode ?? "supervised";
+  const timeoutMs = args.timeoutMs ?? defaultTimeoutMs(args.command);
+  const job = await startJob(cwd, {
+    host,
+    kind: args.command,
+    prompt: rawPrompt,
+    cwd,
+    executionMode,
+    timeoutMs,
+    ...(args.model ? { model: args.model } : {}),
+  });
+  if (executionMode === "background") {
     try {
-      await requireCleanWorktree(cwd);
+      const spawnWorker = options.spawnWorker ?? spawnBackgroundWorker;
+      const pid = await spawnWorker({ cwd, jobId: job.id, workerToken: job.workerToken });
+      await attachJobProcess(cwd, job.id, job.workerToken, pid);
+      return { event: "accepted", jobId: job.id, status: "queued", executionMode: "background" };
     } catch (error) {
-      const result = withMetadata(
+      const failed = withMetadata(
         failure(args.command, error instanceof Error ? error.message : String(error)),
         host,
+        job.id,
+        0,
+      );
+      await finishJob(cwd, job.id, failed);
+      return failed;
+    }
+  }
+  return runStartedJobSafely({
+    args,
+    cwd,
+    host,
+    rawPrompt,
+    ...(state.config.profile ? { profile: state.config.profile } : {}),
+    candidates,
+    dependencies: activeDependencies,
+    job,
+    timeoutMs,
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+}
+
+async function handleJobs(args: RunnerArguments, cwd: string): Promise<RunnerOutput> {
+  switch (args.jobsAction) {
+    case "list":
+      return { jobs: (await listJobs(cwd, args.pendingNotifications ?? false)).map(publicJob) };
+    case "status": {
+      const snapshot = await getJob(cwd, args.jobId!);
+      return { job: publicJob(snapshot.job), result: snapshot.result };
+    }
+    case "wait":
+      return waitForJob(cwd, args.jobId!, args.waitTimeoutMs);
+    case "cancel":
+      return { job: publicJob(await cancelJob(cwd, args.jobId!)) };
+    case "acknowledge":
+      return { job: publicJob(await acknowledgeJob(cwd, args.jobId!)) };
+    default:
+      throw new Error(`Unknown jobs action: ${args.jobsAction ?? "<none>"}`);
+  }
+}
+
+function publicJob(job: JobRecord): PublicJobRecord {
+  const { workerToken: _workerToken, ...publicRecord } = job;
+  return publicRecord;
+}
+
+async function runBackgroundJob(
+  args: RunnerArguments,
+  cwd: string,
+  dependencies?: RunnerDependencies,
+  outerSignal?: AbortSignal,
+): Promise<WorkerResult> {
+  const request = await readJobRequest(cwd, args.jobId!);
+  if (request.workerToken !== args.workerToken) throw new Error(`Worker token mismatch for job: ${request.id}`);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  process.once("SIGINT", abort);
+  process.once("SIGTERM", abort);
+  const forwardAbort = () => controller.abort();
+  outerSignal?.addEventListener("abort", forwardAbort, { once: true });
+  try {
+    const snapshot = await getJob(cwd, request.id);
+    if (snapshot.job.cancelRequestedAt) controller.abort();
+    const state = await loadState(cwd);
+    const modelConfiguration = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const activeDependencies = dependencies ?? defaultDependencies(modelConfiguration);
+    const candidates = orderModels(activeDependencies.catalog.available(), {
+      requested: request.model,
+      priority: modelPriority(modelConfiguration),
+    });
+    const prompt = await readJobPrompt(cwd, request.id);
+    return runStartedJobSafely({
+      args: requestArguments(request),
+      cwd,
+      host: request.host,
+      rawPrompt: prompt,
+      ...(state.config.profile ? { profile: state.config.profile } : {}),
+      candidates,
+      dependencies: activeDependencies,
+      job: { id: request.id, workerToken: request.workerToken },
+      timeoutMs: request.timeoutMs,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const failed = withMetadata(
+      failure(request.kind, error instanceof Error ? error.message : String(error), request.model ?? null),
+      request.host,
+      request.id,
+      0,
+    );
+    await finishJob(cwd, request.id, failed);
+    return failed;
+  } finally {
+    process.removeListener("SIGINT", abort);
+    process.removeListener("SIGTERM", abort);
+    outerSignal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
+function requestArguments(request: JobRequest): RunnerArguments {
+  return {
+    command: request.kind,
+    host: request.host,
+    ...(request.model ? { model: request.model } : {}),
+    executionMode: "supervised",
+    timeoutMs: request.timeoutMs,
+    reconfigure: false,
+    reset: false,
+    json: true,
+  };
+}
+
+async function runStartedJobSafely(
+  options: Parameters<typeof runStartedJob>[0],
+): Promise<WorkerResult> {
+  try {
+    return await runStartedJob(options);
+  } catch (error) {
+    const kind = options.args.command as TaskKind;
+    const failed = withMetadata(
+      failure(kind, error instanceof Error ? error.message : String(error), options.args.model ?? null),
+      options.host,
+      options.job.id,
+      0,
+    );
+    await finishJob(options.cwd, options.job.id, failed);
+    return failed;
+  }
+}
+
+async function runStartedJob(options: {
+  args: Extract<RunnerArguments, { command: TaskKind }> | RunnerArguments;
+  cwd: string;
+  host: Host;
+  rawPrompt: string;
+  profile?: SwarmProfile;
+  candidates: PiModel[];
+  dependencies: RunnerDependencies;
+  job: JobHandle;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<WorkerResult> {
+  const kind = options.args.command as TaskKind;
+  const jobId = options.job.id;
+  await markJobRunning(options.cwd, jobId, options.job.workerToken, process.pid);
+  const heartbeat = setInterval(() => {
+    void heartbeatJob(options.cwd, jobId, options.job.workerToken, process.pid).catch(() => {});
+  }, JOB_HEARTBEAT_INTERVAL_MS);
+  const deadline = Date.now() + options.timeoutMs;
+
+  try {
+    if (options.candidates.length === 0) {
+      const result = withMetadata(
+        failure(kind, options.args.model ? `Requested Pi model is unavailable: ${options.args.model}` : "No configured Pi model is available."),
+        options.host,
         jobId,
         0,
       );
-      await finishJob(cwd, jobId, result);
+      await finishJob(options.cwd, jobId, result);
       return result;
     }
-  }
 
-  const prompt = buildWorkerPrompt({ host, kind: args.command, prompt: rawPrompt, profile: state.config.profile });
-  let result = await runWithFallback({
-    kind: args.command,
-    cwd,
-    prompt,
-    mode: args.command === "implement" ? "implement" : "readonly",
-    candidates,
-    dependencies: activeDependencies,
-  });
-  let diff = "";
-  if (args.command === "implement") {
-    const changes = await captureWorktreeChanges(cwd);
-    diff = changes.diff;
-    result = { ...result, changedFiles: changes.changedFiles, diffStat: changes.diffStat };
+    if (kind === "orchestrate") {
+      const result = await runOrchestration({
+        cwd: options.cwd,
+        host: options.host,
+        prompt: options.rawPrompt,
+        profile: options.profile,
+        candidates: options.candidates,
+        dependencies: options.dependencies,
+        deadline,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+      const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
+      await finishJob(options.cwd, jobId, final);
+      return final;
+    }
+
+    if (kind === "implement") {
+      try {
+        await requireCleanWorktree(options.cwd);
+      } catch (error) {
+        const result = withMetadata(
+          failure(kind, error instanceof Error ? error.message : String(error)),
+          options.host,
+          jobId,
+          0,
+        );
+        await finishJob(options.cwd, jobId, result);
+        return result;
+      }
+    }
+
+    const prompt = buildWorkerPrompt({
+      host: options.host,
+      kind,
+      prompt: options.rawPrompt,
+      profile: options.profile,
+    });
+    let result = await runWithFallback({
+      kind,
+      cwd: options.cwd,
+      prompt,
+      mode: kind === "implement" ? "implement" : "readonly",
+      candidates: options.candidates,
+      dependencies: options.dependencies,
+      deadline,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+    let diff = "";
+    if (kind === "implement") {
+      const changes = await captureWorktreeChanges(options.cwd);
+      diff = changes.diff;
+      result = { ...result, changedFiles: changes.changedFiles, diffStat: changes.diffStat };
+    }
+    const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
+    await finishJob(options.cwd, jobId, final, diff);
+    return final;
+  } finally {
+    clearInterval(heartbeat);
   }
-  const final = withMetadata(result, host, jobId, result.attempts ?? 0);
-  await finishJob(cwd, jobId, final, diff);
-  return final;
 }
 
 async function handleInit(
@@ -240,19 +462,31 @@ async function runWithFallback(options: {
   mode: "readonly" | "implement";
   candidates: PiModel[];
   dependencies: RunnerDependencies;
+  deadline: number;
+  signal?: AbortSignal;
 }): Promise<WorkerResult> {
   let last = failure(options.kind, "No model attempt completed.");
   for (let index = 0; index < options.candidates.length; index += 1) {
+    const remainingMs = options.deadline - Date.now();
+    if (remainingMs <= 0) return statusResult(options.kind, "timed-out", "Pi job timed out.");
     const model = options.candidates[index]!;
     try {
       const session = await options.dependencies.createSession({ cwd: options.cwd, mode: options.mode, model });
-      last = await executeSession({ kind: options.kind, model: modelId(model), prompt: options.prompt, session });
+      last = await executeSession({
+        kind: options.kind,
+        model: modelId(model),
+        prompt: options.prompt,
+        session,
+        timeoutMs: remainingMs,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
     } catch (error) {
       last = failure(options.kind, error instanceof Error ? error.message : String(error), modelId(model));
     }
     const attempts = index + 1;
     last = { ...last, attempts, fallbackUsed: attempts > 1 };
     if (last.success) return last;
+    if (last.status === "cancelled" || last.status === "timed-out") return last;
     if (options.mode === "implement" && !(await inspectWorktree(options.cwd)).clean) return last;
   }
   return last;
@@ -265,6 +499,8 @@ async function runOrchestration(options: {
   profile?: SwarmProfile | undefined;
   candidates: PiModel[];
   dependencies: RunnerDependencies;
+  deadline: number;
+  signal?: AbortSignal;
 }): Promise<WorkerResult> {
   const perspectives = [
     "Correctness and failure modes",
@@ -279,6 +515,8 @@ async function runOrchestration(options: {
         mode: "readonly",
         candidates: options.candidates,
         dependencies: options.dependencies,
+        deadline: options.deadline,
+        ...(options.signal ? { signal: options.signal } : {}),
         prompt: buildWorkerPrompt({
           host: options.host,
           kind: "orchestrate",
@@ -290,9 +528,16 @@ async function runOrchestration(options: {
     ),
   );
   const success = results.every((result) => result.success);
+  const status = success
+    ? "succeeded"
+    : results.some((result) => result.status === "cancelled")
+      ? "cancelled"
+      : results.some((result) => result.status === "timed-out")
+        ? "timed-out"
+        : "failed";
   return {
     kind: "orchestrate",
-    status: success ? "succeeded" : "failed",
+    status,
     success,
     model: results.find((result) => result.model)?.model ?? null,
     output: results
@@ -358,10 +603,19 @@ function withMetadata(
 }
 
 function failure(kind: TaskKind, output: string, model: string | null = null): WorkerResult {
+  return statusResult(kind, "failed", output, model);
+}
+
+function statusResult(
+  kind: TaskKind,
+  status: WorkerResult["status"],
+  output: string,
+  model: string | null = null,
+): WorkerResult {
   return {
     kind,
-    status: "failed",
-    success: false,
+    status,
+    success: status === "succeeded",
     model,
     output,
     changedFiles: [],
@@ -369,4 +623,8 @@ function failure(kind: TaskKind, output: string, model: string | null = null): W
     verification: { status: "not-run", commands: [] },
     error: output,
   };
+}
+
+function defaultTimeoutMs(kind: TaskKind): number {
+  return kind === "orchestrate" || kind === "implement" ? 60 * 60_000 : 30 * 60_000;
 }

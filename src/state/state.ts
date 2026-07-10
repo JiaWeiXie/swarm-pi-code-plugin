@@ -4,6 +4,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import type {
+  ExecutionMode,
+  Host,
+  JobStatus,
+  NotificationStatus,
+  TaskKind,
+} from "../core/contracts.js";
+
 const execFileAsync = promisify(execFile);
 
 export interface SwarmProfile {
@@ -22,7 +30,20 @@ export interface SwarmConfig {
 
 export interface JobRecord {
   id: string;
-  status: string;
+  status: JobStatus | string;
+  host?: Host;
+  kind?: TaskKind;
+  executionMode?: ExecutionMode;
+  timeoutMs?: number;
+  model?: string;
+  pid?: number;
+  workerToken?: string;
+  createdAt?: string;
+  startedAt?: string;
+  updatedAt?: string;
+  finishedAt?: string;
+  cancelRequestedAt?: string;
+  notification?: NotificationStatus;
   [key: string]: unknown;
 }
 

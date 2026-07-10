@@ -61,14 +61,27 @@ node scripts/pi-runner.mjs review --host <host> [--base <ref>] [--scope <scope>]
 node scripts/pi-runner.mjs plan --host <host> --prompt-file <file> --json
 node scripts/pi-runner.mjs implement --host <host> --prompt-file <file> --json
 node scripts/pi-runner.mjs orchestrate --host <host> --prompt-file <file> --json
+node scripts/pi-runner.mjs jobs <list|status|wait|cancel|acknowledge> [options] --json
 ```
 
 Every worker result includes the task kind, status, success flag, selected
 model, output, changed files, diff summary, and verification status.
 
+Task commands accept `--execution-mode supervised|background` and
+`--timeout-ms`. Supervised is the default. Background is read-only and returns
+an accepted job ID after durable artifacts and a detached worker both exist;
+`implement` rejects background mode.
+
 The runner creates one in-memory Pi session per delegated job. Read-only jobs
 use repository inspection tools. Implementation jobs use read, grep, find, ls,
-write, and edit, but never a generic shell tool.
+write, and edit, but never a generic shell tool. Pi provider failures are read
+from the terminal assistant message rather than inferred from whether
+`prompt()` rejected; only a terminal `stop` is successful.
+
+Each job moves through `queued`, `running`, and one terminal state:
+`succeeded`, `failed`, `cancelled`, `timed-out`, or `orphaned`. Workers maintain
+a heartbeat and process lease. Queries reconcile result artifacts, stale
+leases, and cancellation requests before returning state.
 
 ## Safety and Mutation Policy
 
@@ -91,7 +104,13 @@ worktrees normally observe the same setup:
 .swarm-pi-code-plugin/
 ├── model.json                  # provider, custom endpoint, primary, fallbacks
 ├── state.json                  # project profile, migration data, job index
-└── jobs/<job-id>/              # prompt, output, result, optional patch
+└── jobs/<job-id>/
+    ├── request.json            # durable execution request and worker token
+    ├── prompt.md               # copied prompt, safe after host temp cleanup
+    ├── heartbeat.json          # PID lease updated while running
+    ├── result.json             # terminal WorkerResult
+    ├── changes.patch           # optional implementation diff
+    └── worker.*.log            # detached worker stdout and stderr
 ```
 
 `model.json` is the canonical provider and model file. `state.json` stores the
@@ -102,6 +121,12 @@ file, and an atomic rename.
 `SWARM_PI_CODE_PLUGIN_DATA_DIR` can override the resolved data directory. The
 current worktree remains the Pi session working directory even when its shared
 configuration is resolved from the primary checkout.
+
+Terminal results are written before the state index is updated. Reconciliation
+repairs a crash between those writes. Every terminal job starts with a pending
+notification; a host watcher waits for the result, presents it, and then
+acknowledges it. If the watcher disappears, the next plugin delegation replays
+the pending result once.
 
 ## Credentials
 

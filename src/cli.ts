@@ -21,10 +21,22 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.stdout.write(`${JSON.stringify(completion, null, args.json ? 2 : 0)}\n`);
       return completion.status === "timed-out" ? 1 : 0;
     }
-    const result = await runCommand(args, process.cwd());
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const delegated = args.command === "ask" || args.command === "review" ||
+      args.command === "plan" || args.command === "implement" || args.command === "orchestrate";
+    if (delegated) {
+      process.once("SIGINT", abort);
+      process.once("SIGTERM", abort);
+    }
+    const result = await runCommand(args, process.cwd(), undefined, { signal: controller.signal }).finally(() => {
+      process.removeListener("SIGINT", abort);
+      process.removeListener("SIGTERM", abort);
+    });
     const serialized = JSON.stringify(result, null, args.json ? 2 : 0);
     process.stdout.write(`${serialized}\n`);
 
+    if ("event" in result && result.event === "wait-timed-out") return 3;
     return "success" in result && !result.success ? 1 : 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

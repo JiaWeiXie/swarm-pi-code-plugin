@@ -152,6 +152,41 @@ node scripts/pi-runner.mjs orchestrate --host codex --prompt-file /path/to/task.
 `implement` is guarded by a clean-worktree preflight. The host must inspect the
 result and run verification before delivery.
 
+Delegated commands default to supervised execution. The host relay owns the Pi
+process until a terminal result is recorded, while the main session can keep
+working. Read-only commands also accept durable background execution:
+
+```bash
+node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/question.md \
+  --execution-mode background --json
+node scripts/pi-runner.mjs jobs wait --job <job-id> --json
+```
+
+Background mode is supported by `ask`, `plan`, `review`, and `orchestrate`.
+`implement` is always supervised because concurrent mutation of the same
+worktree would invalidate its clean-worktree boundary. While an implementation
+worker is active, the main session must not edit that worktree.
+
+Worker commands use a 30-minute default timeout for `ask`, `plan`, and `review`,
+and a 60-minute default for `orchestrate` and `implement`. Override the job
+deadline with `--timeout-ms` from 1000 through 86400000 milliseconds.
+
+Durable job inspection and control are available through:
+
+```bash
+node scripts/pi-runner.mjs jobs list --json
+node scripts/pi-runner.mjs jobs list --pending-notifications --json
+node scripts/pi-runner.mjs jobs status --job <job-id> --json
+node scripts/pi-runner.mjs jobs wait --job <job-id> --wait-timeout-ms 5000 --json
+node scripts/pi-runner.mjs jobs cancel --job <job-id> --json
+node scripts/pi-runner.mjs jobs acknowledge --job <job-id> --json
+```
+
+`jobs wait` does not change the worker deadline. Its optional wait timeout exits
+with status 3 while leaving the job running. Terminal jobs remain pending until
+the host presents and acknowledges them, so an interrupted watcher can replay
+the result during the next plugin delegation.
+
 ## Troubleshooting
 
 ### The command or skill is not visible
@@ -197,6 +232,14 @@ change.
 Pi implementation requires a clean assigned worktree so unrelated user changes
 cannot be confused with worker edits. Review or safely commit the existing
 changes first, then retry in the intended worktree.
+
+### A delegated job stopped without a notification
+
+Run `jobs list --pending-notifications --json`. Terminal results are durable and
+remain pending until acknowledged. A stale job whose process disappeared is
+reconciled to `orphaned`; a worker stopped after cancellation is reconciled to
+`cancelled`. Host adapters check this pending queue before starting another
+delegation.
 
 ### A linked worktree cannot see the configuration
 

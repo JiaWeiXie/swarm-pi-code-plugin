@@ -5,6 +5,19 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import type { WorkerResult } from "../src/core/contracts.js";
+import {
+  acknowledgeJob,
+  attachJobProcess,
+  cancelJob,
+  getJob,
+  finishJob,
+  jobDirectory,
+  listJobs,
+  reconcileJobs,
+  startJob,
+  waitForJob,
+} from "../src/state/jobs.js";
 import {
   clearConfiguration,
   loadState,
@@ -13,6 +26,19 @@ import {
   setModelPriority,
   updateState,
 } from "../src/state/state.js";
+
+function workerResult(status: WorkerResult["status"] = "succeeded"): WorkerResult {
+  return {
+    kind: "ask",
+    status,
+    success: status === "succeeded",
+    output: status === "succeeded" ? "done" : status,
+    model: "test/model",
+    changedFiles: [],
+    diffStat: "",
+    verification: { status: "not-run", commands: [] },
+  };
+}
 
 function repositoryFixture(): { repository: string; worktree: string } {
   const repository = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-state-"));
@@ -160,4 +186,126 @@ test("concurrent state updates do not lose job records", async () => {
       Array.from({ length: 12 }, (_, index) => `job-${index}`).sort(),
     );
   });
+});
+
+test("job lifecycle persists terminal results and acknowledges notifications", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-job-lifecycle-"));
+  const handle = await startJob(workspace, {
+    host: "codex",
+    kind: "ask",
+    prompt: "Inspect",
+    cwd: workspace,
+    executionMode: "supervised",
+    timeoutMs: 30_000,
+  });
+
+  assert.equal((await getJob(workspace, handle.id)).job.status, "queued");
+  const cancelled = await cancelJob(workspace, handle.id);
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal((await listJobs(workspace, true)).length, 1);
+  assert.equal((await waitForJob(workspace, handle.id)).status, "cancelled");
+
+  const acknowledged = await acknowledgeJob(workspace, handle.id);
+  assert.equal(acknowledged.notification, "acknowledged");
+  assert.equal((await listJobs(workspace, true)).length, 0);
+});
+
+test("reconciliation converts stale dead workers to orphaned", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-job-orphan-"));
+  const handle = await startJob(workspace, {
+    host: "claude",
+    kind: "plan",
+    prompt: "Plan",
+    cwd: workspace,
+    executionMode: "background",
+    timeoutMs: 30_000,
+  });
+  await attachJobProcess(workspace, handle.id, handle.workerToken, 999_999);
+  await updateState(workspace, (state) => {
+    const job = state.jobs.find((candidate) => candidate.id === handle.id)!;
+    job.status = "running";
+    job.updatedAt = "2000-01-01T00:00:00.000Z";
+  });
+  const directory = await jobDirectory(workspace, handle.id);
+  fs.writeFileSync(path.join(directory, "heartbeat.json"), JSON.stringify({
+    jobId: handle.id,
+    workerToken: handle.workerToken,
+    pid: 999_999,
+    updatedAt: "2000-01-01T00:00:00.000Z",
+  }));
+
+  await reconcileJobs(workspace);
+  const snapshot = await getJob(workspace, handle.id);
+  assert.equal(snapshot.job.status, "orphaned");
+  assert.equal(snapshot.result?.status, "orphaned");
+  assert.match(snapshot.result?.output ?? "", /disappeared/i);
+});
+
+test("reconciliation repairs state when result artifact already exists", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-job-repair-"));
+  const handle = await startJob(workspace, {
+    host: "codex",
+    kind: "ask",
+    prompt: "Inspect",
+    cwd: workspace,
+    executionMode: "supervised",
+    timeoutMs: 30_000,
+  });
+  const result = { ...workerResult(), host: "codex", jobId: handle.id };
+  fs.writeFileSync(
+    path.join(await jobDirectory(workspace, handle.id), "result.json"),
+    `${JSON.stringify(result)}\n`,
+  );
+
+  await reconcileJobs(workspace);
+  const snapshot = await getJob(workspace, handle.id);
+  assert.equal(snapshot.job.status, "succeeded");
+  assert.equal(snapshot.job.notification, "pending");
+  assert.equal(snapshot.result?.output, "done");
+});
+
+test("reconciliation preserves a stale heartbeat while the worker PID is alive", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-job-live-"));
+  const handle = await startJob(workspace, {
+    host: "codex",
+    kind: "review",
+    prompt: "Review",
+    cwd: workspace,
+    executionMode: "background",
+    timeoutMs: 30_000,
+  });
+  await attachJobProcess(workspace, handle.id, handle.workerToken, process.pid);
+  await updateState(workspace, (state) => {
+    const job = state.jobs.find((candidate) => candidate.id === handle.id)!;
+    job.status = "running";
+    job.updatedAt = "2000-01-01T00:00:00.000Z";
+  });
+  fs.writeFileSync(path.join(await jobDirectory(workspace, handle.id), "heartbeat.json"), JSON.stringify({
+    jobId: handle.id,
+    workerToken: handle.workerToken,
+    pid: process.pid,
+    updatedAt: "2000-01-01T00:00:00.000Z",
+  }));
+
+  await reconcileJobs(workspace);
+  assert.equal((await getJob(workspace, handle.id)).job.status, "running");
+});
+
+test("the first terminal result wins concurrent completion races", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-job-terminal-race-"));
+  const handle = await startJob(workspace, {
+    host: "codex",
+    kind: "ask",
+    prompt: "Inspect",
+    cwd: workspace,
+    executionMode: "background",
+    timeoutMs: 30_000,
+  });
+
+  await finishJob(workspace, handle.id, { ...workerResult("cancelled"), jobId: handle.id });
+  await finishJob(workspace, handle.id, { ...workerResult("succeeded"), jobId: handle.id });
+
+  const snapshot = await getJob(workspace, handle.id);
+  assert.equal(snapshot.job.status, "cancelled");
+  assert.equal(snapshot.result?.status, "cancelled");
 });

@@ -2,6 +2,9 @@ export type {
   Host,
   TaskKind,
   WorkerMode,
+  ExecutionMode,
+  JobStatus,
+  NotificationStatus,
   WorkerRequest,
   WorkerResult,
   WorkerStatus,
@@ -20,6 +23,7 @@ export * from "./state/jobs.js";
 export * from "./state/state.js";
 export * from "./state/model-config.js";
 export { parseArguments } from "./runner/args.js";
+export { spawnBackgroundWorker } from "./runner/background.js";
 export { buildWorkerPrompt } from "./runner/prompts.js";
 export { runCommand } from "./runner/run.js";
 export * from "./web/configuration-service.js";

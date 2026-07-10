@@ -9,6 +9,7 @@ import { executeSession, type RunnableSession } from "../src/pi/execute.js";
 import { describeModels, describeProviders, selectModel, type PiModel } from "../src/pi/models.js";
 import { parseArguments } from "../src/runner/args.js";
 import { runCommand, type RunnerDependencies } from "../src/runner/run.js";
+import { getJob, startJob } from "../src/state/jobs.js";
 import { defaultModelConfiguration } from "../src/state/model-config.js";
 
 const fakeModel = {
@@ -79,6 +80,63 @@ test("argument parsing requires host and prompt file for ask", () => {
   );
   assert.throws(() => parseArguments(["configure", "--section", "models"]), /configuration section/);
   assert.throws(() => parseArguments(["init", "--section", "project"]), /only supported by configure/);
+
+  assert.deepEqual(
+    parseArguments([
+      "plan",
+      "--host",
+      "codex",
+      "--prompt-file",
+      "/tmp/plan.md",
+      "--execution-mode",
+      "background",
+      "--timeout-ms",
+      "45000",
+      "--json",
+    ]),
+    {
+      command: "plan",
+      host: "codex",
+      promptFile: "/tmp/plan.md",
+      executionMode: "background",
+      timeoutMs: 45_000,
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+  );
+  assert.throws(
+    () => parseArguments([
+      "implement",
+      "--host",
+      "codex",
+      "--prompt-file",
+      "/tmp/task.md",
+      "--execution-mode",
+      "background",
+    ]),
+    /background.*implement/i,
+  );
+  assert.throws(
+    () => parseArguments([
+      "ask",
+      "--host",
+      "codex",
+      "--prompt-file",
+      "/tmp/task.md",
+      "--timeout-ms",
+      "999",
+    ]),
+    /timeout/i,
+  );
+  assert.deepEqual(parseArguments(["jobs", "status", "--job", "job-1", "--json"]), {
+    command: "jobs",
+    jobsAction: "status",
+    jobId: "job-1",
+    reconfigure: false,
+    reset: false,
+    json: true,
+  });
 });
 
 test("model helpers expose stable provider/model identifiers", () => {
@@ -133,6 +191,12 @@ test("session execution collects streamed output and always disposes", async () 
           });
         }
       }
+      for (const listener of listeners) {
+        listener({
+          type: "message_end",
+          message: { role: "assistant", stopReason: "stop" },
+        });
+      }
     },
     dispose() {
       disposed = true;
@@ -151,6 +215,134 @@ test("session execution collects streamed output and always disposes", async () 
   assert.equal(disposed, true);
 });
 
+test("session execution treats resolved provider errors as failures", async () => {
+  let disposed = false;
+  const listeners = new Set<(event: any) => void>();
+  const session: RunnableSession = {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    async prompt() {
+      for (const listener of listeners) {
+        listener({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "provider unavailable",
+          },
+        });
+      }
+    },
+    dispose() {
+      disposed = true;
+    },
+  };
+
+  const result = await executeSession({
+    kind: "ask",
+    model: "test-provider/test-model",
+    prompt: "Inspect this repository.",
+    session,
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.success, false);
+  assert.match(result.output, /provider unavailable/);
+  assert.equal(disposed, true);
+});
+
+test("session execution classifies incomplete and aborted terminal messages", async () => {
+  for (const [stopReason, expected] of [
+    ["length", /before completion/i],
+    ["aborted", /aborted/i],
+  ] as const) {
+    const listeners = new Set<(event: any) => void>();
+    const result = await executeSession({
+      kind: "plan",
+      model: "test-provider/test-model",
+      prompt: "Plan",
+      session: {
+        subscribe(listener) {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        async prompt() {
+          for (const listener of listeners) {
+            listener({
+              type: "message_end",
+              message: { role: "assistant", stopReason },
+            });
+          }
+        },
+        dispose() {},
+      },
+    });
+    assert.equal(result.status, "failed");
+    assert.match(result.output, expected);
+  }
+});
+
+test("session execution aborts and reports timeout", async () => {
+  let aborted = false;
+  let disposed = false;
+  const result = await executeSession({
+    kind: "ask",
+    model: "test-provider/test-model",
+    prompt: "Wait forever",
+    timeoutMs: 5,
+    session: {
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {
+        await new Promise(() => {});
+      },
+      async abort() {
+        aborted = true;
+      },
+      async waitForIdle() {},
+      dispose() {
+        disposed = true;
+      },
+    },
+  });
+
+  assert.equal(result.status, "timed-out");
+  assert.equal(aborted, true);
+  assert.equal(disposed, true);
+});
+
+test("session execution aborts and reports external cancellation", async () => {
+  const controller = new AbortController();
+  let aborted = false;
+  const resultPromise = executeSession({
+    kind: "ask",
+    model: "test-provider/test-model",
+    prompt: "Wait forever",
+    signal: controller.signal,
+    session: {
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {
+        await new Promise(() => {});
+      },
+      async abort() {
+        aborted = true;
+      },
+      async waitForIdle() {},
+      dispose() {},
+    },
+  });
+  controller.abort();
+  const result = await resultPromise;
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(aborted, true);
+});
+
 test("ask runs through injected model and session dependencies", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-ask-"));
   const session: RunnableSession = {
@@ -159,6 +351,7 @@ test("ask runs through injected model and session dependencies", async () => {
         type: "message_update",
         assistantMessageEvent: { type: "text_delta", delta: "done" },
       });
+      listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
       return () => {};
     },
     async prompt(prompt) {
@@ -206,7 +399,8 @@ test("implement requires a clean worktree and captures Pi changes", async () => 
     catalog: { available: () => [fakeModel] },
     readFile: async () => "Change file.txt",
     createSession: async (options) => ({
-      subscribe() {
+      subscribe(listener) {
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
         return () => {};
       },
       async prompt() {
@@ -345,6 +539,7 @@ test("readonly jobs fall back through configured model priority", async () => {
             type: "message_update",
             assistantMessageEvent: { type: "text_delta", delta: "fallback done" },
           });
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
         }
         return () => {};
       },
@@ -384,6 +579,52 @@ test("readonly jobs fall back through configured model priority", async () => {
   assert.equal("fallbackUsed" in result && result.fallbackUsed, true);
 });
 
+test("readonly jobs fall back when Pi resolves with a terminal provider error", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-terminal-fallback-"));
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel, fallbackModel] },
+    readFile: async () => "Inspect",
+    createSession: async ({ model }) => ({
+      subscribe(listener) {
+        if (model === fakeModel) {
+          listener({
+            type: "message_end",
+            message: { role: "assistant", stopReason: "error", errorMessage: "primary failed" },
+          });
+        } else {
+          listener({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "fallback recovered" },
+          });
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        }
+        return () => {};
+      },
+      async prompt() {},
+      dispose() {},
+    }),
+  };
+  await runCommand({
+    command: "init",
+    reconfigure: false,
+    reset: false,
+    modelPriority: ["test-provider/test-model", "test-provider/fallback-model"],
+    json: true,
+  }, workspace, dependencies);
+  const result = await runCommand({
+    command: "ask",
+    host: "codex",
+    promptFile: "prompt.md",
+    reconfigure: false,
+    reset: false,
+    json: true,
+  }, workspace, dependencies);
+
+  assert.equal("status" in result && result.status, "succeeded");
+  assert.equal("attempts" in result && result.attempts, 2);
+  assert.equal("output" in result && result.output, "fallback recovered");
+});
+
 test("review builds a working-tree prompt and runs readonly", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-review-"));
   execFileSync("git", ["init", workspace], { stdio: "ignore" });
@@ -400,7 +641,8 @@ test("review builds a working-tree prompt and runs readonly", async () => {
     catalog: { available: () => [fakeModel] },
     readFile: async () => "unused",
     createSession: async ({ mode }) => ({
-      subscribe() {
+      subscribe(listener) {
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
         return () => {};
       },
       async prompt(prompt) {
@@ -442,7 +684,8 @@ test("branch review handles a repository with only a root commit", async () => {
     catalog: { available: () => [fakeModel] },
     readFile: async () => "unused",
     createSession: async () => ({
-      subscribe() {
+      subscribe(listener) {
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
         return () => {};
       },
       async prompt(prompt) {
@@ -476,12 +719,13 @@ test("orchestrate runs exactly three readonly perspectives and records artifacts
     createSession: async ({ mode }) => {
       sessions += 1;
       return {
-        subscribe(listener) {
-          listener({
-            type: "message_update",
-            assistantMessageEvent: { type: "text_delta", delta: `result ${sessions}` },
-          });
-          return () => {};
+      subscribe(listener) {
+        listener({
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", delta: `result ${sessions}` },
+        });
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        return () => {};
         },
         async prompt(prompt) {
           assert.equal(mode, "readonly");
@@ -515,4 +759,166 @@ test("orchestrate runs exactly three readonly perspectives and records artifacts
   assert.equal(fs.existsSync(path.join(jobDir, "request.json")), true);
   assert.equal(fs.existsSync(path.join(jobDir, "prompt.md")), true);
   assert.equal(fs.existsSync(path.join(jobDir, "result.json")), true);
+});
+
+test("background submission returns an accepted job without creating a Pi session", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-background-submit-"));
+  let sessions = 0;
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Inspect in background",
+    createSession: async () => {
+      sessions += 1;
+      throw new Error("background submit must not create a session");
+    },
+  };
+
+  const result = await runCommand(
+    {
+      command: "ask",
+      host: "codex",
+      promptFile: "prompt.md",
+      executionMode: "background",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+    { spawnWorker: async () => 424_242 },
+  );
+
+  assert.deepEqual(result, {
+    event: "accepted",
+    jobId: "jobId" in result ? result.jobId : "",
+    status: "queued",
+    executionMode: "background",
+  });
+  assert.equal(sessions, 0);
+  const snapshot = await getJob(workspace, "jobId" in result ? result.jobId : "");
+  assert.equal(snapshot.job.status, "queued");
+  assert.equal(snapshot.job.pid, 424_242);
+  assert.equal(snapshot.job.timeoutMs, 30 * 60_000);
+});
+
+test("background spawn failures become durable failed jobs", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-background-spawn-"));
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Inspect in background",
+    createSession: async () => {
+      throw new Error("unused");
+    },
+  };
+  const result = await runCommand(
+    {
+      command: "plan",
+      host: "claude",
+      promptFile: "prompt.md",
+      executionMode: "background",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+    { spawnWorker: async () => { throw new Error("spawn unavailable"); } },
+  );
+
+  assert.equal("status" in result && result.status, "failed");
+  assert.match("output" in result ? result.output : "", /spawn unavailable/);
+  const snapshot = await getJob(workspace, "jobId" in result ? result.jobId ?? "" : "");
+  assert.equal(snapshot.job.status, "failed");
+  assert.equal(snapshot.job.notification, "pending");
+});
+
+test("private background worker reconstructs and completes a durable job", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-background-worker-"));
+  const handle = await startJob(workspace, {
+    host: "codex",
+    kind: "ask",
+    prompt: "Durable prompt",
+    cwd: workspace,
+    executionMode: "background",
+    timeoutMs: 30_000,
+  });
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "unused",
+    createSession: async () => ({
+      subscribe(listener) {
+        listener({
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", delta: "background done" },
+        });
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        return () => {};
+      },
+      async prompt(prompt) {
+        assert.match(prompt, /Durable prompt/);
+      },
+      dispose() {},
+    }),
+  };
+
+  const result = await runCommand(
+    {
+      command: "__worker",
+      jobId: handle.id,
+      workerToken: handle.workerToken,
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal("status" in result && result.status, "succeeded");
+  assert.equal("output" in result && result.output, "background done");
+  assert.equal((await getJob(workspace, handle.id)).job.notification, "pending");
+});
+
+test("jobs commands expose list, status, wait timeout, and acknowledge", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-jobs-cli-"));
+  const handle = await startJob(workspace, {
+    host: "codex",
+    kind: "review",
+    prompt: "Review",
+    cwd: workspace,
+    executionMode: "background",
+    timeoutMs: 30_000,
+  });
+
+  const listed = await runCommand({
+    command: "jobs",
+    jobsAction: "list",
+    reconfigure: false,
+    reset: false,
+    json: true,
+  }, workspace);
+  assert.equal("jobs" in listed && Array.isArray(listed.jobs) && listed.jobs.length, 1);
+  assert.equal("jobs" in listed && Array.isArray(listed.jobs) && "workerToken" in listed.jobs[0]!, false);
+
+  const status = await runCommand({
+    command: "jobs",
+    jobsAction: "status",
+    jobId: handle.id,
+    reconfigure: false,
+    reset: false,
+    json: true,
+  }, workspace);
+  assert.equal("job" in status && status.job.status, "queued");
+  assert.equal("job" in status && "workerToken" in status.job, false);
+
+  const waited = await runCommand({
+    command: "jobs",
+    jobsAction: "wait",
+    jobId: handle.id,
+    waitTimeoutMs: 5,
+    reconfigure: false,
+    reset: false,
+    json: true,
+  }, workspace);
+  assert.equal("event" in waited && waited.event, "wait-timed-out");
 });
