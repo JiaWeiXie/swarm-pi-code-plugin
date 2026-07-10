@@ -1,0 +1,22 @@
+{
+  "name": "swarm-pi-code",
+  "version": "0.1.0",
+  "description": "Dual-host agent swarm adapter backed by the embedded Pi coding-agent SDK.",
+  "author": {
+    "name": "JiaWei Xie"
+  },
+  "license": "MIT",
+  "interface": {
+    "displayName": "Swarm Pi Code",
+    "shortDescription": "Delegate bounded coding work to embedded Pi sessions.",
+    "longDescription": "Swarm Pi Code connects Codex and Claude Code to controlled Pi coding-agent sessions for analysis and implementation workflows.",
+    "developerName": "JiaWei Xie",
+    "category": "Productivity",
+    "capabilities": ["Analysis", "Write"],
+    "defaultPrompt": [
+      "Use Pi to review the current changes.",
+      "Use Pi to plan this implementation.",
+      "Use Pi to implement this scoped change."
+    ]
+  }
+}

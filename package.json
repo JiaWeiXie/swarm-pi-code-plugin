@@ -1,0 +1,25 @@
+{
+  "name": "swarm-pi-code-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Dual-host Claude Code and Codex plugin backed by the embedded Pi coding-agent SDK",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test:build": "tsc -p tsconfig.test.json",
+    "test": "npm run test:build && node --test .test-dist/tests/*.test.js",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.6"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}

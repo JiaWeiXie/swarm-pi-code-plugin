@@ -1,0 +1,20 @@
+{
+  "name": "swarm-pi-code-local",
+  "interface": {
+    "displayName": "swarm-pi-code local"
+  },
+  "plugins": [
+    {
+      "name": "swarm-pi-code",
+      "source": {
+        "source": "local",
+        "path": "./plugins/swarm-pi-code"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

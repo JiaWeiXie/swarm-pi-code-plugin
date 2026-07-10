@@ -1,0 +1,27 @@
+min_version = "2026.6.3"
+
+[tools]
+node = "24.15.0"
+
+[env]
+NODE_ENV = "development"
+
+[tasks.install]
+description = "Install Node dependencies and update the lockfile"
+run = "npm install"
+
+[tasks.test]
+description = "Run the Node test suite"
+run = "npm test"
+
+[tasks.typecheck]
+description = "Type-check the TypeScript sources"
+run = "npm run typecheck"
+
+[tasks.build]
+description = "Compile the runner and library"
+run = "npm run build"
+
+[tasks.check]
+description = "Run all project quality gates"
+run = "npm run check"
