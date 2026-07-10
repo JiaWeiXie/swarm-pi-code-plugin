@@ -10,8 +10,8 @@ description: Delegate an explicit scoped request to add, fix, change, or refacto
 3. Run `jobs list --pending-notifications --json`. Present pending terminal results and acknowledge each only after adding it to the response being prepared.
 4. Write the exact task, scope, acceptance criteria, and prohibited actions to a temporary file outside the repository.
 5. Run `node "$PLUGIN_ROOT/scripts/pi-runner.mjs" implement --host "$HOST" --prompt-file "$PROMPT_FILE" --execution-mode supervised --json`. Background implementation is prohibited.
-6. While Pi is running, do not mutate the same worktree from the main session. Delete the prompt file, inspect every changed file, and inspect the actual Git diff.
-7. Run repository verification from the host, because Pi has no shell tool and reports verification as `not-run`.
-8. Present the terminal result, run `jobs acknowledge --job <id> --json`, then report model/fallback, changed files, checks, and risks.
+6. While Pi is running, do not mutate the same worktree from the main session. Delete the prompt file, inspect every changed file, the actual Git diff, and any `runtimeSideEffects` entries.
+7. Run repository verification from the host. Lenient mode may let Pi run sandboxed commands, but the host still owns verification and the result remains `not-run` until the host verifies it.
+8. On failure, timeout, or cancellation, assume partial worktree changes may remain; inspect them instead of rolling them back automatically. Present the terminal result, run `jobs acknowledge --job <id> --json`, then report model/fallback, changed files, side effects, checks, and risks.
 
 Never commit, push, switch branches, or start another mutating worker on a dirty worktree.

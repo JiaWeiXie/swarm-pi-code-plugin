@@ -27,9 +27,10 @@ worktree-aware state.
 
 Read-only jobs use Pi sessions with repository inspection tools. Explicit
 implementation jobs add scoped write and edit tools, require a clean worktree,
-and return the changed-file list and diff summary. Pi never receives a generic
-shell tool and never commits, pushes, changes branches, or runs host-owned
-verification commands.
+and return the changed-file list and diff summary. Strict mode exposes no shell.
+Lenient mode adds an OS-sandboxed shell whose process tree is restricted to the
+assigned worktree and an isolated temporary home; Git metadata remains
+host-owned.
 
 Provider configuration is stored in `.swarm-pi-code-plugin/model.json`. Project
 profile, migration metadata, and job history are stored in
@@ -46,6 +47,8 @@ See the [architecture reference](docs/architecture.md) and
 - Node.js 22.19.0 or newer for installed plugins.
 - A supported Claude Code or Codex installation.
 - A Git repository for worktree-aware implementation jobs.
+- macOS, or Linux with `bubblewrap`, `socat`, and `ripgrep`, to enable lenient
+  sandbox mode.
 
 ### Claude Code
 
@@ -104,7 +107,8 @@ Run the host-specific setup entry point. The browser walks through four steps:
 
 1. Connect usable cloud or local AI services.
 2. Choose a primary model and ordered fallbacks.
-3. Describe the project goal, working area, and delegated task types.
+3. Describe the project goal, working area, delegated task types, and execution
+   safety mode.
 4. Review and save the complete setup.
 
 The connection list is intentionally empty when no usable service is detected.
@@ -130,8 +134,22 @@ $swarm-pi-code-plugin-project
 ```
 
 The project flow reads the current profile, lets the user change the goal,
-scope, or task types, and updates only `state.json`. It does not rewrite model
-configuration, credentials, or job history.
+scope, task types, or sandbox mode, and updates only `state.json`. It does not
+rewrite model configuration, credentials, or job history.
+
+### Execution safety
+
+Projects default to **Strict**, which keeps the existing scoped Pi tools and
+does not expose Bash. **Lenient** adds Bash through macOS Seatbelt or Linux
+Bubblewrap. Read-only workers see the worktree as read-only; implementation
+workers may write only the assigned worktree and a job-specific temporary
+directory. The shell receives a sanitized environment without model tokens,
+SSH agent sockets, or host credential variables.
+
+Lenient mode permits outbound network access. Source visible to the worker can
+therefore be sent to external services; the setup page presents this warning
+before save. Unsupported platforms or missing dependencies fail closed and
+never fall back to an unsandboxed shell.
 
 ### Non-interactive runner
 
@@ -149,8 +167,10 @@ node scripts/pi-runner.mjs implement --host codex --prompt-file /path/to/task.md
 node scripts/pi-runner.mjs orchestrate --host codex --prompt-file /path/to/task.md --json
 ```
 
-`implement` is guarded by a clean-worktree preflight. The host must inspect the
-result and run verification before delivery.
+`implement` is guarded by a clean-worktree preflight and an exclusive worktree
+lease. The host must inspect the result and run verification before delivery.
+Timeouts, cancellation, and failures may leave partial changes; they are
+reported and are never silently rolled back.
 
 Delegated commands default to supervised execution. The host relay owns the Pi
 process until a terminal result is recorded, while the main session can keep

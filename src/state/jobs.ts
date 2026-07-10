@@ -6,6 +6,7 @@ import type {
   ExecutionMode,
   Host,
   JobStatus,
+  SandboxMode,
   TaskKind,
   WorkerResult,
 } from "../core/contracts.js";
@@ -20,6 +21,7 @@ export interface JobStart {
   prompt: string;
   cwd: string;
   executionMode: ExecutionMode;
+  sandboxMode?: SandboxMode;
   timeoutMs: number;
   model?: string;
 }
@@ -30,6 +32,7 @@ export interface JobRequest {
   kind: TaskKind;
   cwd: string;
   executionMode: ExecutionMode;
+  sandboxMode?: SandboxMode;
   timeoutMs: number;
   model?: string;
   workerToken: string;
@@ -57,6 +60,7 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
   const id = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
   const workerToken = randomUUID();
   const createdAt = new Date().toISOString();
+  const sandboxMode = input.sandboxMode ?? "strict";
   const directory = await jobDirectory(cwd, id);
   const request: JobRequest = {
     id,
@@ -64,6 +68,7 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
     kind: input.kind,
     cwd: input.cwd,
     executionMode: input.executionMode,
+    sandboxMode,
     timeoutMs: input.timeoutMs,
     ...(input.model ? { model: input.model } : {}),
     workerToken,
@@ -80,6 +85,7 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       host: input.host,
       kind: input.kind,
       executionMode: input.executionMode,
+      sandboxMode,
       timeoutMs: input.timeoutMs,
       ...(input.model ? { model: input.model } : {}),
       workerToken,

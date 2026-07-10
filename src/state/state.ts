@@ -9,6 +9,7 @@ import type {
   Host,
   JobStatus,
   NotificationStatus,
+  SandboxMode,
   TaskKind,
 } from "../core/contracts.js";
 
@@ -25,6 +26,7 @@ export interface SwarmConfig {
   modelPriority: string[];
   availableModels: string[];
   availableModelsCheckedAt: string | null;
+  sandboxMode?: SandboxMode;
   profile?: SwarmProfile;
 }
 
@@ -34,6 +36,7 @@ export interface JobRecord {
   host?: Host;
   kind?: TaskKind;
   executionMode?: ExecutionMode;
+  sandboxMode?: SandboxMode;
   timeoutMs?: number;
   model?: string;
   pid?: number;
@@ -57,7 +60,12 @@ export interface SwarmState {
 export function defaultState(): SwarmState {
   return {
     version: 1,
-    config: { modelPriority: [], availableModels: [], availableModelsCheckedAt: null },
+    config: {
+      modelPriority: [],
+      availableModels: [],
+      availableModelsCheckedAt: null,
+      sandboxMode: "strict",
+    },
     jobs: [],
   };
 }
@@ -157,9 +165,34 @@ export async function saveProfile(cwd: string, profile: SwarmProfile): Promise<S
   });
 }
 
+export async function saveProjectSettings(
+  cwd: string,
+  profile: SwarmProfile,
+  sandboxMode: SandboxMode,
+): Promise<SwarmState> {
+  return updateState(cwd, (state) => {
+    state.config.profile = {
+      ...profile,
+      configuredAt: profile.configuredAt ?? new Date().toISOString(),
+    };
+    state.config.sandboxMode = sandboxMode;
+  });
+}
+
+export async function setSandboxMode(cwd: string, sandboxMode: SandboxMode): Promise<SwarmState> {
+  return updateState(cwd, (state) => {
+    state.config.sandboxMode = sandboxMode;
+  });
+}
+
 export async function clearConfiguration(cwd: string): Promise<SwarmState> {
   return updateState(cwd, (state) => {
-    state.config = { modelPriority: [], availableModels: [], availableModelsCheckedAt: null };
+    state.config = {
+      modelPriority: [],
+      availableModels: [],
+      availableModelsCheckedAt: null,
+      sandboxMode: "strict",
+    };
   });
 }
 
@@ -219,6 +252,7 @@ function normalizeState(value: Record<string, unknown>): SwarmState {
   state.config.modelPriority = stringArray(config.modelPriority);
   state.config.availableModels = stringArray(config.availableModels);
   state.config.availableModelsCheckedAt = stringValue(config.availableModelsCheckedAt) ?? null;
+  state.config.sandboxMode = sandboxModeValue(config.sandboxMode);
   if (Object.keys(profile).length > 0) {
     state.config.profile = {
       goal: stringValue(profile.goal),
@@ -255,6 +289,10 @@ function stringArray(value: unknown): string[] {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function sandboxModeValue(value: unknown): SandboxMode {
+  return value === "lenient" ? "lenient" : "strict";
 }
 
 async function withStateLock<T>(cwd: string, run: () => Promise<T>): Promise<T> {

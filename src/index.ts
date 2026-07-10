@@ -3,6 +3,7 @@ export type {
   TaskKind,
   WorkerMode,
   ExecutionMode,
+  SandboxMode,
   JobStatus,
   NotificationStatus,
   WorkerRequest,

@@ -11,6 +11,8 @@ import { parseArguments } from "../src/runner/args.js";
 import { runCommand, type RunnerDependencies } from "../src/runner/run.js";
 import { getJob, startJob } from "../src/state/jobs.js";
 import { defaultModelConfiguration } from "../src/state/model-config.js";
+import { detectSandboxAvailability } from "../src/sandbox/availability.js";
+import { setSandboxMode } from "../src/state/state.js";
 
 const fakeModel = {
   provider: "test-provider",
@@ -389,6 +391,7 @@ test("implement requires a clean worktree and captures Pi changes", async () => 
   execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
   execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
   fs.writeFileSync(path.join(workspace, "file.txt"), "before\n");
+  fs.writeFileSync(path.join(workspace, ".gitignore"), "cache/\n");
   execFileSync("git", ["-C", workspace, "add", "."]);
   execFileSync(
     "git",
@@ -406,6 +409,8 @@ test("implement requires a clean worktree and captures Pi changes", async () => 
       async prompt() {
         assert.equal(options.mode, "implement");
         fs.writeFileSync(path.join(workspace, "file.txt"), "after\n");
+        fs.mkdirSync(path.join(workspace, "cache"));
+        fs.writeFileSync(path.join(workspace, "cache", "artifact.bin"), "generated\n");
       },
       dispose() {},
     }),
@@ -426,6 +431,7 @@ test("implement requires a clean worktree and captures Pi changes", async () => 
   assert.equal("status" in result && result.status, "succeeded");
   assert.deepEqual("changedFiles" in result && result.changedFiles, ["file.txt"]);
   assert.match("diffStat" in result ? result.diffStat : "", /file\.txt/);
+  assert.deepEqual("runtimeSideEffects" in result && result.runtimeSideEffects, ["cache/"]);
 });
 
 test("implement rejects a dirty worktree before creating Pi session", async () => {
@@ -763,6 +769,7 @@ test("orchestrate runs exactly three readonly perspectives and records artifacts
 
 test("background submission returns an accepted job without creating a Pi session", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-background-submit-"));
+  await setSandboxMode(workspace, "lenient");
   let sessions = 0;
   const dependencies: RunnerDependencies = {
     catalog: { available: () => [fakeModel] },
@@ -799,6 +806,42 @@ test("background submission returns an accepted job without creating a Pi sessio
   assert.equal(snapshot.job.status, "queued");
   assert.equal(snapshot.job.pid, 424_242);
   assert.equal(snapshot.job.timeoutMs, 30 * 60_000);
+  assert.equal(snapshot.job.sandboxMode, "lenient");
+});
+
+test("supervised lenient jobs inject one shared sandbox runner", {
+  skip: !detectSandboxAvailability().available,
+}, async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-lenient-job-"));
+  await setSandboxMode(workspace, "lenient");
+  let receivedSandbox = false;
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Inspect with shell access",
+    createSession: async (options) => {
+      receivedSandbox = options.sandboxRunner !== undefined;
+      return {
+        subscribe(listener) {
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+          return () => {};
+        },
+        async prompt() {},
+        dispose() {},
+      };
+    },
+  };
+
+  const result = await runCommand({
+    command: "ask",
+    host: "codex",
+    promptFile: "prompt.md",
+    reconfigure: false,
+    reset: false,
+    json: true,
+  }, workspace, dependencies);
+
+  assert.equal(receivedSandbox, true);
+  assert.equal("status" in result && result.status, "succeeded");
 });
 
 test("background spawn failures become durable failed jobs", async () => {

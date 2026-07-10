@@ -2,8 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createPiEnvironment } from "../pi/environment.js";
 import { createModelCatalog, describeProviders, modelId } from "../pi/models.js";
+import { detectSandboxAvailability } from "../sandbox/availability.js";
 import { loadModelConfiguration, modelPriority, parseModelConfiguration, saveModelConfiguration, } from "../state/model-config.js";
-import { loadState, resolveWorkspaceRoot, saveProfile, setModelPriority, } from "../state/state.js";
+import { loadState, resolveWorkspaceRoot, saveProjectSettings, setModelPriority, setSandboxMode, } from "../state/state.js";
 import { discoverEndpoint, discoverLocalEndpoints, } from "./model-discovery.js";
 export async function previewProviderConnection(cwd, credential, env = process.env) {
     const normalized = normalizeCredential(credential);
@@ -75,6 +76,8 @@ export async function loadConfigurationView(cwd, env = process.env) {
             .sort((left, right) => left.name.localeCompare(right.name)),
         models: relevant.map((model) => browserModel(model, available.has(modelId(model)), configuration)),
         registryError: catalog.error?.() ?? null,
+        sandboxMode: state.config.sandboxMode ?? "strict",
+        sandboxAvailability: detectSandboxAvailability(),
     };
 }
 function browserModel(model, available, configuration) {
@@ -111,6 +114,8 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
     const profile = submission.profile
         ? await normalizeProjectProfile(cwd, submission.profile)
         : undefined;
+    const sandboxMode = normalizeSandboxMode(submission.sandboxMode, current.sandboxMode);
+    assertSandboxModeAvailable(sandboxMode);
     const candidate = parseModelConfiguration({
         version: 1,
         primary: submission.primary,
@@ -147,13 +152,33 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
     const saved = await saveModelConfiguration(cwd, candidate);
     await setModelPriority(cwd, modelPriority(saved));
     if (profile)
-        await saveProfile(cwd, profile);
+        await saveProjectSettings(cwd, profile, sandboxMode);
+    else
+        await setSandboxMode(cwd, sandboxMode);
     return loadConfigurationView(cwd, env);
 }
 export async function saveProjectProfileSubmission(cwd, submission) {
-    const profile = await normalizeProjectProfile(cwd, submission);
-    const state = await saveProfile(cwd, profile);
+    const current = await loadState(cwd);
+    const settings = "profile" in submission ? submission : { profile: submission };
+    const profile = await normalizeProjectProfile(cwd, settings.profile);
+    const sandboxMode = normalizeSandboxMode(settings.sandboxMode, current.config.sandboxMode ?? "strict");
+    assertSandboxModeAvailable(sandboxMode);
+    const state = await saveProjectSettings(cwd, profile, sandboxMode);
     return state.config.profile;
+}
+function normalizeSandboxMode(value, fallback) {
+    if (value === undefined)
+        return fallback;
+    if (value === "strict" || value === "lenient")
+        return value;
+    throw new Error("Sandbox mode must be strict or lenient");
+}
+function assertSandboxModeAvailable(mode) {
+    if (mode !== "lenient")
+        return;
+    const availability = detectSandboxAvailability();
+    if (!availability.available)
+        throw new Error(availability.reason ?? "Lenient sandboxing is unavailable");
 }
 async function projectDirectoryOptions(cwd, selected) {
     const root = await resolveWorkspaceRoot(cwd);

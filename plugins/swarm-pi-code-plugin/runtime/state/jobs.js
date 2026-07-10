@@ -9,6 +9,7 @@ export async function startJob(cwd, input) {
     const id = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
     const workerToken = randomUUID();
     const createdAt = new Date().toISOString();
+    const sandboxMode = input.sandboxMode ?? "strict";
     const directory = await jobDirectory(cwd, id);
     const request = {
         id,
@@ -16,6 +17,7 @@ export async function startJob(cwd, input) {
         kind: input.kind,
         cwd: input.cwd,
         executionMode: input.executionMode,
+        sandboxMode,
         timeoutMs: input.timeoutMs,
         ...(input.model ? { model: input.model } : {}),
         workerToken,
@@ -32,6 +34,7 @@ export async function startJob(cwd, input) {
             host: input.host,
             kind: input.kind,
             executionMode: input.executionMode,
+            sandboxMode,
             timeoutMs: input.timeoutMs,
             ...(input.model ? { model: input.model } : {}),
             workerToken,

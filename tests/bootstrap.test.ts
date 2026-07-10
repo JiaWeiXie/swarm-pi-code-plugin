@@ -16,16 +16,25 @@ test("plugin bootstrap retries a partial install until a success marker exists",
     "pi-coding-agent",
     "package.json",
   );
+  const sandboxDependency = path.join(
+    root,
+    "node_modules",
+    "@carderne",
+    "sandbox-runtime",
+    "package.json",
+  );
   const bin = path.join(root, "bin");
   const countFile = path.join(root, "npm-count.txt");
   fs.mkdirSync(scripts, { recursive: true });
   fs.mkdirSync(path.dirname(dependency), { recursive: true });
+  fs.mkdirSync(path.dirname(sandboxDependency), { recursive: true });
   fs.mkdirSync(bin, { recursive: true });
   fs.copyFileSync(
     path.join(process.cwd(), "plugins/swarm-pi-code-plugin/scripts/bootstrap.mjs"),
     path.join(scripts, "bootstrap.mjs"),
   );
   fs.writeFileSync(dependency, '{"name":"@earendil-works/pi-coding-agent"}\n');
+  fs.writeFileSync(sandboxDependency, '{"name":"@carderne/sandbox-runtime"}\n');
   const fakeNpm = path.join(bin, "npm");
   fs.writeFileSync(
     fakeNpm,

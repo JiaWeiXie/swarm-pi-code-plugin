@@ -23,6 +23,7 @@ import {
   loadState,
   resolveStateDir,
   saveProfile,
+  setSandboxMode,
   setModelPriority,
   updateState,
 } from "../src/state/state.js";
@@ -78,10 +79,12 @@ test("linked worktrees resolve one shared state directory", async () => {
     assert.equal(await resolveStateDir(worktree), path.join(repository, ".swarm-pi-code-plugin"));
 
     await setModelPriority(repository, ["test/primary", "test/fallback"]);
+    await setSandboxMode(repository, "lenient");
     assert.deepEqual((await loadState(worktree)).config.modelPriority, [
       "test/primary",
       "test/fallback",
     ]);
+    assert.equal((await loadState(worktree)).config.sandboxMode, "lenient");
   });
 });
 
@@ -108,6 +111,7 @@ test("previous swarm-pi-code state migrates with configuration and Pi jobs", asy
     assert.deepEqual(state.config.modelPriority, ["test/model"]);
     assert.equal(state.config.profile?.goal, "existing Pi project");
     assert.deepEqual(state.jobs, [{ id: "pi-job-1", status: "succeeded" }]);
+    assert.equal(state.config.sandboxMode, "strict");
     assert.equal(state.migration?.source, ".swarm-pi-code");
     assert.equal(
       fs.existsSync(path.join(repository, ".swarm-pi-code-plugin", "state.json")),
@@ -165,6 +169,7 @@ test("reset clears configuration while preserving Pi job history", async () => {
     const reset = await loadState(repository);
     assert.deepEqual(reset.config.modelPriority, []);
     assert.equal(reset.config.profile, undefined);
+    assert.equal(reset.config.sandboxMode, "strict");
     assert.deepEqual(reset.jobs, [{ id: "pi-job", status: "succeeded" }]);
   });
 });

@@ -1,8 +1,16 @@
 import fs from "node:fs/promises";
 
-import type { Host, ProviderSummary, TaskKind, WorkerResult } from "../core/contracts.js";
+import type { Host, ProviderSummary, SandboxMode, TaskKind, WorkerResult } from "../core/contracts.js";
 import { buildReviewRequest } from "../git/review.js";
-import { captureWorktreeChanges, inspectWorktree, requireCleanWorktree } from "../git/worktree.js";
+import {
+  acquireWorktreeLease,
+  assertWorktreeBaseline,
+  captureIgnoredPaths,
+  captureWorktreeChanges,
+  inspectWorktree,
+  requireCleanWorktree,
+  validateChangedPaths,
+} from "../git/worktree.js";
 import { executeSession, type RunnableSession } from "../pi/execute.js";
 import {
   createModelCatalog,
@@ -14,6 +22,7 @@ import {
   type PiModel,
 } from "../pi/models.js";
 import { createWorkerSession } from "../pi/runtime.js";
+import { createSandboxRunner, type SandboxRunner } from "../sandbox/runner.js";
 import {
   acknowledgeJob,
   attachJobProcess,
@@ -58,6 +67,7 @@ export interface RunnerDependencies {
     cwd: string;
     mode: "readonly" | "implement";
     model: PiModel;
+    sandboxRunner?: SandboxRunner;
   }): Promise<RunnableSession>;
 }
 
@@ -78,6 +88,7 @@ export type RunnerOutput =
       modelPriority: string[];
       detectedModels: string[];
       profile: SwarmProfile | null;
+      sandboxMode: SandboxMode;
       jobs: number;
     };
 
@@ -144,6 +155,7 @@ export async function runCommand(
     priority: modelPriority(modelConfiguration),
   });
   const executionMode = args.executionMode ?? "supervised";
+  const sandboxMode = state.config.sandboxMode ?? "strict";
   const timeoutMs = args.timeoutMs ?? defaultTimeoutMs(args.command);
   const job = await startJob(cwd, {
     host,
@@ -151,6 +163,7 @@ export async function runCommand(
     prompt: rawPrompt,
     cwd,
     executionMode,
+    sandboxMode,
     timeoutMs,
     ...(args.model ? { model: args.model } : {}),
   });
@@ -181,6 +194,7 @@ export async function runCommand(
     dependencies: activeDependencies,
     job,
     timeoutMs,
+    sandboxMode,
     ...(options.signal ? { signal: options.signal } : {}),
   });
 }
@@ -244,6 +258,7 @@ async function runBackgroundJob(
       dependencies: activeDependencies,
       job: { id: request.id, workerToken: request.workerToken },
       timeoutMs: request.timeoutMs,
+      sandboxMode: request.sandboxMode ?? "strict",
       signal: controller.signal,
     });
   } catch (error) {
@@ -303,6 +318,7 @@ async function runStartedJob(options: {
   dependencies: RunnerDependencies;
   job: JobHandle;
   timeoutMs: number;
+  sandboxMode: SandboxMode;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
   const kind = options.args.command as TaskKind;
@@ -312,6 +328,8 @@ async function runStartedJob(options: {
     void heartbeatJob(options.cwd, jobId, options.job.workerToken, process.pid).catch(() => {});
   }, JOB_HEARTBEAT_INTERVAL_MS);
   const deadline = Date.now() + options.timeoutMs;
+  let sandboxRunner: SandboxRunner | undefined;
+  let worktreeLease: Awaited<ReturnType<typeof acquireWorktreeLease>> | undefined;
 
   try {
     if (options.candidates.length === 0) {
@@ -325,24 +343,9 @@ async function runStartedJob(options: {
       return result;
     }
 
-    if (kind === "orchestrate") {
-      const result = await runOrchestration({
-        cwd: options.cwd,
-        host: options.host,
-        prompt: options.rawPrompt,
-        profile: options.profile,
-        candidates: options.candidates,
-        dependencies: options.dependencies,
-        deadline,
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
-      const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
-      await finishJob(options.cwd, jobId, final);
-      return final;
-    }
-
     if (kind === "implement") {
       try {
+        worktreeLease = await acquireWorktreeLease(options.cwd, jobId);
         await requireCleanWorktree(options.cwd);
       } catch (error) {
         const result = withMetadata(
@@ -354,6 +357,28 @@ async function runStartedJob(options: {
         await finishJob(options.cwd, jobId, result);
         return result;
       }
+    }
+
+    const workerMode = kind === "implement" ? "implement" : "readonly";
+    if (options.sandboxMode === "lenient") {
+      sandboxRunner = await createSandboxRunner({ cwd: options.cwd, mode: workerMode });
+    }
+
+    if (kind === "orchestrate") {
+      const result = await runOrchestration({
+        cwd: options.cwd,
+        host: options.host,
+        prompt: options.rawPrompt,
+        profile: options.profile,
+        candidates: options.candidates,
+        dependencies: options.dependencies,
+        deadline,
+        ...(sandboxRunner ? { sandboxRunner } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+      const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
+      await finishJob(options.cwd, jobId, final);
+      return final;
     }
 
     const prompt = buildWorkerPrompt({
@@ -370,18 +395,47 @@ async function runStartedJob(options: {
       candidates: options.candidates,
       dependencies: options.dependencies,
       deadline,
+      ...(sandboxRunner ? { sandboxRunner } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     });
     let diff = "";
     if (kind === "implement") {
       const changes = await captureWorktreeChanges(options.cwd);
       diff = changes.diff;
-      result = { ...result, changedFiles: changes.changedFiles, diffStat: changes.diffStat };
+      const ignored = worktreeLease
+        ? (await captureIgnoredPaths(options.cwd)).filter(
+            (entry) => !worktreeLease!.baseline.ignoredPaths.includes(entry),
+          )
+        : [];
+      try {
+        if (worktreeLease) await assertWorktreeBaseline(options.cwd, worktreeLease.baseline);
+        await validateChangedPaths(options.cwd, changes.changedFiles);
+        result = {
+          ...result,
+          changedFiles: changes.changedFiles,
+          diffStat: changes.diffStat,
+          ...(ignored.length > 0 ? { runtimeSideEffects: ignored } : {}),
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result = {
+          ...result,
+          status: "failed",
+          success: false,
+          output: `${result.output}\n\nSandbox postflight failed: ${message}`.trim(),
+          error: message,
+          changedFiles: changes.changedFiles,
+          diffStat: changes.diffStat,
+          ...(ignored.length > 0 ? { runtimeSideEffects: ignored } : {}),
+        };
+      }
     }
     const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
     await finishJob(options.cwd, jobId, final, diff);
     return final;
   } finally {
+    await sandboxRunner?.dispose().catch(() => {});
+    await worktreeLease?.release().catch(() => {});
     clearInterval(heartbeat);
   }
 }
@@ -451,6 +505,7 @@ function initStatus(
     modelPriority: priority,
     detectedModels: detected,
     profile: state.config.profile ?? null,
+    sandboxMode: state.config.sandboxMode ?? "strict",
     jobs: state.jobs.length,
   };
 }
@@ -462,6 +517,7 @@ async function runWithFallback(options: {
   mode: "readonly" | "implement";
   candidates: PiModel[];
   dependencies: RunnerDependencies;
+  sandboxRunner?: SandboxRunner;
   deadline: number;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
@@ -471,7 +527,12 @@ async function runWithFallback(options: {
     if (remainingMs <= 0) return statusResult(options.kind, "timed-out", "Pi job timed out.");
     const model = options.candidates[index]!;
     try {
-      const session = await options.dependencies.createSession({ cwd: options.cwd, mode: options.mode, model });
+      const session = await options.dependencies.createSession({
+        cwd: options.cwd,
+        mode: options.mode,
+        model,
+        ...(options.sandboxRunner ? { sandboxRunner: options.sandboxRunner } : {}),
+      });
       last = await executeSession({
         kind: options.kind,
         model: modelId(model),
@@ -499,6 +560,7 @@ async function runOrchestration(options: {
   profile?: SwarmProfile | undefined;
   candidates: PiModel[];
   dependencies: RunnerDependencies;
+  sandboxRunner?: SandboxRunner;
   deadline: number;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
@@ -515,6 +577,7 @@ async function runOrchestration(options: {
         mode: "readonly",
         candidates: options.candidates,
         dependencies: options.dependencies,
+        ...(options.sandboxRunner ? { sandboxRunner: options.sandboxRunner } : {}),
         deadline: options.deadline,
         ...(options.signal ? { signal: options.signal } : {}),
         prompt: buildWorkerPrompt({

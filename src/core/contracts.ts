@@ -6,6 +6,8 @@ export type WorkerMode = "readonly" | "implement";
 
 export type ExecutionMode = "supervised" | "background";
 
+export type SandboxMode = "strict" | "lenient";
+
 export type WorkerStatus =
   | "succeeded"
   | "failed"
@@ -25,6 +27,7 @@ export interface WorkerRequest {
   prompt: string;
   mode: WorkerMode;
   executionMode: ExecutionMode;
+  sandboxMode: SandboxMode;
   timeoutMs: number;
   model?: string;
 }
@@ -37,6 +40,7 @@ export interface WorkerResult {
   model: string | null;
   changedFiles: string[];
   diffStat: string;
+  runtimeSideEffects?: string[];
   verification: {
     status: "not-run" | "passed" | "failed";
     commands: string[];

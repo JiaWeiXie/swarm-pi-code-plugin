@@ -6,13 +6,10 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dependency = path.join(
-  pluginRoot,
-  "node_modules",
-  "@earendil-works",
-  "pi-coding-agent",
-  "package.json",
-);
+const dependencies = [
+  ["@earendil-works", "pi-coding-agent"],
+  ["@carderne", "sandbox-runtime"],
+].map((segments) => path.join(pluginRoot, "node_modules", ...segments, "package.json"));
 const installLock = path.join(pluginRoot, ".installing-runtime");
 const runtimeMarker = path.join(pluginRoot, "node_modules", ".swarm-pi-runtime-ready");
 
@@ -37,8 +34,8 @@ export function ensureRuntime() {
       if (result.stderr) process.stderr.write(result.stderr);
       throw new Error("Unable to install swarm-pi-code-plugin runtime dependencies.");
     }
-    if (!existsSync(dependency)) {
-      throw new Error("Pi runtime installation completed without the pinned dependency.");
+    if (!dependencies.every(existsSync)) {
+      throw new Error("Pi runtime installation completed without all pinned dependencies.");
     }
     writeFileSync(runtimeMarker, "ready\n", { mode: 0o600 });
   } finally {
@@ -67,7 +64,7 @@ function acquireInstallLock() {
 }
 
 function runtimeReady() {
-  return existsSync(runtimeMarker) && existsSync(dependency);
+  return existsSync(runtimeMarker) && dependencies.every(existsSync);
 }
 
 function assertNodeVersion() {

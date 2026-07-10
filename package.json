@@ -17,6 +17,7 @@
     "check": "npm run typecheck && npm test"
   },
   "dependencies": {
+    "@carderne/sandbox-runtime": "0.0.49",
     "@earendil-works/pi-coding-agent": "0.80.6"
   },
   "devDependencies": {

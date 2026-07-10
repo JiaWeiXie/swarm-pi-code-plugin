@@ -130,6 +130,19 @@ export function renderConfigurationPage(
             </details>
           </div>
         </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Execution safety</h2><p>Choose whether delegated workers may run shell commands.</p></div>
+          <div class="form-control">
+            <div class="scope-toggle" role="radiogroup" aria-label="Sandbox execution mode">
+              <button id="sandbox-strict" type="button" role="radio">Strict</button>
+              <button id="sandbox-lenient" type="button" role="radio">Lenient</button>
+            </div>
+            <p id="sandbox-backend" class="field-hint"></p>
+            <div id="sandbox-warning" class="notice warning sandbox-warning" hidden>
+              Shell commands run inside an OS sandbox and may access the network. Project source visible to the worker could be sent to external services.
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="review-screen" class="screen" hidden>
@@ -140,6 +153,7 @@ export function renderConfigurationPage(
         <div class="review-section"><h2>Project goal</h2><div id="review-goal" class="review-value review-text"></div></div>
         <div class="review-section"><h2>Working area</h2><div id="review-directories" class="review-list"></div></div>
         <div class="review-section"><h2>Delegated work</h2><div id="review-tasks" class="review-list"></div></div>
+        <div class="review-section"><h2>Execution safety</h2><div id="review-sandbox" class="review-value"></div></div>
       </section>
 
       <section id="closed-screen" class="screen completion-screen" hidden>
@@ -347,6 +361,7 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 .mode-tabs button.active { color: #183b36; background: #fff; box-shadow: 0 1px 2px rgba(21,35,32,.08); }
 .dialog-panel label:not(:first-child) { margin-top: 16px; }
 .field-hint { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.sandbox-warning { margin-top: 12px; }
 .optional { color: var(--muted); font-weight: 500; }
 .wide-button { width: 100%; margin-top: 18px; }
 .discovery-result { margin-top: 16px; padding: 12px; border: 1px solid #a9d2c0; border-radius: 6px; color: #215842; background: var(--green-soft); }
@@ -424,6 +439,7 @@ const clientScript = String.raw`
     editingCustomIndex: -1,
     dialogMode: "cloud",
     closed: false,
+    sandboxMode: boot.sandboxMode === "lenient" ? "lenient" : "strict",
     profile: {
       goal: savedProfile?.goal || "",
       scope: savedProfile?.dirs?.length ? "selected" : "all",
@@ -655,6 +671,16 @@ const clientScript = String.raw`
       },
     })));
     $("custom-tasks").value = state.profile.customTasks.join(", ");
+    const lenient = state.sandboxMode === "lenient";
+    $("sandbox-strict").className = lenient ? "" : "active";
+    $("sandbox-lenient").className = lenient ? "active" : "";
+    $("sandbox-strict").setAttribute("aria-checked", String(!lenient));
+    $("sandbox-lenient").setAttribute("aria-checked", String(lenient));
+    $("sandbox-lenient").disabled = !boot.sandboxAvailability.available;
+    $("sandbox-backend").textContent = boot.sandboxAvailability.available
+      ? "Available through " + boot.sandboxAvailability.label + "."
+      : boot.sandboxAvailability.reason;
+    $("sandbox-warning").hidden = !lenient;
   }
   function checkRow({value,label,description,checked,onChange}) {
     const row = document.createElement("label"), input = document.createElement("input"), copy = document.createElement("span");
@@ -697,6 +723,9 @@ const clientScript = String.raw`
     profile.dirs.forEach(value => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = value; directories.append(row); });
     const tasks = $("review-tasks"); tasks.replaceChildren();
     profile.tasks.forEach(value => { const known = taskTypes.find(item => item.value === value), row = document.createElement("div"); row.className = "review-item"; row.textContent = known?.label || value; tasks.append(row); });
+    $("review-sandbox").textContent = state.sandboxMode === "lenient"
+      ? "Lenient - sandboxed shell and outbound network enabled"
+      : "Strict - scoped Pi tools only";
   }
   function render() {
     $("full-steps").hidden = setupMode !== "full"; $("project-steps").hidden = setupMode !== "project";
@@ -836,6 +865,12 @@ const clientScript = String.raw`
     state.profile.customTasks = $("custom-tasks").value.split(",").map(value => value.trim()).filter(Boolean);
     clearProfileError();
   });
+  $("sandbox-strict").addEventListener("click", () => { state.sandboxMode = "strict"; renderProject(); });
+  $("sandbox-lenient").addEventListener("click", () => {
+    if (!boot.sandboxAvailability.available) return;
+    state.sandboxMode = "lenient";
+    renderProject();
+  });
   $("next-button").addEventListener("click", () => { if (state.phase === 3 && !validateProject()) return; setPhase(Math.min(4, state.phase + 1)); });
   $("back-button").addEventListener("click", () => setPhase(Math.max(initialPhase, state.phase - 1)));
   document.querySelectorAll("[data-step]").forEach(button => button.addEventListener("click", () => { const step = Number(button.dataset.step); if (step >= initialPhase && step <= state.phase) setPhase(step); }));
@@ -843,8 +878,8 @@ const clientScript = String.raw`
     const status = $("save-status"), button = $("save-button"); status.className = "save-status"; status.textContent = "Saving configuration..."; button.disabled = true;
     try {
       const profile = projectProfile();
-      if (setupMode === "project") await post("/api/save-profile", {profile});
-      else await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,credentials:Object.entries(state.credentials).map(([provider,apiKey])=>({provider,apiKey})),profile});
+      if (setupMode === "project") await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode});
+      else await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,credentials:Object.entries(state.credentials).map(([provider,apiKey])=>({provider,apiKey})),profile,sandboxMode:state.sandboxMode});
       showCompletion(setupMode === "project" ? "Project setup saved" : "Configuration saved", "Swarm Pi will use these project settings for delegated work. You can close this tab.", true);
     } catch (error) { status.className = "save-status error"; status.textContent = error.message; button.disabled = false; }
   });

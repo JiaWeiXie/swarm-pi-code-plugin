@@ -54,6 +54,14 @@ test("configuration page starts from connections and uses the original Swarm Pi 
     providerCatalog: [{ id: "openai", name: "OpenAI" }],
     models: [],
     registryError: null,
+    sandboxMode: "strict",
+    sandboxAvailability: {
+      available: true,
+      backend: "macos-seatbelt",
+      label: "macOS Seatbelt",
+      reason: null,
+      warnings: [],
+    },
   }, "test-nonce");
 
   assert.match(html, /Connect an AI service/);
@@ -75,12 +83,22 @@ test("project-only page starts from the guided project setup", () => {
     providerCatalog: [],
     models: [],
     registryError: null,
+    sandboxMode: "lenient",
+    sandboxAvailability: {
+      available: true,
+      backend: "macos-seatbelt",
+      label: "macOS Seatbelt",
+      reason: null,
+      warnings: [],
+    },
   }, "test-nonce", "project");
 
   assert.match(html, /"setupMode":"project"/);
   assert.match(html, /What should this project accomplish/);
   assert.match(html, /Selected folders/);
   assert.match(html, /Delegated work/);
+  assert.match(html, /Execution safety/);
+  assert.match(html, /sandboxed shell and outbound network enabled/);
   assert.match(html, /\/api\/save-profile/);
 });
 
@@ -88,14 +106,18 @@ test("project profile save validates scope and does not create model configurati
   const { workspace } = fixture();
   fs.mkdirSync(path.join(workspace, "src"));
   const profile = await saveProjectProfileSubmission(workspace, {
-    goal: "Ship a dependable project setup flow",
-    dirs: ["src"],
-    tasks: ["implementation", "code-review"],
+    profile: {
+      goal: "Ship a dependable project setup flow",
+      dirs: ["src"],
+      tasks: ["implementation", "code-review"],
+    },
+    sandboxMode: "strict",
   });
 
   assert.equal(profile.goal, "Ship a dependable project setup flow");
   assert.deepEqual(profile.dirs, ["src"]);
   assert.deepEqual(profile.tasks, ["implementation", "code-review"]);
+  assert.equal((await loadState(workspace)).config.sandboxMode, "strict");
   assert.equal(fs.existsSync(path.join(workspace, ".swarm-pi-code-plugin", "model.json")), false);
   await assert.rejects(
     () => saveProjectProfileSubmission(workspace, { goal: "Invalid", dirs: ["../outside"], tasks: ["analysis"] }),

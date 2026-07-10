@@ -18,6 +18,9 @@ flowchart TB
     Q --> I[Scoped implementation Pi session]
     O --> F[Repository evidence]
     I --> W[Assigned Git worktree]
+    R --> B{Sandbox mode}
+    B --> T[Strict scoped tools]
+    B --> L[Lenient OS-sandboxed Bash]
     R --> D[.swarm-pi-code-plugin]
     D --> M[model.json]
     D --> S[state.json and jobs]
@@ -72,9 +75,10 @@ Task commands accept `--execution-mode supervised|background` and
 an accepted job ID after durable artifacts and a detached worker both exist;
 `implement` rejects background mode.
 
-The runner creates one in-memory Pi session per delegated job. Read-only jobs
-use repository inspection tools. Implementation jobs use read, grep, find, ls,
-write, and edit, but never a generic shell tool. Pi provider failures are read
+The runner creates one in-memory Pi session per delegated model attempt.
+Strict jobs use scoped repository tools only. Lenient jobs share one job-level
+sandbox manager and add Bash; orchestration perspectives share that manager so
+parallel sessions cannot reset each other's process boundary. Pi provider failures are read
 from the terminal assistant message rather than inferred from whether
 `prompt()` rejected; only a terminal `stop` is successful.
 
@@ -88,12 +92,20 @@ leases, and cancellation requests before returning state.
 - `ask`, `review`, `plan`, and orchestration perspectives are read-only.
 - `implement` requires explicit user mutation intent.
 - `implement` requires a clean assigned worktree before a Pi session starts.
+- `implement` holds an exclusive lease for the assigned worktree until
+  postflight capture completes.
 - Scoped write and edit operations reject traversal and symlinks that resolve
   outside the assigned worktree.
 - Once an implementation session writes files, the runner does not start a
   second fallback model in the same job.
-- The host captures tracked and untracked changes after the session.
-- Pi cannot commit, push, switch branches, alter worktrees, or run verification.
+- The host captures tracked, untracked, and newly created ignored side effects
+  after the session, then validates HEAD and changed path types.
+- Lenient Bash writes directly to the assigned worktree under the same user ID;
+  there is no staging copy or automatic patch application.
+- Git metadata and shared plugin state are denied paths. The host remains the
+  only owner of commits, pushes, branch changes, verification, and delivery.
+- Cancellation and failure preserve partial worktree changes for host review;
+  the runner never performs an automatic rollback.
 
 ## State Ownership
 
@@ -114,9 +126,9 @@ worktrees normally observe the same setup:
 ```
 
 `model.json` is the canonical provider and model file. `state.json` stores the
-project goal, directory scope, delegated task types, migration metadata, and
-job index. State updates use an inter-process lock, a same-directory temporary
-file, and an atomic rename.
+project goal, directory scope, delegated task types, sandbox mode, migration
+metadata, and job index. State updates use an inter-process lock, a
+same-directory temporary file, and an atomic rename.
 
 `SWARM_PI_CODE_PLUGIN_DATA_DIR` can override the resolved data directory. The
 current worktree remains the Pi session working directory even when its shared
@@ -147,10 +159,10 @@ ephemeral port, uses a random per-session token, rejects non-loopback and
 cross-origin writes, applies a restrictive CSP, limits request and response
 sizes, and shuts down after save, close, or timeout.
 
-Full setup saves model configuration and project profile together. Project-only
-setup starts at **Project setup**, pre-populates the existing profile, and
-writes only `state.config.profile`. Neither flow deletes jobs or global Pi
-credentials.
+Full setup saves model configuration, project profile, and sandbox mode
+together. Project-only setup starts at **Project setup**, pre-populates the
+existing project settings, and writes `state.config.profile` plus
+`state.config.sandboxMode`. Neither flow deletes jobs or global Pi credentials.
 
 ## Migration
 

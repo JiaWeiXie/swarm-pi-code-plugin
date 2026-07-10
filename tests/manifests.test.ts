@@ -97,6 +97,7 @@ test("plugin package contains both host adapters and a self-contained runner", (
     dependencies: Record<string, string>;
   };
   assert.equal(pluginPackage.dependencies["@earendil-works/pi-coding-agent"], "0.80.6");
+  assert.equal(pluginPackage.dependencies["@carderne/sandbox-runtime"], "0.0.49");
 
   execFileSync(process.execPath, ["--check", path.join(pluginRoot, "scripts/bootstrap.mjs")]);
   execFileSync(process.execPath, ["--check", path.join(pluginRoot, "scripts/pi-runner.mjs")]);

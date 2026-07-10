@@ -5,6 +5,7 @@ import { once } from "node:events";
 
 import type { Host } from "../core/contracts.js";
 import { resolveModelConfigurationFile } from "../state/model-config.js";
+import { loadState } from "../state/state.js";
 import {
   discoverConfigurationEndpoint,
   discoverLocalConfigurationEndpoints,
@@ -13,7 +14,7 @@ import {
   saveConfigurationSubmission,
   saveProjectProfileSubmission,
   type ConfigurationSubmission,
-  type ProjectProfileSubmission,
+  type ProjectSettingsSubmission,
 } from "./configuration-service.js";
 import { EndpointDiscoveryError, type EndpointDiscoveryRequest } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
@@ -89,10 +90,12 @@ export async function startConfigurationServer(
       if (request.method === "POST" && url.pathname === "/api/save-profile") {
         assertJsonRequest(request, origin);
         const body = await readJsonBody(request);
-        const profile = await saveProjectProfileSubmission(cwd, normalizeProfileSubmission(body));
+        const settings = normalizeProjectSubmission(body);
+        const profile = await saveProjectProfileSubmission(cwd, settings);
+        const sandboxMode = (await loadState(cwd)).config.sandboxMode ?? "strict";
         response.setHeader("Connection", "close");
         response.once("finish", () => void finish("saved"));
-        json(response, 200, { saved: true, profile });
+        json(response, 200, { saved: true, profile, sandboxMode });
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/discover") {
@@ -176,7 +179,7 @@ export async function startConfigurationServer(
   };
 }
 
-function normalizeProfileSubmission(value: unknown): ProjectProfileSubmission {
+function normalizeProjectSubmission(value: unknown): ProjectSettingsSubmission {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new HttpError(400, "Project profile request must be a JSON object");
   }
@@ -185,7 +188,12 @@ function normalizeProfileSubmission(value: unknown): ProjectProfileSubmission {
   if (typeof profile !== "object" || profile === null || Array.isArray(profile)) {
     throw new HttpError(400, "Project profile is required");
   }
-  return profile as unknown as ProjectProfileSubmission;
+  return {
+    profile: profile as ProjectSettingsSubmission["profile"],
+    ...(record.sandboxMode !== undefined
+      ? { sandboxMode: record.sandboxMode as ProjectSettingsSubmission["sandboxMode"] }
+      : {}),
+  };
 }
 
 function normalizeDiscoveryRequest(value: unknown): EndpointDiscoveryRequest {

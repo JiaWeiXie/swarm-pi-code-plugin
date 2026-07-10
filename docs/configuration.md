@@ -32,7 +32,8 @@ The shared workspace data directory contains two files with distinct roles:
   the primary model, ordered fallbacks, and non-secret custom provider
   definitions.
 - `state.json` contains the project profile, job index, migration metadata, and
-  a compatibility mirror of model priority for older plugin releases.
+  sandbox mode, plus a compatibility mirror of model priority for older plugin
+  releases.
 
 Linked Git worktrees resolve the same shared data directory and therefore read
 the same `model.json`.
@@ -125,7 +126,7 @@ setup session, not a daemon.
 7. The user chooses a primary model and optional ordered fallbacks from models
    on usable connections.
 8. Project setup asks for one project goal, whole-project or selected-folder
-   scope, and one or more delegated task types using separate controls.
+   scope, delegated task types, and strict or lenient execution safety.
 9. Review shows the complete model and project profile before save.
 10. The server validates the complete draft, writes `model.json` atomically,
     updates the shared project profile and compatibility priority mirror,
@@ -145,9 +146,23 @@ next action instead of leaving a disabled form on screen.
 
 `/swarm-pi-code-plugin:project` and `$swarm-pi-code-plugin-project` launch the
 same page in project-only mode. This mode starts at **Project setup**, shows a
-profile-only Review, and writes only `state.config.profile`. It pre-populates
-the current goal, directories, and task types and is safe to run repeatedly;
-Provider, model priority, credentials, and jobs are not rewritten.
+project-only Review, and writes `state.config.profile` plus
+`state.config.sandboxMode`. It pre-populates the current goal, directories,
+task types, and safety mode and is safe to run repeatedly; Provider, model
+priority, credentials, and jobs are not rewritten.
+
+## Sandbox Setting
+
+`state.config.sandboxMode` is `strict` or `lenient`; missing values from older
+state files normalize to `strict`. The browser disables lenient mode when the
+current platform or required backend dependencies are unavailable.
+
+Strict mode exposes only the existing scoped Pi tools. Lenient mode adds an
+OS-sandboxed Bash tool, permits outbound network access, and displays a source
+exfiltration warning. Its shell uses an isolated HOME/TMP and does not inherit
+provider credentials, SSH agent sockets, or other host secrets. Saving a new
+mode affects newly submitted jobs only because each durable job stores its
+resolved sandbox mode in `request.json`.
 
 Reconfiguration opens the connection overview instead of the raw provider
 form. Existing connections can be refreshed, edited, or removed. Refreshing a

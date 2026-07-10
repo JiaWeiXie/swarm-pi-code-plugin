@@ -7,7 +7,12 @@ const execFileAsync = promisify(execFile);
 export function defaultState() {
     return {
         version: 1,
-        config: { modelPriority: [], availableModels: [], availableModelsCheckedAt: null },
+        config: {
+            modelPriority: [],
+            availableModels: [],
+            availableModelsCheckedAt: null,
+            sandboxMode: "strict",
+        },
         jobs: [],
     };
 }
@@ -90,9 +95,28 @@ export async function saveProfile(cwd, profile) {
         state.config.profile = { ...profile, configuredAt: profile.configuredAt ?? new Date().toISOString() };
     });
 }
+export async function saveProjectSettings(cwd, profile, sandboxMode) {
+    return updateState(cwd, (state) => {
+        state.config.profile = {
+            ...profile,
+            configuredAt: profile.configuredAt ?? new Date().toISOString(),
+        };
+        state.config.sandboxMode = sandboxMode;
+    });
+}
+export async function setSandboxMode(cwd, sandboxMode) {
+    return updateState(cwd, (state) => {
+        state.config.sandboxMode = sandboxMode;
+    });
+}
 export async function clearConfiguration(cwd) {
     return updateState(cwd, (state) => {
-        state.config = { modelPriority: [], availableModels: [], availableModelsCheckedAt: null };
+        state.config = {
+            modelPriority: [],
+            availableModels: [],
+            availableModelsCheckedAt: null,
+            sandboxMode: "strict",
+        };
     });
 }
 async function readLegacyState(cwd) {
@@ -152,6 +176,7 @@ function normalizeState(value) {
     state.config.modelPriority = stringArray(config.modelPriority);
     state.config.availableModels = stringArray(config.availableModels);
     state.config.availableModelsCheckedAt = stringValue(config.availableModelsCheckedAt) ?? null;
+    state.config.sandboxMode = sandboxModeValue(config.sandboxMode);
     if (Object.keys(profile).length > 0) {
         state.config.profile = {
             goal: stringValue(profile.goal),
@@ -180,6 +205,9 @@ function stringArray(value) {
 }
 function stringValue(value) {
     return typeof value === "string" ? value : undefined;
+}
+function sandboxModeValue(value) {
+    return value === "lenient" ? "lenient" : "strict";
 }
 async function withStateLock(cwd, run) {
     const directory = await resolveStateDir(cwd);

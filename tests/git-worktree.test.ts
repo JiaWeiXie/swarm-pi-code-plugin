@@ -6,9 +6,12 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  acquireWorktreeLease,
+  assertWorktreeBaseline,
   captureWorktreeChanges,
   inspectWorktree,
   requireCleanWorktree,
+  validateChangedPaths,
 } from "../src/git/worktree.js";
 
 function repositoryFixture(): string {
@@ -55,4 +58,34 @@ test("change capture reports tracked and untracked files after implementation", 
   assert.match(changes.diff, /new\.txt/);
   assert.match(changes.diffStat, /tracked\.txt/);
   assert.match(changes.diffStat, /new\.txt \(untracked\)/);
+});
+
+test("implementation leases serialize writers and preserve the HEAD baseline", async () => {
+  const repository = repositoryFixture();
+  const lease = await acquireWorktreeLease(repository, "job-one");
+  await assert.rejects(
+    () => acquireWorktreeLease(repository, "job-two"),
+    /already owns this worktree/i,
+  );
+  await assertWorktreeBaseline(repository, lease.baseline);
+  await lease.release();
+
+  const replacement = await acquireWorktreeLease(repository, "job-two");
+  await replacement.release();
+});
+
+test("a failed worktree baseline does not leave a stale lease", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-non-git-"));
+  await assert.rejects(() => acquireWorktreeLease(workspace, "failed-job"));
+  const leaseDirectory = path.join(workspace, ".swarm-pi-code-plugin", "worktree-leases");
+  assert.deepEqual(fs.readdirSync(leaseDirectory), []);
+});
+
+test("postflight rejects changed symlinks that escape the worktree", async () => {
+  const repository = repositoryFixture();
+  fs.symlinkSync(os.tmpdir(), path.join(repository, "outside-link"));
+  await assert.rejects(
+    () => validateChangedPaths(repository, ["outside-link"]),
+    /symlink points outside/i,
+  );
 });

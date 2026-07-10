@@ -1,6 +1,7 @@
 import { createAgentSession, SessionManager, SettingsManager, type CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
 
 import type { WorkerMode } from "../core/contracts.js";
+import type { SandboxRunner } from "../sandbox/runner.js";
 import type { ModelConfiguration } from "../state/model-config.js";
 import { createPiEnvironment } from "./environment.js";
 import { createScopedMutationTools } from "./scoped-tools.js";
@@ -11,6 +12,7 @@ export interface CreateWorkerSessionOptions {
   mode: WorkerMode;
   model?: CreateAgentSessionOptions["model"];
   modelConfiguration: ModelConfiguration;
+  sandboxRunner?: SandboxRunner;
 }
 
 export async function createWorkerSession(options: CreateWorkerSessionOptions) {
@@ -23,7 +25,10 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
     sessionManager: SessionManager.inMemory(),
     settingsManager: SettingsManager.inMemory(),
     tools: toolsForMode(options.mode),
-    customTools: options.mode === "implement" ? createScopedMutationTools(options.cwd) : [],
+    customTools: [
+      ...(options.mode === "implement" ? createScopedMutationTools(options.cwd) : []),
+      ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
+    ],
     ...(options.model ? { model: options.model } : {}),
   });
 }

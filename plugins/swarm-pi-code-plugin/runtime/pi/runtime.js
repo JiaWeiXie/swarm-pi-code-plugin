@@ -11,7 +11,10 @@ export async function createWorkerSession(options) {
         sessionManager: SessionManager.inMemory(),
         settingsManager: SettingsManager.inMemory(),
         tools: toolsForMode(options.mode),
-        customTools: options.mode === "implement" ? createScopedMutationTools(options.cwd) : [],
+        customTools: [
+            ...(options.mode === "implement" ? createScopedMutationTools(options.cwd) : []),
+            ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
+        ],
         ...(options.model ? { model: options.model } : {}),
     });
 }

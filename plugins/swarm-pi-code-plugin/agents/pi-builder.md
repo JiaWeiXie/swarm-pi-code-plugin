@@ -16,8 +16,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/pi-runner.mjs" implement \
 ```
 
 4. Delete the temporary file.
-5. Inspect every returned changed file and the actual Git diff. Run project verification commands from the host; Pi cannot run shell commands.
+5. Inspect every returned changed file, the actual Git diff, and any `runtimeSideEffects`. Run project verification commands from the host; lenient Pi may run sandboxed commands, but it does not own verification.
 6. Fix problems directly or run one new, explicitly scoped Pi implementation only after restoring a clean worktree.
 7. Report Pi model/fallback, changed files, host verification, and remaining risks, then acknowledge the terminal job.
 
-Never run implementation in background, mutate the same worktree concurrently, commit, push, switch branches, or claim verification was run when the result says `not-run`.
+Failures, cancellation, and timeout can leave partial changes. Never roll them back automatically, run implementation in background, mutate the same worktree concurrently, commit, push, switch branches, or claim verification was run when the result says `not-run`.
