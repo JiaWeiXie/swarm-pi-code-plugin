@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -16,6 +17,53 @@ test("Claude and Codex manifests use the swarm-pi-code identity", () => {
   assert.equal(codex.name, "swarm-pi-code");
   assert.equal(claude.version, "0.1.0");
   assert.equal(codex.version, "0.1.0");
+  assert.equal(codex.skills, "./skills/");
+});
+
+test("plugin package contains both host adapters and a self-contained runner", () => {
+  const pluginRoot = path.join(repoRoot, "plugins/swarm-pi-code");
+  const skills = ["configure", "ask", "review", "plan", "implement", "orchestrate"];
+  for (const skill of skills) {
+    const file = path.join(
+      pluginRoot,
+      "skills",
+      `swarm-pi-code-${skill}`,
+      "SKILL.md",
+    );
+    assert.equal(fs.existsSync(file), true, `missing Codex skill: ${skill}`);
+    const source = fs.readFileSync(file, "utf8");
+    assert.match(source, /pi-runner\.mjs/);
+    assert.match(source, /--host "\$HOST"/);
+  }
+
+  for (const relative of [
+    "commands/init.md",
+    "agents/pi-worker.md",
+    "agents/pi-builder.md",
+    "scripts/bootstrap.mjs",
+    "scripts/pi-runner.mjs",
+    "runtime/cli.js",
+    "package.json",
+    "package-lock.json",
+  ]) {
+    assert.equal(fs.existsSync(path.join(pluginRoot, relative)), true, `missing plugin file: ${relative}`);
+  }
+
+  const implementation = fs.readFileSync(
+    path.join(pluginRoot, "skills/swarm-pi-code-implement/SKILL.md"),
+    "utf8",
+  );
+  assert.match(implementation, /explicit mutation intent/i);
+  assert.match(implementation, /clean worktree/i);
+  assert.match(implementation, /verification from the host/i);
+
+  const pluginPackage = readJson("plugins/swarm-pi-code/package.json") as {
+    dependencies: Record<string, string>;
+  };
+  assert.equal(pluginPackage.dependencies["@earendil-works/pi-coding-agent"], "0.80.6");
+
+  execFileSync(process.execPath, ["--check", path.join(pluginRoot, "scripts/bootstrap.mjs")]);
+  execFileSync(process.execPath, ["--check", path.join(pluginRoot, "scripts/pi-runner.mjs")]);
 });
 
 test("repo marketplaces point at the shared plugin root", () => {

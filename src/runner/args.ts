@@ -13,7 +13,9 @@ export interface RunnerArguments {
   reconfigure: boolean;
   reset: boolean;
   modelPriority?: string[];
+  modelPriorityFile?: string;
   profile?: Record<string, unknown>;
+  profileFile?: string;
   json: boolean;
 }
 
@@ -69,8 +71,14 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--set-model-priority":
         parsed.modelPriority = parseStringArray(readValue(argv, ++index, argument), argument);
         break;
+      case "--set-model-priority-file":
+        parsed.modelPriorityFile = readValue(argv, ++index, argument);
+        break;
       case "--save-profile":
         parsed.profile = parseObject(readValue(argv, ++index, argument), argument);
+        break;
+      case "--save-profile-file":
+        parsed.profileFile = readValue(argv, ++index, argument);
         break;
       default:
         throw new Error(`Unknown argument: ${argument}`);

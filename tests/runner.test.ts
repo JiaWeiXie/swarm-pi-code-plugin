@@ -269,6 +269,35 @@ test("init replaces validated model priority and preserves it in status", async 
   );
 });
 
+test("init reads model priority and profile from host-created JSON files", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-init-files-"));
+  const priorityFile = path.join(workspace, "priority.json");
+  const profileFile = path.join(workspace, "profile.json");
+  fs.writeFileSync(priorityFile, '["test-provider/test-model"]');
+  fs.writeFileSync(profileFile, '{"goal":"quoted user input: it\'s safe","dirs":["src"]}');
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: (file) => fs.promises.readFile(file, "utf8"),
+    createSession: async () => {
+      throw new Error("unused");
+    },
+  };
+  const result = await runCommand(
+    {
+      command: "init",
+      reconfigure: true,
+      reset: false,
+      modelPriorityFile: priorityFile,
+      profileFile,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+  assert.deepEqual("modelPriority" in result && result.modelPriority, ["test-provider/test-model"]);
+  assert.equal("profile" in result && result.profile?.goal, "quoted user input: it's safe");
+});
+
 test("readonly jobs fall back through configured model priority", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-fallback-"));
   const dependencies: RunnerDependencies = {

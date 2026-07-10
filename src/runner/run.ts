@@ -67,7 +67,7 @@ export async function runCommand(
 ): Promise<RunnerOutput> {
   const available = dependencies.catalog.available();
   if (args.command === "models") return modelInventory(available, await loadState(cwd));
-  if (args.command === "init") return handleInit(args, cwd, available);
+  if (args.command === "init") return handleInit(args, cwd, available, dependencies);
 
   const host = args.host!;
   const state = await loadState(cwd);
@@ -138,6 +138,7 @@ async function handleInit(
   args: RunnerArguments,
   cwd: string,
   available: PiModel[],
+  dependencies: RunnerDependencies,
 ): Promise<Extract<RunnerOutput, { configured: boolean }>> {
   if (args.reset) {
     const state = await clearConfiguration(cwd);
@@ -146,13 +147,35 @@ async function handleInit(
 
   const detected = available.map(modelId);
   await setAvailableModels(cwd, detected);
-  if (args.modelPriority) {
-    const unavailable = args.modelPriority.filter((model) => !detected.includes(model));
+  const modelPriority = args.modelPriority ?? (args.modelPriorityFile
+    ? parseStringArrayJson(await dependencies.readFile(args.modelPriorityFile), "model priority file")
+    : undefined);
+  if (modelPriority) {
+    const unavailable = modelPriority.filter((model) => !detected.includes(model));
     if (unavailable.length) throw new Error(`Selected Pi models are not available: ${unavailable.join(", ")}`);
-    await setModelPriority(cwd, args.modelPriority);
+    await setModelPriority(cwd, modelPriority);
   }
-  if (args.profile) await saveProfile(cwd, parseProfile(args.profile));
+  const profile = args.profile ?? (args.profileFile
+    ? parseObjectJson(await dependencies.readFile(args.profileFile), "profile file")
+    : undefined);
+  if (profile) await saveProfile(cwd, parseProfile(profile));
   return initStatus(await loadState(cwd), detected, args, false);
+}
+
+function parseStringArrayJson(value: string, label: string): string[] {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+    throw new Error(`${label} must contain a JSON string array`);
+  }
+  return parsed;
+}
+
+function parseObjectJson(value: string, label: string): Record<string, unknown> {
+  const parsed = JSON.parse(value) as unknown;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${label} must contain a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function initStatus(

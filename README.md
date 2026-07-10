@@ -4,8 +4,8 @@ Dual-host plugin project for Claude Code and Codex. The host agent owns intent,
 approvals, validation, and delivery; an embedded Pi coding-agent session performs
 bounded read-only or implementation work.
 
-This repository is a clean rewrite of `swarm-code-plugin`. It does not contain
-an OpenCode compatibility runtime.
+This repository is a clean rewrite of `swarm-code-plugin`. Pi is the only
+delegated worker engine.
 
 ## Development
 
@@ -22,6 +22,63 @@ Runtime baseline:
 - Node.js 24.15.0
 - `@earendil-works/pi-coding-agent` 0.80.6
 - TypeScript strict mode
+
+Installed plugins require Node.js 22.19.0 or newer, matching the pinned Pi SDK.
+The repository itself develops and verifies with the mise-pinned Node 24.15.0.
+
+## Install
+
+### Claude Code
+
+Add the GitHub repository as a marketplace, then install the named plugin:
+
+```bash
+claude plugin marketplace add https://github.com/JiaWeiXie/swarm-pi-code-plugin
+claude plugin install swarm-pi-code@swarm-pi-code
+```
+
+Restart Claude Code or run `/reload`, then configure the project:
+
+```text
+/swarm-pi-code:init
+/swarm-pi-code:init --reconfigure
+```
+
+For local development:
+
+```bash
+claude --plugin-dir /absolute/path/to/swarm-pi-code-plugin/plugins/swarm-pi-code
+```
+
+### Codex
+
+This repository contains a non-default local marketplace. Add its repository
+root once, then install by plugin and marketplace name:
+
+```bash
+codex plugin marketplace add /absolute/path/to/swarm-pi-code-plugin
+codex plugin add swarm-pi-code@swarm-pi-code-local
+```
+
+Start a new Codex task so skills are reloaded. Available skills are:
+
+```text
+$swarm-pi-code-configure
+$swarm-pi-code-ask
+$swarm-pi-code-review
+$swarm-pi-code-plan
+$swarm-pi-code-implement
+$swarm-pi-code-orchestrate
+```
+
+The first runner invocation installs the exact plugin-local production
+dependencies from `package-lock.json`. Credential discovery uses Pi's supported
+auth storage and provider environment variables; project state never stores
+credentials. Confirm authenticated models with:
+
+```bash
+node plugins/swarm-pi-code/scripts/pi-runner.mjs models --json
+```
 
 ## Status
 
@@ -49,8 +106,8 @@ still pending, so the result reports verification as `not-run`.
 State is stored in `.swarm-pi-code/state.json`. Linked worktrees resolve the
 main repository through Git's common directory and share this state. Set
 `SWARM_PI_CODE_DATA_DIR` for an explicit override. A first read can migrate the
-old project profile and model preference from `.swarm-code/`; OpenCode jobs and
-provider data are deliberately excluded.
+old project profile and model preference from `.swarm-code/`; predecessor job
+history and provider data are deliberately excluded.
 
 The runner stores each request, raw prompt, result, and implementation patch in
 `.swarm-pi-code/jobs/<job-id>/`. State updates use an inter-process lock and an
@@ -66,5 +123,6 @@ node scripts/pi-runner.mjs init \
 ```
 
 `--reset` clears model inventory, priority, and project profile while preserving
-Pi job history and artifacts. Host commands/skills and the distributable plugin
-runtime remain tracked in [`docs/architecture.md`](docs/architecture.md).
+Pi job history and artifacts. The plugin package includes the compiled runner,
+Claude command/agents, and six shared host-aware skills. Remaining release work
+is tracked in [`docs/architecture.md`](docs/architecture.md).

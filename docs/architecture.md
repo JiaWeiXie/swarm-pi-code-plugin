@@ -3,7 +3,7 @@
 ## Decision
 
 Rebuild swarm-code around the embedded Pi coding-agent SDK. Do not spawn the Pi
-CLI and do not retain an OpenCode fallback. The embedded SDK gives the project
+CLI and do not retain a predecessor-runtime fallback. The embedded SDK gives the project
 ownership of tool exposure, session lifetime, result shape, and testability.
 
 The repository and marketplace package are named `swarm-pi-code-plugin` and
@@ -33,7 +33,7 @@ Git diff capture and host-owned verification
 - `.swarm-pi-code/` stores host-neutral configuration, job metadata, prompts,
   output, diff summaries, and verification results. It never stores credentials.
 - Pi `AuthStorage` and `ModelRegistry` use Pi's supported credential and model
-  configuration. No OpenCode credentials are read or migrated.
+  configuration. No predecessor credentials are read or migrated.
 - The implementation profile has no generic bash tool. Build, test, lint, and
   formatting commands are executed by the host from an explicit workspace
   verification profile.
@@ -79,7 +79,7 @@ for linked worktrees. `SWARM_PI_CODE_DATA_DIR` remains an explicit override.
 
 On first run, state migration may copy project goal, directory scope, delegated
 task types, and recognized `provider/model` preferences from `.swarm-code/`.
-OpenCode caches, sessions, jobs, logs, and provider-specific settings are not
+Predecessor caches, sessions, jobs, logs, and provider-specific settings are not
 migrated. Unrecognized models force model reconfiguration.
 
 State writes use a same-directory temporary file followed by an atomic rename.
@@ -117,6 +117,19 @@ The shared runner now implements all six task surfaces plus configuration:
 - Every invocation persists request, prompt, result, and optional patch
   artifacts. State index updates use a lock plus atomic rename.
 
+## Implemented Host Packaging
+
+- Claude Code loads `/swarm-pi-code:init`, `pi-worker`, and `pi-builder` from the
+  standard command/agent directories.
+- Codex loads configure, ask, review, plan, implement, and orchestrate from the
+  validated root `skills/` contract. Skills detect Claude versus Codex before
+  invoking the shared runner.
+- The marketplace package contains compiled JavaScript and a plugin-local,
+  locked production dependency graph. First use performs one concurrency-safe
+  `npm ci --omit=dev --ignore-scripts`; subsequent calls reuse that cache.
+- Host adapters write user prompts and configuration JSON to temporary files so
+  user-controlled text is never interpolated into shell source.
+
 ## Implementation Milestones
 
 1. **SDK gate**: prove the pinned Pi SDK loads, tool profiles are enforced, model
@@ -132,8 +145,8 @@ The shared runner now implements all six task surfaces plus configuration:
    the same worktree.
 6. **Migration and release**: add one-time state migration, installation docs,
    marketplace tests, cachebuster flow, and end-to-end acceptance runs.
-7. **OpenCode removal gate**: verify no tracked file, manifest, prompt, test, or
-   documentation references OpenCode before the first stable release.
+7. **Predecessor removal gate**: verify no tracked runtime, manifest, prompt, or
+   user documentation depends on the previous worker engine.
 
 ## Verification Strategy
 
@@ -154,5 +167,5 @@ The shared runner now implements all six task surfaces plus configuration:
 - The plugin package must be self-contained for both host installers. The SDK
   bundling strategy must pass a clean-machine install test before release.
 - No worker can commit, push, or modify files outside its assigned worktree.
-- OpenCode is absent from runtime, manifests, installation requirements, and
+- The previous worker engine is absent from runtime, manifests, installation requirements, and
   user-facing documentation.

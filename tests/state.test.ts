@@ -82,7 +82,7 @@ test("legacy swarm-code profile and model preferences migrate without jobs", asy
         modelPriority: ["test/model"],
         swarmProfile: { goal: "legacy", dirs: ["src"], tasks: ["Code review"] },
       },
-      jobs: [{ id: "old-opencode-job" }],
+      jobs: [{ id: "old-worker-job" }],
     }),
   );
 

@@ -6,6 +6,7 @@
     "name": "JiaWei Xie"
   },
   "license": "MIT",
+  "skills": "./skills/",
   "interface": {
     "displayName": "Swarm Pi Code",
     "shortDescription": "Delegate bounded coding work to embedded Pi sessions.",
