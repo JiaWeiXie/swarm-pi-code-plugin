@@ -78,11 +78,46 @@ $swarm-pi-code-plugin-orchestrate
 
 The first runner invocation installs the exact plugin-local production
 dependencies from `package-lock.json`. Credential discovery uses Pi's supported
-auth storage and provider environment variables; project state never stores
+auth storage and provider environment variables; project files never store
 credentials. Confirm authenticated models with:
 
 ```bash
 node plugins/swarm-pi-code-plugin/scripts/pi-runner.mjs models --json
+```
+
+## Configure Providers and Models
+
+Both host entry points launch the same temporary local setup page:
+
+```text
+/swarm-pi-code-plugin:init --reconfigure
+$swarm-pi-code-plugin-configure
+```
+
+The runner binds only to `127.0.0.1` on a random port, opens the browser, and
+prints a one-time URL as a fallback. The page lists built-in Pi providers,
+authentication readiness, primary and fallback models, and optional custom
+endpoints for Ollama, LM Studio, vLLM, or compatible gateways. It shuts down
+after save, cancel, or ten minutes of inactivity.
+
+Provider and model choices are saved atomically to the shared, gitignored
+`.swarm-pi-code-plugin/model.json`. Reconfiguration reads this file and
+pre-populates the form. An API key entered in the page goes directly to Pi's
+user credential store (`~/.pi/agent/auth.json` by default); it is never written
+to `model.json`, state, job artifacts, logs, URLs, or browser responses. A blank
+key field preserves the existing credential.
+
+For a terminal without automatic browser launch:
+
+```bash
+node scripts/pi-runner.mjs configure --host codex --no-open
+```
+
+Provider inventory is also available to automation:
+
+```bash
+node scripts/pi-runner.mjs providers --json
+node scripts/pi-runner.mjs models --provider anthropic --all --json
 ```
 
 ## Status
@@ -95,6 +130,8 @@ worktree-aware state, and a testable runner for `ask`, `plan`, and guarded
 ```bash
 mise run build
 node scripts/pi-runner.mjs models --json
+node scripts/pi-runner.mjs providers --json
+node scripts/pi-runner.mjs configure --host codex --no-open
 node scripts/pi-runner.mjs init --json
 node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/prompt.md --json
 node scripts/pi-runner.mjs review --host codex --scope working-tree --json
@@ -108,8 +145,10 @@ all writes and edits to the assigned worktree (including symlink checks), and
 returns the exact changed-file list plus a diff summary. Verification remains a
 host responsibility, so the Pi result reports verification as `not-run`.
 
-State is stored in `.swarm-pi-code-plugin/state.json`. Linked worktrees resolve the
-main repository through Git's common directory and share this state. Set
+Provider and model configuration is stored in
+`.swarm-pi-code-plugin/model.json`; job history and the project profile remain
+in `.swarm-pi-code-plugin/state.json`. Linked worktrees resolve the main
+repository through Git's common directory and share both files. Set
 `SWARM_PI_CODE_PLUGIN_DATA_DIR` for an explicit override. A first read fully
 migrates existing `.swarm-pi-code/` config and Pi jobs. It can also migrate the
 older project profile and model preference from `.swarm-code/`; predecessor job
@@ -119,7 +158,8 @@ The runner stores each request, raw prompt, result, and implementation patch in
 `.swarm-pi-code-plugin/jobs/<job-id>/`. State updates use an inter-process lock and an
 atomic rename, so concurrent read-only jobs do not overwrite job history.
 
-Configure a complete primary/fallback chain atomically:
+The browser is the recommended setup path. Automation may still configure a
+complete primary/fallback chain atomically:
 
 ```bash
 node scripts/pi-runner.mjs init \
@@ -128,7 +168,7 @@ node scripts/pi-runner.mjs init \
   --json
 ```
 
-`--reset` clears model inventory, priority, and project profile while preserving
-Pi job history and artifacts. The plugin package includes the compiled runner,
+`--reset` clears `model.json`, model inventory, priority, and project profile
+while preserving Pi credentials, job history, and artifacts. The plugin package includes the compiled runner,
 Claude command/agents, and six shared host-aware skills. Architecture and safety
 details are documented in [`docs/architecture.md`](docs/architecture.md).

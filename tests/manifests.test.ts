@@ -16,7 +16,7 @@ test("Claude and Codex manifests use the swarm-pi-code-plugin identity", () => {
   assert.equal(claude.name, "swarm-pi-code-plugin");
   assert.equal(codex.name, "swarm-pi-code-plugin");
   assert.equal(claude.version, "0.1.0");
-  assert.equal(codex.version, "0.1.0");
+  assert.match(codex.version as string, /^0\.1\.0\+codex\.\d{14}$/);
   assert.equal(codex.skills, "./skills/");
 });
 
@@ -43,6 +43,7 @@ test("plugin package contains both host adapters and a self-contained runner", (
     "scripts/bootstrap.mjs",
     "scripts/pi-runner.mjs",
     "runtime/cli.js",
+    "runtime/web/configuration-server.js",
     "package.json",
     "package-lock.json",
   ]) {
@@ -56,6 +57,14 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(implementation, /explicit mutation intent/i);
   assert.match(implementation, /clean worktree/i);
   assert.match(implementation, /verification from the host/i);
+
+  const configure = fs.readFileSync(
+    path.join(pluginRoot, "skills/swarm-pi-code-plugin-configure/SKILL.md"),
+    "utf8",
+  );
+  assert.match(configure, /pi-runner\.mjs" configure --host "\$HOST"/);
+  assert.match(configure, /model\.json/);
+  assert.match(configure, /Never ask the user to paste an API key/i);
 
   const pluginPackage = readJson("plugins/swarm-pi-code-plugin/package.json") as {
     dependencies: Record<string, string>;

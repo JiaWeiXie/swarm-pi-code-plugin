@@ -1,6 +1,6 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260710053850",
   "description": "Dual-host agent swarm adapter backed by the embedded Pi coding-agent SDK.",
   "author": {
     "name": "JiaWei Xie"
@@ -13,7 +13,10 @@
     "longDescription": "Swarm Pi Code Plugin connects Codex and Claude Code to controlled Pi coding-agent sessions for analysis and implementation workflows.",
     "developerName": "JiaWei Xie",
     "category": "Productivity",
-    "capabilities": ["Analysis", "Write"],
+    "capabilities": [
+      "Analysis",
+      "Write"
+    ],
     "defaultPrompt": [
       "Use Pi to review the current changes.",
       "Use Pi to plan this implementation.",

@@ -1,12 +1,13 @@
 import fs from "node:fs/promises";
 
-import type { Host, TaskKind, WorkerResult } from "../core/contracts.js";
+import type { Host, ProviderSummary, TaskKind, WorkerResult } from "../core/contracts.js";
 import { buildReviewRequest } from "../git/review.js";
 import { captureWorktreeChanges, inspectWorktree, requireCleanWorktree } from "../git/worktree.js";
 import { executeSession, type RunnableSession } from "../pi/execute.js";
 import {
   createModelCatalog,
   describeModels,
+  describeProviders,
   modelId,
   orderModels,
   type ModelCatalog,
@@ -14,6 +15,13 @@ import {
 } from "../pi/models.js";
 import { createWorkerSession } from "../pi/runtime.js";
 import { finishJob, startJob } from "../state/jobs.js";
+import {
+  clearModelConfiguration,
+  loadModelConfiguration,
+  modelPriority,
+  saveModelPriority,
+  type ModelConfiguration,
+} from "../state/model-config.js";
 import {
   clearConfiguration,
   loadState,
@@ -38,6 +46,7 @@ export interface RunnerDependencies {
 export type RunnerOutput =
   | WorkerResult
   | { models: ReturnType<typeof describeModels>; active: string | null; providers: Record<string, number> }
+  | { providers: ProviderSummary[]; registryError: string | null }
   | {
       configured: boolean;
       reconfigure: boolean;
@@ -49,12 +58,12 @@ export type RunnerOutput =
       jobs: number;
     };
 
-export function defaultDependencies(): RunnerDependencies {
+export function defaultDependencies(modelConfiguration: ModelConfiguration): RunnerDependencies {
   return {
-    catalog: createModelCatalog(),
+    catalog: createModelCatalog(modelConfiguration),
     readFile: (file) => fs.readFile(file, "utf8"),
     createSession: async (options) => {
-      const { session } = await createWorkerSession(options);
+      const { session } = await createWorkerSession({ ...options, modelConfiguration });
       return session;
     },
   };
@@ -63,21 +72,42 @@ export function defaultDependencies(): RunnerDependencies {
 export async function runCommand(
   args: RunnerArguments,
   cwd: string,
-  dependencies: RunnerDependencies = defaultDependencies(),
+  dependencies?: RunnerDependencies,
 ): Promise<RunnerOutput> {
-  const available = dependencies.catalog.available();
-  if (args.command === "models") return modelInventory(available, await loadState(cwd));
-  if (args.command === "init") return handleInit(args, cwd, available, dependencies);
+  if (args.command === "configure") {
+    throw new Error("configure must be started through the CLI web configuration entry point");
+  }
+  const state = await loadState(cwd);
+  const modelConfiguration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const activeDependencies = dependencies ?? defaultDependencies(modelConfiguration);
+  const available = activeDependencies.catalog.available();
+  if (args.command === "models") {
+    return modelInventory(activeDependencies.catalog, modelConfiguration, args);
+  }
+  if (args.command === "providers") {
+    return {
+      providers: describeProviders(activeDependencies.catalog, modelConfiguration),
+      registryError: activeDependencies.catalog.error?.() ?? null,
+    };
+  }
+  if (args.command === "init") {
+    return handleInit(
+      args,
+      cwd,
+      available,
+      activeDependencies,
+      modelConfiguration,
+    );
+  }
 
   const host = args.host!;
-  const state = await loadState(cwd);
   const rawPrompt =
     args.command === "review"
       ? await buildReviewRequest(cwd, { base: args.base, scope: args.scope })
-      : await dependencies.readFile(args.promptFile!);
+      : await activeDependencies.readFile(args.promptFile!);
   const candidates = orderModels(available, {
     requested: args.model,
-    priority: state.config.modelPriority,
+    priority: modelPriority(modelConfiguration),
   });
   const jobId = await startJob(cwd, { host, kind: args.command, prompt: rawPrompt, cwd });
 
@@ -93,7 +123,7 @@ export async function runCommand(
   }
 
   if (args.command === "orchestrate") {
-    const result = await runOrchestration({ cwd, host, prompt: rawPrompt, profile: state.config.profile, candidates, dependencies });
+    const result = await runOrchestration({ cwd, host, prompt: rawPrompt, profile: state.config.profile, candidates, dependencies: activeDependencies });
     const final = withMetadata(result, host, jobId, result.attempts ?? 0);
     await finishJob(cwd, jobId, final);
     return final;
@@ -121,7 +151,7 @@ export async function runCommand(
     prompt,
     mode: args.command === "implement" ? "implement" : "readonly",
     candidates,
-    dependencies,
+    dependencies: activeDependencies,
   });
   let diff = "";
   if (args.command === "implement") {
@@ -139,27 +169,32 @@ async function handleInit(
   cwd: string,
   available: PiModel[],
   dependencies: RunnerDependencies,
+  modelConfiguration: ModelConfiguration,
 ): Promise<Extract<RunnerOutput, { configured: boolean }>> {
   if (args.reset) {
+    await clearModelConfiguration(cwd);
     const state = await clearConfiguration(cwd);
-    return initStatus(state, [], args, true);
+    return initStatus(state, [], [], args, true);
   }
 
   const detected = available.map(modelId);
   await setAvailableModels(cwd, detected);
-  const modelPriority = args.modelPriority ?? (args.modelPriorityFile
+  const selectedPriority = args.modelPriority ?? (args.modelPriorityFile
     ? parseStringArrayJson(await dependencies.readFile(args.modelPriorityFile), "model priority file")
     : undefined);
-  if (modelPriority) {
-    const unavailable = modelPriority.filter((model) => !detected.includes(model));
+  if (selectedPriority) {
+    const unavailable = selectedPriority.filter((model) => !detected.includes(model));
     if (unavailable.length) throw new Error(`Selected Pi models are not available: ${unavailable.join(", ")}`);
-    await setModelPriority(cwd, modelPriority);
+    await saveModelPriority(cwd, modelConfiguration, selectedPriority);
+    await setModelPriority(cwd, selectedPriority);
   }
   const profile = args.profile ?? (args.profileFile
     ? parseObjectJson(await dependencies.readFile(args.profileFile), "profile file")
     : undefined);
   if (profile) await saveProfile(cwd, parseProfile(profile));
-  return initStatus(await loadState(cwd), detected, args, false);
+  const state = await loadState(cwd);
+  const currentModelConfiguration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  return initStatus(state, modelPriority(currentModelConfiguration), detected, args, false);
 }
 
 function parseStringArrayJson(value: string, label: string): string[] {
@@ -180,17 +215,18 @@ function parseObjectJson(value: string, label: string): Record<string, unknown> 
 
 function initStatus(
   state: Awaited<ReturnType<typeof loadState>>,
+  priority: string[],
   detected: string[],
   args: RunnerArguments,
   reset: boolean,
 ): Extract<RunnerOutput, { configured: boolean }> {
-  const activeModel = state.config.modelPriority.find((model) => detected.includes(model)) ?? null;
+  const activeModel = priority.find((model) => detected.includes(model)) ?? null;
   return {
     configured: Boolean(activeModel || state.config.profile),
     reconfigure: args.reconfigure,
     reset,
     activeModel,
-    modelPriority: state.config.modelPriority,
+    modelPriority: priority,
     detectedModels: detected,
     profile: state.config.profile ?? null,
     jobs: state.jobs.length,
@@ -272,14 +308,22 @@ async function runOrchestration(options: {
 }
 
 function modelInventory(
-  available: PiModel[],
-  state: Awaited<ReturnType<typeof loadState>>,
+  catalog: ModelCatalog,
+  configuration: ModelConfiguration,
+  args: RunnerArguments,
 ): Extract<RunnerOutput, { models: unknown }> {
+  const available = catalog.available();
+  const source = args.allModels ? catalog.all?.() ?? available : available;
+  const models = args.provider
+    ? source.filter((model) => model.provider === args.provider)
+    : source;
   const providers: Record<string, number> = {};
-  for (const model of available) providers[model.provider] = (providers[model.provider] ?? 0) + 1;
+  for (const model of models) providers[model.provider] = (providers[model.provider] ?? 0) + 1;
   return {
-    models: describeModels(available),
-    active: state.config.modelPriority.find((candidate) => available.some((model) => modelId(model) === candidate)) ?? null,
+    models: describeModels(models),
+    active: modelPriority(configuration).find((candidate) =>
+      available.some((model) => modelId(model) === candidate),
+    ) ?? null,
     providers,
   };
 }

@@ -1,6 +1,6 @@
 import type { Host, TaskKind } from "../core/contracts.js";
 
-export type RunnerCommand = "init" | "models" | TaskKind;
+export type RunnerCommand = "init" | "models" | "providers" | "configure" | TaskKind;
 export type ReviewScope = "auto" | "working-tree" | "branch";
 
 export interface RunnerArguments {
@@ -8,6 +8,7 @@ export interface RunnerArguments {
   host?: Host;
   promptFile?: string;
   model?: string;
+  provider?: string;
   base?: string;
   scope?: ReviewScope;
   reconfigure: boolean;
@@ -16,12 +17,17 @@ export interface RunnerArguments {
   modelPriorityFile?: string;
   profile?: Record<string, unknown>;
   profileFile?: string;
+  allModels?: boolean;
+  noOpen?: boolean;
+  port?: number;
   json: boolean;
 }
 
 const COMMANDS = new Set<RunnerCommand>([
   "init",
   "models",
+  "providers",
+  "configure",
   "ask",
   "review",
   "plan",
@@ -53,6 +59,12 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--reset":
         parsed.reset = true;
         break;
+      case "--all":
+        parsed.allModels = true;
+        break;
+      case "--no-open":
+        parsed.noOpen = true;
+        break;
       case "--host":
         parsed.host = parseHost(readValue(argv, ++index, argument));
         break;
@@ -61,6 +73,12 @@ export function parseArguments(argv: string[]): RunnerArguments {
         break;
       case "--model":
         parsed.model = readValue(argv, ++index, argument);
+        break;
+      case "--provider":
+        parsed.provider = readValue(argv, ++index, argument);
+        break;
+      case "--port":
+        parsed.port = parsePort(readValue(argv, ++index, argument));
         break;
       case "--base":
         parsed.base = readValue(argv, ++index, argument);
@@ -85,7 +103,13 @@ export function parseArguments(argv: string[]): RunnerArguments {
     }
   }
 
-  if (command !== "models" && command !== "init" && !parsed.host) {
+  if (
+    command !== "models" &&
+    command !== "providers" &&
+    command !== "configure" &&
+    command !== "init" &&
+    !parsed.host
+  ) {
     throw new Error(`--host is required for ${command}`);
   }
   if (
@@ -96,6 +120,14 @@ export function parseArguments(argv: string[]): RunnerArguments {
   }
 
   return parsed;
+}
+
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error(`Invalid port: ${value}`);
+  }
+  return port;
 }
 
 function parseScope(value: string): ReviewScope {

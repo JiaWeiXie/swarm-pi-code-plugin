@@ -6,6 +6,7 @@ export type {
   WorkerResult,
   WorkerStatus,
   AvailableModel,
+  ProviderSummary,
 } from "./core/contracts.js";
 export { main } from "./cli.js";
 export { executeSession, notImplementedResult } from "./pi/execute.js";
@@ -17,6 +18,9 @@ export * from "./git/worktree.js";
 export * from "./git/review.js";
 export * from "./state/jobs.js";
 export * from "./state/state.js";
+export * from "./state/model-config.js";
 export { parseArguments } from "./runner/args.js";
 export { buildWorkerPrompt } from "./runner/prompts.js";
 export { runCommand } from "./runner/run.js";
+export * from "./web/configuration-service.js";
+export * from "./web/configuration-server.js";

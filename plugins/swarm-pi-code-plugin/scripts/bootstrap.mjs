@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -14,10 +14,11 @@ const dependency = path.join(
   "package.json",
 );
 const installLock = path.join(pluginRoot, ".installing-runtime");
+const runtimeMarker = path.join(pluginRoot, "node_modules", ".swarm-pi-runtime-ready");
 
 export function ensureRuntime() {
   assertNodeVersion();
-  if (existsSync(dependency)) return;
+  if (runtimeReady()) return;
   if (process.env.SWARM_PI_CODE_PLUGIN_SKIP_BOOTSTRAP === "1") {
     throw new Error(`Pi runtime dependencies are missing in ${pluginRoot}`);
   }
@@ -36,6 +37,10 @@ export function ensureRuntime() {
       if (result.stderr) process.stderr.write(result.stderr);
       throw new Error("Unable to install swarm-pi-code-plugin runtime dependencies.");
     }
+    if (!existsSync(dependency)) {
+      throw new Error("Pi runtime installation completed without the pinned dependency.");
+    }
+    writeFileSync(runtimeMarker, "ready\n", { mode: 0o600 });
   } finally {
     rmSync(installLock, { recursive: true, force: true });
   }
@@ -49,7 +54,7 @@ function acquireInstallLock() {
       return true;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      if (existsSync(dependency)) return false;
+      if (runtimeReady()) return false;
       const age = Date.now() - statSync(installLock).mtimeMs;
       if (age > 300_000) {
         rmSync(installLock, { recursive: true, force: true });
@@ -59,6 +64,10 @@ function acquireInstallLock() {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
     }
   }
+}
+
+function runtimeReady() {
+  return existsSync(runtimeMarker) && existsSync(dependency);
 }
 
 function assertNodeVersion() {

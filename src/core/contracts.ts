@@ -40,3 +40,17 @@ export interface AvailableModel {
   model: string;
   name: string;
 }
+
+export interface ProviderSummary {
+  id: string;
+  name: string;
+  ready: boolean;
+  modelCount: number;
+  availableModelCount: number;
+  auth: {
+    source: string | null;
+    label: string | null;
+  };
+  selection: "primary" | "fallback" | null;
+  custom: boolean;
+}

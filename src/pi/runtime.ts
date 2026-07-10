@@ -1,13 +1,8 @@
-import {
-  AuthStorage,
-  createAgentSession,
-  ModelRegistry,
-  SessionManager,
-  SettingsManager,
-  type CreateAgentSessionOptions,
-} from "@earendil-works/pi-coding-agent";
+import { createAgentSession, SessionManager, SettingsManager, type CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
 
 import type { WorkerMode } from "../core/contracts.js";
+import type { ModelConfiguration } from "../state/model-config.js";
+import { createPiEnvironment } from "./environment.js";
 import { createScopedMutationTools } from "./scoped-tools.js";
 import { toolsForMode } from "./tool-profiles.js";
 
@@ -15,11 +10,11 @@ export interface CreateWorkerSessionOptions {
   cwd: string;
   mode: WorkerMode;
   model?: CreateAgentSessionOptions["model"];
+  modelConfiguration: ModelConfiguration;
 }
 
 export async function createWorkerSession(options: CreateWorkerSessionOptions) {
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
+  const { authStorage, modelRegistry } = createPiEnvironment(options.modelConfiguration);
 
   return createAgentSession({
     cwd: options.cwd,

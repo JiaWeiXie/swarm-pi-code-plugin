@@ -1,6 +1,8 @@
 const COMMANDS = new Set([
     "init",
     "models",
+    "providers",
+    "configure",
     "ask",
     "review",
     "plan",
@@ -30,6 +32,12 @@ export function parseArguments(argv) {
             case "--reset":
                 parsed.reset = true;
                 break;
+            case "--all":
+                parsed.allModels = true;
+                break;
+            case "--no-open":
+                parsed.noOpen = true;
+                break;
             case "--host":
                 parsed.host = parseHost(readValue(argv, ++index, argument));
                 break;
@@ -38,6 +46,12 @@ export function parseArguments(argv) {
                 break;
             case "--model":
                 parsed.model = readValue(argv, ++index, argument);
+                break;
+            case "--provider":
+                parsed.provider = readValue(argv, ++index, argument);
+                break;
+            case "--port":
+                parsed.port = parsePort(readValue(argv, ++index, argument));
                 break;
             case "--base":
                 parsed.base = readValue(argv, ++index, argument);
@@ -61,7 +75,11 @@ export function parseArguments(argv) {
                 throw new Error(`Unknown argument: ${argument}`);
         }
     }
-    if (command !== "models" && command !== "init" && !parsed.host) {
+    if (command !== "models" &&
+        command !== "providers" &&
+        command !== "configure" &&
+        command !== "init" &&
+        !parsed.host) {
         throw new Error(`--host is required for ${command}`);
     }
     if ((command === "ask" || command === "plan" || command === "implement" || command === "orchestrate") &&
@@ -69,6 +87,13 @@ export function parseArguments(argv) {
         throw new Error(`--prompt-file is required for ${command}`);
     }
     return parsed;
+}
+function parsePort(value) {
+    const port = Number(value);
+    if (!Number.isInteger(port) || port < 0 || port > 65535) {
+        throw new Error(`Invalid port: ${value}`);
+    }
+    return port;
 }
 function parseScope(value) {
     if (value === "auto" || value === "working-tree" || value === "branch")

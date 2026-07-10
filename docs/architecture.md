@@ -31,8 +31,10 @@ Git diff capture and host-owned verification
 
 - One in-memory Pi session is created per delegated job. Coding sessions are not
   resumed across worktrees or branches.
-- `.swarm-pi-code-plugin/` stores host-neutral configuration, job metadata, prompts,
-  output, diff summaries, and verification results. It never stores credentials.
+- `.swarm-pi-code-plugin/model.json` stores host-neutral provider and model
+  configuration. `state.json` stores the project profile and job metadata;
+  job directories hold prompts, output, diff summaries, and verification
+  results. None of these project files stores credentials.
 - Pi `AuthStorage` and `ModelRegistry` use Pi's supported credential and model
   configuration. No predecessor credentials are read or migrated.
 - The implementation profile has no generic bash tool. Build, test, lint, and
@@ -46,6 +48,8 @@ The shared runner exposes:
 ```text
 node scripts/pi-runner.mjs init --host <claude|codex> --json
 node scripts/pi-runner.mjs models --json
+node scripts/pi-runner.mjs providers --json
+node scripts/pi-runner.mjs configure --host <host> [--no-open]
 node scripts/pi-runner.mjs ask --host <host> --prompt-file <file> --json
 node scripts/pi-runner.mjs review --host <host> [--base <ref>] --json
 node scripts/pi-runner.mjs plan --host <host> --prompt-file <file> --json
@@ -77,7 +81,9 @@ The implementation skill only triggers for explicit user mutation intent.
 ## State and Migration
 
 Use the Git common directory to resolve one shared `.swarm-pi-code-plugin/`
-state root for linked worktrees. `SWARM_PI_CODE_PLUGIN_DATA_DIR` remains an
+data root for linked worktrees. `model.json` is canonical for providers and
+model priority; `state.json` retains the project profile, jobs, and a temporary
+compatibility priority mirror. `SWARM_PI_CODE_PLUGIN_DATA_DIR` remains an
 explicit override.
 
 On first run after the naming alignment, state migration preserves configuration
@@ -85,7 +91,9 @@ and Pi jobs from `.swarm-pi-code/`. It may also copy project goal, directory
 scope, delegated task types, and recognized `provider/model` preferences from
 the older `.swarm-code/` format. Predecessor caches, sessions, jobs, logs, and
 provider-specific settings are not migrated from that older format.
-Unrecognized models force model reconfiguration.
+When `model.json` is absent, the first read falls back to migrated
+`state.config.modelPriority`; the next successful setup creates the canonical
+file. Unrecognized models force model reconfiguration.
 
 State writes use a same-directory temporary file followed by an atomic rename.
 For linked worktrees, the state root is the parent of Git's absolute common
@@ -110,8 +118,13 @@ session:
 
 The shared runner now implements all six task surfaces plus configuration:
 
-- `init` refreshes authenticated Pi models, atomically replaces model priority,
-  saves the project profile, and resets configuration without deleting jobs.
+- `configure` starts a loopback-only, token-protected browser session that reads
+  and atomically updates `model.json`, writes credentials only through Pi
+  `AuthStorage`, and exits after save, cancel, or timeout.
+- `init` refreshes authenticated Pi models, atomically replaces model priority
+  in canonical `model.json`, mirrors priority for older plugin releases, saves
+  the project profile, and resets project configuration without deleting jobs
+  or Pi credentials.
 - `ask`, `plan`, and `review` run read-only sessions. Review supports working
   tree, branch, explicit base, auto scope, untracked files, and root commits.
 - Read-only failures retry the configured fallback chain in order.
@@ -128,12 +141,16 @@ The shared runner now implements all six task surfaces plus configuration:
   standard command/agent directories.
 - Codex loads configure, ask, review, plan, implement, and orchestrate from the
   validated root `skills/` contract. Skills detect Claude versus Codex before
-  invoking the shared runner.
+  invoking the shared runner. Claude and Codex launch the same browser setup
+  implementation and never request API keys in host conversation text.
 - The marketplace package contains compiled JavaScript and a plugin-local,
   locked production dependency graph. First use performs one concurrency-safe
   `npm ci --omit=dev --ignore-scripts`; subsequent calls reuse that cache.
 - Host adapters write user prompts and configuration JSON to temporary files so
   user-controlled text is never interpolated into shell source.
+- The configuration web server binds only to `127.0.0.1` on an ephemeral port,
+  requires a random per-session token, rejects cross-origin writes, applies a
+  restrictive CSP, and exposes no persisted credential value to the browser.
 
 ## Implementation Milestones
 
@@ -155,14 +172,17 @@ The shared runner now implements all six task surfaces plus configuration:
 
 ## Verification Strategy
 
-- Unit tests cover tool profiles, state resolution, argument parsing, model
-  selection, retry policy, trigger classification, and JSON schemas.
+- Unit tests cover tool profiles, state resolution, `model.json` migration and
+  validation, argument parsing, model selection, provider readiness, retry
+  policy, trigger classification, and JSON schemas.
 - Mocked Pi sessions cover read-only tool denial, allowed edits, failures,
   cancellation, token limits, and model fallback.
 - Git integration tests cover clean/dirty preflight, linked worktrees, exact
   changed-file capture, and preservation of unrelated user changes.
 - Manifest tests parse both plugin formats and both repo marketplaces.
-- Manual acceptance runs configure and execute one ask, review, plan, and bounded
+- Browser E2E covers first-run save, reconfiguration prefill, custom endpoints,
+  responsive layout, token enforcement, and credential non-disclosure. Manual
+  acceptance then runs configure and one ask, review, plan, and bounded
   implementation from both Claude Code and Codex.
 
 ## Release Gates
