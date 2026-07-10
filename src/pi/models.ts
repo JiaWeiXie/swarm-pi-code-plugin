@@ -36,10 +36,16 @@ export function describeProviders(
   configuration: ModelConfiguration,
 ): ProviderSummary[] {
   const all = catalog.all?.() ?? catalog.available();
-  const available = new Set(catalog.available().map(modelId));
+  const availableModels = catalog.available();
+  const available = new Set(availableModels.map(modelId));
   const priority = modelPriority(configuration);
   const custom = new Set(configuration.customProviders.map((provider) => provider.id));
-  const providerIds = [...new Set(all.map((model) => model.provider))].sort((left, right) =>
+  const selectedProviders = priority.map((reference) => reference.slice(0, reference.indexOf("/")));
+  const providerIds = [...new Set([
+    ...availableModels.map((model) => model.provider),
+    ...custom,
+    ...selectedProviders,
+  ])].sort((left, right) =>
     (catalog.displayName?.(left) ?? left).localeCompare(catalog.displayName?.(right) ?? right),
   );
   return providerIds.map((id) => {

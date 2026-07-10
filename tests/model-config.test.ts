@@ -19,6 +19,7 @@ const customProvider = {
   baseUrl: "http://127.0.0.1:11434/v1",
   api: "openai-completions" as const,
   authHeader: false,
+  requiresApiKey: true,
   models: [
     {
       id: "org/model-name",
@@ -44,7 +45,7 @@ test("model.json is canonical, normalized, and written with private permissions"
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.deepEqual(modelPriority(saved), ["local-openai/org/model-name", "openai/fallback"]);
   assert.deepEqual(await loadModelConfiguration(workspace), saved);
-  assert.doesNotMatch(raw, /api.?key/i);
+  assert.doesNotMatch(raw, /"apiKey"\s*:/i);
 
   await clearModelConfiguration(workspace);
   assert.equal(fs.existsSync(file), false);
@@ -73,4 +74,39 @@ test("custom provider config rejects embedded secrets and invalid model referenc
     () => parseModelConfiguration({ version: 1, primary: "missing-separator", fallbacks: [], customProviders: [], updatedAt: null }),
     /provider\/model/,
   );
+});
+
+test("custom model limits can remain automatic and retain metadata provenance", () => {
+  const configuration = parseModelConfiguration({
+    version: 1,
+    primary: "local-auto/model-a",
+    fallbacks: [],
+    updatedAt: null,
+    customProviders: [{
+      id: "local-auto",
+      name: "Local Auto",
+      baseUrl: "http://127.0.0.1:1234/v1",
+      api: "openai-completions",
+      authHeader: false,
+      requiresApiKey: false,
+      models: [{ id: "model-a" }],
+    }],
+  });
+  const model = configuration.customProviders[0]?.models[0];
+  assert.equal(model?.contextWindow, undefined);
+  assert.equal(model?.maxTokens, undefined);
+  assert.equal(configuration.customProviders[0]?.requiresApiKey, false);
+
+  const withMetadata = parseModelConfiguration({
+    ...configuration,
+    customProviders: [{
+      ...configuration.customProviders[0],
+      models: [{
+        id: "model-a",
+        contextWindow: 131_072,
+        metadata: { contextWindow: "endpoint" },
+      }],
+    }],
+  });
+  assert.equal(withMetadata.customProviders[0]?.models[0]?.metadata?.contextWindow, "endpoint");
 });

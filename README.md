@@ -95,17 +95,31 @@ $swarm-pi-code-plugin-configure
 ```
 
 The runner binds only to `127.0.0.1` on a random port, opens the browser, and
-prints a one-time URL as a fallback. The page lists built-in Pi providers,
-authentication readiness, primary and fallback models, and optional custom
-endpoints for Ollama, LM Studio, vLLM, or compatible gateways. It shuts down
-after save, cancel, or ten minutes of inactivity.
+prints a one-time URL as a fallback. Setup follows three familiar steps:
+**Connections**, **Models**, and **Routing**. The Connections page contains only
+services that are already usable, detected from Pi-supported credentials, or
+saved by the user. A new project with no usable service starts with an empty
+list instead of a catalog of unfinished providers.
+
+Known Pi OAuth subscriptions and documented provider environment variables are
+detected without exposing their secret values. Users can also explicitly scan
+for a running Ollama or LM Studio instance, connect a known cloud provider, or
+enter a custom HTTP(S) endpoint. Custom setup initially asks only for the URL
+and optional API key; **Test and find models** detects supported OpenAI,
+Anthropic, Gemini, Ollama, and LM Studio model-list APIs. Context-window and
+maximum-output values are filled from endpoint metadata or Pi's model catalog
+when known. Unknown values remain **Automatic**, with manual overrides kept in
+an Advanced section.
+
+The setup server shuts down after save, cancel, or ten minutes of inactivity.
 
 Provider and model choices are saved atomically to the shared, gitignored
 `.swarm-pi-code-plugin/model.json`. Reconfiguration reads this file and
-pre-populates the form. An API key entered in the page goes directly to Pi's
-user credential store (`~/.pi/agent/auth.json` by default); it is never written
-to `model.json`, state, job artifacts, logs, URLs, or browser responses. A blank
-key field preserves the existing credential.
+pre-populates connections, models, and routing. An API key entered in the page
+goes directly to Pi's user credential store (`~/.pi/agent/auth.json` by
+default); it is never written to `model.json`, state, job artifacts, logs,
+URLs, or browser responses. A blank key field preserves the existing
+credential.
 
 For a terminal without automatic browser launch:
 

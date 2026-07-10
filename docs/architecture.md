@@ -180,7 +180,8 @@ The shared runner now implements all six task surfaces plus configuration:
 - Git integration tests cover clean/dirty preflight, linked worktrees, exact
   changed-file capture, and preservation of unrelated user changes.
 - Manifest tests parse both plugin formats and both repo marketplaces.
-- Browser E2E covers first-run save, reconfiguration prefill, custom endpoints,
+- Browser E2E covers the true empty state, user-triggered endpoint discovery,
+  automatic model metadata, first-run save, reconfiguration prefill,
   responsive layout, token enforcement, and credential non-disclosure. Manual
   acceptance then runs configure and one ask, review, plan, and bounded
   implementation from both Claude Code and Codex.

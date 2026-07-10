@@ -13,13 +13,32 @@ export const SUPPORTED_PROVIDER_APIS = [
 
 export type SupportedProviderApi = (typeof SUPPORTED_PROVIDER_APIS)[number];
 
+export const DEFAULT_MODEL_CONTEXT_WINDOW = 128_000;
+export const DEFAULT_MODEL_MAX_TOKENS = 16_384;
+
+export const MODEL_METADATA_SOURCES = [
+  "endpoint",
+  "pi-catalog",
+  "models-dev",
+  "compatibility-default",
+  "user",
+] as const;
+
+export type ModelMetadataSource = (typeof MODEL_METADATA_SOURCES)[number];
+
+export interface CustomModelMetadata {
+  contextWindow?: ModelMetadataSource | undefined;
+  maxTokens?: ModelMetadataSource | undefined;
+}
+
 export interface CustomModelConfiguration {
   id: string;
   name: string;
   reasoning: boolean;
   input: Array<"text" | "image">;
-  contextWindow: number;
-  maxTokens: number;
+  contextWindow?: number | undefined;
+  maxTokens?: number | undefined;
+  metadata?: CustomModelMetadata | undefined;
 }
 
 export interface CustomProviderConfiguration {
@@ -28,6 +47,7 @@ export interface CustomProviderConfiguration {
   baseUrl: string;
   api: SupportedProviderApi;
   authHeader: boolean;
+  requiresApiKey: boolean;
   models: CustomModelConfiguration[];
 }
 
@@ -170,6 +190,7 @@ function parseCustomProvider(value: unknown): CustomProviderConfiguration {
     baseUrl: parsedUrl.toString().replace(/\/$/, ""),
     api: api as SupportedProviderApi,
     authHeader: optionalBoolean(record.authHeader, `authHeader for ${id}`) ?? false,
+    requiresApiKey: optionalBoolean(record.requiresApiKey, `requiresApiKey for ${id}`) ?? true,
     models,
   };
 }
@@ -189,16 +210,52 @@ function parseCustomModel(value: unknown, provider: string): CustomModelConfigur
         return entry;
       });
   if (!input.includes("text")) input.unshift("text");
-  const contextWindow = integer(record.contextWindow, `contextWindow for ${provider}/${id}`, 1024, 10_000_000, 128_000);
-  const maxTokens = integer(record.maxTokens, `maxTokens for ${provider}/${id}`, 1, contextWindow, 16_384);
+  const contextWindow = optionalInteger(
+    record.contextWindow,
+    `contextWindow for ${provider}/${id}`,
+    1024,
+    10_000_000,
+  );
+  const maxTokens = optionalInteger(
+    record.maxTokens,
+    `maxTokens for ${provider}/${id}`,
+    1,
+    contextWindow ?? 10_000_000,
+  );
+  const metadata = parseModelMetadata(record.metadata, provider, id);
   return {
     id,
     name: optionalString(record.name, `name for ${provider}/${id}`) ?? id,
     reasoning: optionalBoolean(record.reasoning, `reasoning for ${provider}/${id}`) ?? false,
     input: unique(input),
-    contextWindow,
-    maxTokens,
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+    ...(metadata === undefined ? {} : { metadata }),
   };
+}
+
+function parseModelMetadata(
+  value: unknown,
+  provider: string,
+  model: string,
+): CustomModelMetadata | undefined {
+  if (value === undefined) return undefined;
+  const record = asRecord(value, `metadata for ${provider}/${model}`);
+  const contextWindow = metadataSource(record.contextWindow, `contextWindow metadata for ${provider}/${model}`);
+  const maxTokens = metadataSource(record.maxTokens, `maxTokens metadata for ${provider}/${model}`);
+  if (!contextWindow && !maxTokens) return undefined;
+  return {
+    ...(contextWindow ? { contextWindow } : {}),
+    ...(maxTokens ? { maxTokens } : {}),
+  };
+}
+
+function metadataSource(value: unknown, label: string): ModelMetadataSource | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !MODEL_METADATA_SOURCES.includes(value as ModelMetadataSource)) {
+    throw new Error(`${label} must be a supported metadata source`);
+  }
+  return value as ModelMetadataSource;
 }
 
 function modelReference(value: unknown): string {
@@ -248,14 +305,13 @@ function optionalBoolean(value: unknown, label: string): boolean | undefined {
   return value;
 }
 
-function integer(
+function optionalInteger(
   value: unknown,
   label: string,
   minimum: number,
   maximum: number,
-  defaultValue: number,
-): number {
-  if (value === undefined) return defaultValue;
+): number | undefined {
+  if (value === undefined) return undefined;
   if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
     throw new Error(`${label} must be an integer between ${minimum} and ${maximum}`);
   }

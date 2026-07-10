@@ -6,10 +6,14 @@ import { once } from "node:events";
 import type { Host } from "../core/contracts.js";
 import { resolveModelConfigurationFile } from "../state/model-config.js";
 import {
+  discoverConfigurationEndpoint,
+  discoverLocalConfigurationEndpoints,
   loadConfigurationView,
+  previewProviderConnection,
   saveConfigurationSubmission,
   type ConfigurationSubmission,
 } from "./configuration-service.js";
+import { EndpointDiscoveryError, type EndpointDiscoveryRequest } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
@@ -79,6 +83,26 @@ export async function startConfigurationServer(
         json(response, 200, { saved: true, configuration: view.configuration });
         return;
       }
+      if (request.method === "POST" && url.pathname === "/api/discover") {
+        assertJsonRequest(request, origin);
+        const discovery = normalizeDiscoveryRequest(await readJsonBody(request));
+        json(response, 200, await discoverConfigurationEndpoint(cwd, discovery, env));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/discover-local") {
+        assertJsonRequest(request, origin);
+        await readJsonBody(request);
+        json(response, 200, {
+          connections: await discoverLocalConfigurationEndpoints(cwd, env),
+        });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/connect-provider") {
+        assertJsonRequest(request, origin);
+        const credential = normalizeProviderCredential(await readJsonBody(request));
+        json(response, 200, await previewProviderConnection(cwd, credential, env));
+        return;
+      }
       if (request.method === "POST" && url.pathname === "/api/cancel") {
         assertJsonRequest(request, origin);
         await readJsonBody(request);
@@ -91,6 +115,7 @@ export async function startConfigurationServer(
     } catch (error) {
       json(response, statusForError(error), {
         error: error instanceof Error ? error.message : "Configuration failed",
+        ...(error instanceof EndpointDiscoveryError ? { code: error.code } : {}),
       });
     }
   });
@@ -137,6 +162,54 @@ export async function startConfigurationServer(
     completion,
     close: () => finish("cancelled"),
   };
+}
+
+function normalizeDiscoveryRequest(value: unknown): EndpointDiscoveryRequest {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HttpError(400, "Discovery request must be a JSON object");
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.baseUrl !== "string") throw new HttpError(400, "Server URL is required");
+  if (record.apiKey !== undefined && typeof record.apiKey !== "string") {
+    throw new HttpError(400, "API key must be a string");
+  }
+  if (record.apiKey && record.apiKey.length > 16_384) throw new HttpError(400, "API key is too long");
+  const reservedProviderIds = record.reservedProviderIds === undefined
+    ? []
+    : normalizeReservedProviderIds(record.reservedProviderIds);
+  return {
+    baseUrl: record.baseUrl,
+    ...(record.apiKey ? { apiKey: record.apiKey } : {}),
+    ...(reservedProviderIds.length > 0 ? { reservedProviderIds } : {}),
+  };
+}
+
+function normalizeReservedProviderIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 512) {
+    throw new HttpError(400, "Reserved provider identifiers must be an array of at most 512 values");
+  }
+  const identifiers = value.map((entry) => {
+    if (typeof entry !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(entry)) {
+      throw new HttpError(400, "Reserved provider identifiers are invalid");
+    }
+    return entry;
+  });
+  return [...new Set(identifiers)];
+}
+
+function normalizeProviderCredential(value: unknown): { provider: string; apiKey: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HttpError(400, "Connection request must be a JSON object");
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.provider !== "string" || !record.provider.trim()) {
+    throw new HttpError(400, "Provider is required");
+  }
+  if (typeof record.apiKey !== "string" || !record.apiKey.trim()) {
+    throw new HttpError(400, "API key is required");
+  }
+  if (record.apiKey.length > 16_384) throw new HttpError(400, "API key is too long");
+  return { provider: record.provider.trim(), apiKey: record.apiKey.trim() };
 }
 
 function isLoopbackRequest(request: IncomingMessage, origin: string): boolean {

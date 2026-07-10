@@ -8,6 +8,16 @@ configuration server during first-run setup and reconfiguration.
 
 Users are not expected to edit configuration JSON by hand.
 
+The product model has three layers:
+
+1. **Connections** are AI services the user can actually use.
+2. **Models** are discovered from those connections.
+3. **Routing** selects one primary model and ordered fallbacks.
+
+Pi's complete provider catalog is implementation data, not user configuration.
+The interface must never present every provider merely because Pi knows about
+it.
+
 ## Configuration Ownership
 
 The shared workspace data directory contains two files with distinct roles:
@@ -62,6 +72,15 @@ shows only a readiness state and a non-secret source label. A blank API-key
 field preserves the current credential. Project reset does not remove global
 Pi credentials.
 
+Automatic connection detection is limited to credentials Pi can resolve
+through its own `AuthStorage` and documented environment-variable map. This
+includes Pi-managed subscription OAuth for ChatGPT Plus/Pro, Claude Pro/Max,
+and GitHub Copilot. The plugin does not scan `.env` files or copy tokens from
+Claude Code, Codex, or another application's private credential store.
+
+A resolved credential adds the provider to the connection list. An unresolved
+provider stays absent instead of appearing as an unfinished setup task.
+
 ## Server Lifecycle and Security
 
 The configuration server:
@@ -76,22 +95,78 @@ The configuration server:
    fallback;
 7. shuts down after save, cancel, or a ten-minute idle timeout.
 
+User-entered endpoint requests accept only HTTP(S), reject embedded URL
+credentials and cloud metadata addresses, use bounded timeouts and response
+sizes, and do not forward credentials across redirects. Local application port
+probing runs only after the user explicitly requests it.
+
 There is no CORS support and no network-listen option. The server is a bounded
 setup session, not a daemon.
 
 ## User Flow
 
 1. The host starts `pi-runner.mjs configure --host <host>`.
-2. The browser displays all Pi registry providers, including providers without
-   credentials and custom providers from the current `model.json`.
-3. The user chooses a provider, optionally enters or replaces its API key, and
-   chooses a primary model plus ordered fallbacks.
-4. A custom endpoint form supports the Pi API types explicitly allowed by the
-   runtime and supplies conservative defaults for optional model metadata.
-5. The server validates provider identifiers, URLs, API types, model metadata,
-   referenced models, and authentication readiness.
-6. It writes `model.json` atomically, updates the compatibility priority mirror,
-   reports success, and exits.
+2. The server loads `model.json`, then detects usable Pi OAuth and API-key
+   connections without returning secrets to the browser.
+3. With no connections, the browser shows a true empty state with actions to
+   connect an AI service or explicitly search for a local AI application.
+4. A known cloud provider asks only for its supported sign-in method. Provider
+   URLs, protocol, headers, and identifiers remain internal defaults.
+5. A custom endpoint initially asks only for a server URL and optional API key.
+   The user runs **Test and find models** before selecting a model.
+6. Discovery identifies the endpoint type, canonical URL, protocol, and model
+   inventory. Technical overrides remain under an Advanced disclosure.
+7. The user chooses a primary model and optional ordered fallbacks from models
+   on usable connections.
+8. The server validates the complete draft, writes `model.json` atomically,
+   updates the compatibility priority mirror, reports success, and exits.
+
+Provider identifiers are internal implementation details. Rediscovering the
+same canonical endpoint and protocol refreshes the existing connection instead
+of creating a duplicate. For distinct endpoints, discovery reserves identifiers
+already present in the current browser draft, and the client performs a second
+collision check before adding a connection. Users must never be asked to repair
+duplicate provider identifiers manually.
+
+Wizard navigation uses **Back** after the first step. **Close setup** appears
+only on the Connections step and confirms that unsaved changes will be lost.
+After save or close, the page renders an explicit completion state with the
+next action instead of leaving a disabled form on screen.
+
+Reconfiguration opens the connection overview instead of the raw provider
+form. Existing connections can be refreshed, edited, or removed. Refreshing a
+connection preserves explicit user model-metadata overrides.
+
+## Endpoint Discovery
+
+Endpoint testing is adapter-based. The first implementation supports:
+
+- OpenAI-compatible `GET /v1/models`;
+- Anthropic `GET /v1/models`;
+- Google Generative AI `GET /v1beta/models`;
+- Ollama `GET /api/tags` plus `POST /api/show` model details;
+- LM Studio `GET /api/v1/models`.
+
+Known response shapes determine the provider label, Pi API type, authentication
+header behavior, model identifiers, capabilities, and any limits the endpoint
+actually reports. A successful OpenAI-compatible list is not treated as proof
+that context or output limits are known.
+
+The metadata precedence is:
+
+1. explicit user override;
+2. native endpoint metadata;
+3. Pi's bundled model catalog;
+4. an optional cached models.dev record;
+5. Pi's runtime compatibility default.
+
+Unknown values remain unknown in the normal UI. Runtime defaults may still be
+materialized when registering a model with Pi, but the interface must label
+them as compatibility defaults instead of presenting them as provider facts.
+
+Connection testing only reads discovery endpoints and should not consume model
+quota. A future optional generation test must be a separate explicit action,
+warn that it may use quota, and never run automatically.
 
 `/swarm-pi-code-plugin:init --reconfigure` and
 `$swarm-pi-code-plugin-configure` always load the current `model.json`, so users
@@ -110,6 +185,15 @@ provider visible in setup cannot disappear when a job starts.
 ## Acceptance Criteria
 
 - First-run and reconfigure work without hand-editing JSON.
+- With no usable credentials and no custom connections, the connection list is
+  empty; there is no catalog of unfinished providers.
+- Pi-resolvable OAuth and documented environment credentials appear as detected
+  connections without exposing their secret value.
+- A custom endpoint can be tested and its models selected without entering a
+  provider ID, API type, context window, or maximum output value.
+- Discovery errors distinguish unreachable server, rejected authentication,
+  unsupported model-list endpoint, malformed response, and timeout states.
+- Model metadata displays its source, and a manual override survives refresh.
 - Reconfigure pre-populates provider, primary model, fallbacks, and custom
   endpoint fields from `model.json`.
 - A submitted API key is usable but absent from every project artifact and

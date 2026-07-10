@@ -6,9 +6,10 @@ import path from "node:path";
 import test from "node:test";
 
 import { executeSession, type RunnableSession } from "../src/pi/execute.js";
-import { describeModels, selectModel, type PiModel } from "../src/pi/models.js";
+import { describeModels, describeProviders, selectModel, type PiModel } from "../src/pi/models.js";
 import { parseArguments } from "../src/runner/args.js";
 import { runCommand, type RunnerDependencies } from "../src/runner/run.js";
+import { defaultModelConfiguration } from "../src/state/model-config.js";
 
 const fakeModel = {
   provider: "test-provider",
@@ -78,6 +79,27 @@ test("model helpers expose stable provider/model identifiers", () => {
   ]);
   assert.equal(selectModel([fakeModel], "test-provider/test-model"), fakeModel);
   assert.equal(selectModel([fakeModel], "missing/model"), undefined);
+});
+
+test("provider summaries hide catalog entries that are not connected or selected", () => {
+  const catalog = {
+    all: () => [fakeModel],
+    available: () => [],
+    displayName: () => "Test Provider",
+  };
+  assert.deepEqual(describeProviders(catalog, defaultModelConfiguration()), []);
+
+  const selected = defaultModelConfiguration(["test-provider/test-model"]);
+  assert.deepEqual(describeProviders(catalog, selected), [{
+    id: "test-provider",
+    name: "Test Provider",
+    ready: false,
+    modelCount: 1,
+    availableModelCount: 0,
+    auth: { source: null, label: null },
+    selection: "primary",
+    custom: false,
+  }]);
 });
 
 test("session execution collects streamed output and always disposes", async () => {

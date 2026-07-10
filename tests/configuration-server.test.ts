@@ -5,11 +5,13 @@ import path from "node:path";
 import test from "node:test";
 
 import { loadState } from "../src/state/state.js";
+import { defaultModelConfiguration } from "../src/state/model-config.js";
 import {
   loadConfigurationView,
   saveConfigurationSubmission,
 } from "../src/web/configuration-service.js";
 import { startConfigurationServer } from "../src/web/configuration-server.js";
+import { renderConfigurationPage } from "../src/web/ui.js";
 
 function fixture() {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-web-config-"));
@@ -26,6 +28,7 @@ function fixture() {
       baseUrl: "http://127.0.0.1:11434/v1",
       api: "openai-completions" as const,
       authHeader: false,
+      requiresApiKey: true,
       models: [
         {
           id: "test-model",
@@ -40,6 +43,25 @@ function fixture() {
   ];
   return { workspace, privateDir, env, customProviders };
 }
+
+test("configuration page starts from connections and uses the original Swarm Pi mark", () => {
+  const html = renderConfigurationPage({
+    configuration: defaultModelConfiguration(),
+    providers: [],
+    providerCatalog: [{ id: "openai", name: "OpenAI" }],
+    models: [],
+    registryError: null,
+  }, "test-nonce");
+
+  assert.match(html, /Connect an AI service/);
+  assert.match(html, /class="brand-logo"/);
+  assert.match(html, />Close setup</);
+  assert.match(html, /id="closed-screen"/);
+  assert.doesNotMatch(html, />Cancel</);
+  assert.doesNotMatch(html, /Show all \d+ providers/);
+  assert.doesNotMatch(html, /Raspberry|raspberry/i);
+  assert.doesNotMatch(html, /Provider ID/);
+});
 
 test("configuration service stores credentials outside model and state files", async () => {
   const { workspace, privateDir, env, customProviders } = fixture();
@@ -68,19 +90,57 @@ test("configuration service stores credentials outside model and state files", a
   assert.deepEqual((await loadState(workspace)).config.modelPriority, ["local-test/test-model"]);
 });
 
+test("custom models keep unknown limits automatic in the browser view", async () => {
+  const { workspace, env } = fixture();
+  const view = await saveConfigurationSubmission(
+    workspace,
+    {
+      primary: null,
+      fallbacks: [],
+      customProviders: [
+        {
+          id: "automatic-limits",
+          name: "Automatic Limits",
+          baseUrl: "http://127.0.0.1:11434/v1",
+          api: "openai-completions",
+          authHeader: false,
+          requiresApiKey: false,
+          models: [
+            {
+              id: "unknown-model",
+              name: "Unknown Model",
+              reasoning: false,
+              input: ["text"],
+            },
+          ],
+        },
+      ],
+    },
+    env,
+  );
+  const model = view.models.find((entry) => entry.id === "automatic-limits/unknown-model");
+
+  assert.equal(model?.contextWindow, null);
+  assert.equal(model?.maxTokens, null);
+  assert.deepEqual(model?.metadata, { contextWindow: null, maxTokens: null });
+});
+
 test("configuration service validates every fallback and credential payload", async () => {
   const { workspace, env, customProviders } = fixture();
-  const inventory = await loadConfigurationView(workspace, env);
-  const unavailableFallback = inventory.models.find((model) => !model.available)?.id;
-  assert.ok(unavailableFallback);
+  const lockedProvider = {
+    ...customProviders[0]!,
+    id: "locked-test",
+    name: "Locked Test",
+    models: [{ ...customProviders[0]!.models[0]!, id: "locked-model" }],
+  };
 
   await assert.rejects(
     () => saveConfigurationSubmission(
       workspace,
       {
         primary: "local-test/test-model",
-        fallbacks: [unavailableFallback],
-        customProviders,
+        fallbacks: ["locked-test/locked-model"],
+        customProviders: [...customProviders, lockedProvider],
         credential: { provider: "local-test", apiKey: "valid-test-key" },
       },
       env,
@@ -117,7 +177,7 @@ test("local configuration server requires its token and closes after save", asyn
 
   assert.equal(documentResponse.status, 200);
   assert.match(documentResponse.headers.get("content-security-policy") ?? "", /default-src 'none'/);
-  assert.match(html, /Model setup/);
+  assert.match(html, /AI connections/);
   assert.doesNotMatch(html, new RegExp(secret));
 
   const forbidden = await fetch(`${setupUrl.origin}/api/save`, {

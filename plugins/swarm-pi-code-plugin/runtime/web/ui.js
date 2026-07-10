@@ -10,301 +10,687 @@ export function renderConfigurationPage(view, nonce) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Swarm Pi - Model setup</title>
+  <title>Swarm Pi - AI setup</title>
   <style nonce="${nonce}">${styles}</style>
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand-mark" aria-hidden="true">SP</div>
-      <strong>Swarm Pi</strong>
-      <div class="local-status"><span></span>Local configuration</div>
-    </header>
-    <aside class="provider-rail">
-      <h2>Providers</h2>
-      <div id="provider-list" class="provider-list"></div>
-    </aside>
-    <main class="workspace">
-      <div class="title-row">
-        <div>
-          <h1>Model setup</h1>
-          <p>Choose the models used for delegated work in this repository.</p>
-        </div>
-        <div id="registry-warning" class="warning" hidden></div>
+      <div class="brand">
+        <svg class="brand-logo" viewBox="0 0 44 44" role="img" aria-label="Swarm Pi logo">
+          <path class="logo-bracket" d="M10 13 4 22l6 9M34 13l6 9-6 9"/>
+          <path class="logo-path" d="M16 10h9l-8 12 10 12H16"/>
+          <circle class="logo-node" cx="26" cy="10" r="3.5"/>
+          <circle class="logo-node" cx="17" cy="22" r="3.5"/>
+          <circle class="logo-node" cx="27" cy="34" r="3.5"/>
+          <path class="logo-handoff" d="M21 22h6"/>
+        </svg>
+        <span>Swarm Pi</span>
       </div>
-      <form id="configuration-form" novalidate>
-        <section class="settings-section">
-          <div class="section-label"><h2>Provider</h2><p>Primary connection</p></div>
-          <div class="section-content">
-            <label for="provider-select">Provider</label>
-            <select id="provider-select"></select>
-            <p class="hint">Select the provider for your primary model.</p>
-          </div>
-        </section>
+      <div class="local-status"><span></span>Local setup</div>
+    </header>
 
-        <section class="settings-section">
-          <div class="section-label"><h2>Authentication</h2><p>Private credential</p></div>
-          <div class="section-content">
-            <div id="auth-status" class="auth-status"></div>
-            <label for="api-key">API key <span class="optional">optional</span></label>
-            <input id="api-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Enter or replace API key">
-            <p class="hint">Saved in Pi's user credential store. It is never written to model.json or shown again.</p>
-          </div>
-        </section>
+    <nav class="steps" aria-label="Setup progress">
+      <button type="button" data-step="1"><span>1</span>Connect</button>
+      <div class="step-line"></div>
+      <button type="button" data-step="2"><span>2</span>Choose models</button>
+      <div class="step-line"></div>
+      <button type="button" data-step="3"><span>3</span>Review</button>
+    </nav>
 
-        <section class="settings-section">
-          <div class="section-label"><h2>Primary model</h2><p>Default worker</p></div>
-          <div class="section-content">
+    <main class="workspace">
+      <div id="registry-warning" class="notice warning" hidden></div>
+
+      <section id="connections-screen" class="screen">
+        <div class="screen-heading">
+          <div><h1>AI connections</h1><p>Services available to this project.</p></div>
+          <button id="open-connection" class="primary-button" type="button">Add connection</button>
+        </div>
+        <div id="connection-empty" class="hero-empty" hidden>
+          <svg viewBox="0 0 72 72" aria-hidden="true">
+            <path d="M21 18h17L25 36l20 18H21"/>
+            <circle cx="40" cy="18" r="5"/><circle cx="25" cy="36" r="5"/><circle cx="45" cy="54" r="5"/>
+          </svg>
+          <h2>Connect an AI service</h2>
+          <p>No usable connection was detected from Pi or this project.</p>
+          <div class="empty-actions">
+            <button id="empty-connect" class="primary-button" type="button">Connect a service</button>
+            <button id="empty-local" class="secondary-button" type="button">Find local AI apps</button>
+          </div>
+        </div>
+        <div id="connection-list" class="connection-list"></div>
+        <div id="connection-actions" class="section-actions">
+          <button id="find-local" class="secondary-button" type="button">Find local AI apps</button>
+          <span id="connection-status" class="inline-status" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <section id="models-screen" class="screen" hidden>
+        <div class="screen-heading"><div><h1>Choose models</h1><p>Select a primary worker and optional fallbacks.</p></div></div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Primary model</h2><p>Used for delegated work by default.</p></div>
+          <div class="form-control">
             <label for="primary-model">Model</label>
             <select id="primary-model"></select>
-            <p class="hint">Only models available for the selected provider can be saved.</p>
+            <div id="model-details" class="model-details"></div>
           </div>
-        </section>
-
-        <section class="settings-section">
-          <div class="section-label"><h2>Fallback models</h2><p>Ordered recovery</p></div>
-          <div class="section-content">
+        </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Fallback models</h2><p>Tried in this order if the primary is unavailable.</p></div>
+          <div class="form-control">
             <div id="fallback-list" class="fallback-list"></div>
-            <button id="add-fallback" class="secondary-button" type="button">Add fallback model</button>
-            <p class="hint inline-hint">Read-only jobs try these models in order when the primary fails.</p>
+            <button id="add-fallback" class="secondary-button" type="button">Add fallback</button>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="settings-section custom-section">
-          <div class="section-label"><h2>Custom endpoint</h2><p>OpenAI-compatible and more</p></div>
-          <div class="section-content">
-            <div class="custom-toolbar">
-              <select id="custom-provider-select" aria-label="Custom provider"></select>
-              <button id="add-custom-provider" class="secondary-button" type="button">Add custom provider</button>
-              <button id="remove-custom-provider" class="danger-button" type="button">Remove</button>
-            </div>
-            <div id="custom-editor" class="custom-editor" hidden>
-              <div class="field-grid">
-                <div><label for="custom-id">Provider ID</label><input id="custom-id" spellcheck="false"></div>
-                <div><label for="custom-name">Display name</label><input id="custom-name"></div>
-                <div class="wide"><label for="custom-url">Base URL</label><input id="custom-url" type="url" spellcheck="false" placeholder="http://127.0.0.1:11434/v1"></div>
-                <div><label for="custom-api">API type</label><select id="custom-api"><option value="openai-completions">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option><option value="google-generative-ai">Google Generative AI</option></select></div>
-                <label class="checkbox-field"><input id="custom-auth-header" type="checkbox"> Add Authorization bearer header</label>
-              </div>
-              <div class="subsection-title"><div><h3>Models</h3><p>Model IDs exposed by this endpoint.</p></div><button id="add-custom-model" class="secondary-button" type="button">Add model</button></div>
-              <div id="custom-model-list" class="custom-model-list"></div>
-            </div>
-            <div id="custom-empty" class="empty-state">Add a custom provider for Ollama, LM Studio, vLLM, or a private gateway.</div>
-          </div>
-        </section>
-      </form>
+      <section id="review-screen" class="screen" hidden>
+        <div class="screen-heading"><div><h1>Review setup</h1><p>Confirm what Swarm Pi will use in this project.</p></div></div>
+        <div class="review-section"><h2>Primary model</h2><div id="review-primary" class="review-value"></div></div>
+        <div class="review-section"><h2>Fallback order</h2><div id="review-fallbacks" class="review-list"></div></div>
+        <div class="review-section"><h2>Connections</h2><div id="review-connections" class="review-list"></div></div>
+      </section>
+
+      <section id="closed-screen" class="screen completion-screen" hidden>
+        <div id="completion-mark" class="completion-mark" aria-hidden="true">✓</div>
+        <h1 id="completion-title">Setup closed</h1>
+        <p id="completion-message"></p>
+      </section>
     </main>
+
     <footer class="actionbar">
       <div id="save-status" class="save-status" role="status" aria-live="polite"></div>
-      <div class="actions">
-        <button id="cancel-button" class="secondary-button" type="button">Cancel</button>
-        <button id="save-button" class="primary-button" type="submit" form="configuration-form">Save configuration</button>
+      <div id="action-buttons" class="actions">
+        <button id="cancel-button" class="secondary-button" type="button">Close setup</button>
+        <button id="back-button" class="secondary-button" type="button" hidden>Back</button>
+        <button id="next-button" class="primary-button" type="button">Choose models</button>
+        <button id="save-button" class="primary-button" type="button" hidden>Save configuration</button>
       </div>
     </footer>
   </div>
+
+  <dialog id="connection-dialog">
+    <div class="dialog-shell">
+      <div class="dialog-heading">
+        <div><h2 id="dialog-title">Add a connection</h2><p>Choose how you access the AI service.</p></div>
+        <button id="close-dialog" class="icon-button" type="button" aria-label="Close" title="Close">x</button>
+      </div>
+      <div class="mode-tabs" role="tablist" aria-label="Connection type">
+        <button id="cloud-tab" type="button" role="tab">Cloud API key</button>
+        <button id="custom-tab" type="button" role="tab">Custom or local endpoint</button>
+      </div>
+
+      <div id="cloud-panel" class="dialog-panel">
+        <label for="cloud-provider">AI service</label>
+        <select id="cloud-provider"></select>
+        <label for="cloud-key">API key</label>
+        <input id="cloud-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Enter API key">
+        <p class="field-hint">Existing Pi subscription sign-ins and environment credentials are detected automatically.</p>
+        <button id="connect-cloud" class="primary-button wide-button" type="button">Connect</button>
+      </div>
+
+      <div id="custom-panel" class="dialog-panel" hidden>
+        <label for="endpoint-url">Server URL</label>
+        <input id="endpoint-url" type="url" spellcheck="false" placeholder="http://127.0.0.1:11434">
+        <label for="endpoint-key">API key <span class="optional">optional</span></label>
+        <input id="endpoint-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Leave blank for local servers">
+        <button id="test-endpoint" class="primary-button wide-button" type="button">Test and find models</button>
+        <div id="discovery-result" class="discovery-result" hidden></div>
+        <details id="advanced-connection" class="advanced" hidden>
+          <summary>Advanced connection and model settings</summary>
+          <div class="advanced-body">
+            <label for="endpoint-name">Connection name</label>
+            <input id="endpoint-name">
+            <div class="advanced-grid">
+              <div><label for="endpoint-canonical-url">API base URL</label><input id="endpoint-canonical-url" type="url" spellcheck="false"></div>
+              <div><label for="endpoint-api">API protocol</label><select id="endpoint-api"><option value="openai-completions">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option><option value="google-generative-ai">Google Generative AI</option></select></div>
+            </div>
+            <div id="advanced-models" class="advanced-models"></div>
+          </div>
+        </details>
+        <button id="accept-endpoint" class="primary-button wide-button" type="button" hidden>Add connection</button>
+      </div>
+      <div id="dialog-status" class="dialog-status" role="status" aria-live="polite"></div>
+    </div>
+  </dialog>
+
   <script nonce="${nonce}">window.__SWARM_CONFIG__=${bootstrap};</script>
   <script nonce="${nonce}">${clientScript}</script>
 </body>
 </html>`;
 }
 const styles = String.raw `
-:root{color-scheme:light;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:15px;line-height:1.45;color:#18201f;background:#f5f7f6;letter-spacing:0;--teal:#087f78;--teal-dark:#076a65;--teal-soft:#eaf7f5;--coral:#c4493d;--amber:#a76800;--green:#168a58;--border:#d9dfdc;--muted:#65716d;--surface:#fff;--rail:#f8faf9}*{box-sizing:border-box}body{margin:0;min-width:320px;background:#f5f7f6}button,input,select{font:inherit;letter-spacing:0}.app-shell{height:100vh;overflow:hidden;display:grid;grid-template-columns:280px minmax(0,1fr);grid-template-rows:64px minmax(0,1fr) 76px;grid-template-areas:"top top" "rail main" "rail actions"}.topbar{grid-area:top;display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid var(--border);background:#fff;font-size:18px}.brand-mark{display:grid;place-items:center;width:32px;height:32px;border-radius:6px;background:#102b29;color:#fff;font-size:12px;font-weight:800}.local-status{margin-left:auto;display:flex;align-items:center;gap:8px;color:#3d4946;font-size:14px}.local-status span{width:9px;height:9px;border-radius:50%;background:var(--green)}.provider-rail{grid-area:rail;min-height:0;overflow-y:auto;background:var(--rail);border-right:1px solid var(--border);padding:25px 16px 32px}.provider-rail h2{font-size:13px;text-transform:uppercase;color:var(--muted);margin:0 10px 14px;font-weight:700}.provider-list{display:grid;gap:4px}.provider-item{width:100%;display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:10px;padding:10px;border:1px solid transparent;border-radius:7px;background:transparent;text-align:left;color:inherit;cursor:pointer}.provider-item:hover{background:#fff;border-color:#e2e7e5}.provider-item.active{background:#fff;border-color:#a9cbc6;box-shadow:0 1px 2px rgba(20,49,46,.05)}.provider-swatch{display:grid;place-items:center;width:38px;height:38px;border-radius:6px;background:#dfeae7;color:#24403c;font-size:12px;font-weight:800;text-transform:uppercase}.provider-copy{min-width:0}.provider-name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:650}.provider-state{display:flex;align-items:center;gap:6px;margin-top:2px;font-size:12px;color:var(--muted)}.provider-state::before{content:"";width:7px;height:7px;border-radius:50%;background:#a5afac}.provider-state.ready{color:var(--green)}.provider-state.ready::before{background:var(--green)}.provider-state.missing{color:var(--amber)}.provider-state.missing::before{background:#e3a21a}.provider-arrow{color:#7a8582}.show-all-providers{width:100%;margin-top:10px}.workspace{grid-area:main;min-height:0;overflow:auto;padding:34px clamp(28px,5vw,72px) 40px;background:#fff}.title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding-bottom:22px;border-bottom:1px solid var(--border)}h1{font-size:29px;line-height:1.15;margin:0 0 7px;font-weight:720}.title-row p{margin:0;color:var(--muted)}.warning{max-width:420px;padding:9px 12px;border:1px solid #e7c27a;border-radius:6px;background:#fff8e8;color:#73500d;font-size:13px}.settings-section{display:grid;grid-template-columns:minmax(150px,210px) minmax(0,1fr);gap:36px;padding:24px 0;border-bottom:1px solid #e5e9e7}.section-label h2{font-size:16px;margin:0 0 4px}.section-label p,.subsection-title p{margin:0;color:var(--muted);font-size:13px}.section-content>label,.field-grid label,.custom-model-row label{display:block;margin-bottom:7px;font-size:13px;font-weight:650;color:#34413e}.optional{color:var(--muted);font-weight:500}input,select{width:100%;height:42px;padding:0 12px;border:1px solid #cbd3d0;border-radius:6px;background:#fff;color:#18201f;outline:none}input:focus,select:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(8,127,120,.12)}input:disabled,select:disabled{background:#f2f4f3;color:#89928f}.hint{margin:7px 0 0;color:var(--muted);font-size:12px}.auth-status{display:flex;align-items:flex-start;gap:10px;margin-bottom:15px;padding:12px;border:1px solid #dfe5e2;border-radius:6px;background:#f8faf9}.auth-dot{width:10px;height:10px;margin-top:5px;border-radius:50%;background:#dfa21f;flex:none}.auth-status.ready{border-color:#a8d3c0;background:#f1fbf6}.auth-status.ready .auth-dot{background:var(--green)}.auth-title{font-weight:680}.auth-detail{display:block;color:var(--muted);font-size:12px;margin-top:1px}.fallback-list{display:grid;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:10px}.fallback-list:empty{display:none}.fallback-row{display:grid;grid-template-columns:28px minmax(0,1fr) 38px;align-items:center;border-bottom:1px solid var(--border)}.fallback-row:last-child{border-bottom:0}.fallback-row select{border:0;border-radius:0;box-shadow:none}.drag-handle{color:#8d9794;text-align:center;font-size:18px}.icon-button{width:38px;height:38px;border:0;background:transparent;color:#67716f;cursor:pointer;font-size:20px}.icon-button:hover{color:var(--coral);background:#fff2f0}.secondary-button,.primary-button,.danger-button{height:40px;padding:0 15px;border-radius:6px;cursor:pointer;font-weight:650}.secondary-button{border:1px solid #cbd3d0;background:#fff;color:#26312f}.secondary-button:hover{background:#f5f7f6}.primary-button{border:1px solid var(--teal);background:var(--teal);color:#fff}.primary-button:hover{background:var(--teal-dark)}.primary-button:disabled{opacity:.55;cursor:wait}.danger-button{border:1px solid #e6b7b1;background:#fff;color:var(--coral)}.inline-hint{display:inline;margin-left:12px}.custom-toolbar{display:grid;grid-template-columns:minmax(180px,1fr) auto auto;gap:8px}.custom-editor{margin-top:18px;padding-top:18px;border-top:1px solid var(--border)}.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.field-grid .wide{grid-column:1/-1}.checkbox-field{display:flex!important;align-items:center;gap:9px;margin:24px 0 0!important;font-weight:500!important}.checkbox-field input{width:17px;height:17px;margin:0}.subsection-title{display:flex;align-items:center;justify-content:space-between;margin:22px 0 10px}.subsection-title h3{font-size:14px;margin:0 0 2px}.custom-model-list{display:grid;gap:8px}.custom-model-row{display:grid;grid-template-columns:1.2fr 1.2fr 110px 110px 38px;gap:8px;align-items:end}.custom-model-row .icon-button{border:1px solid var(--border);border-radius:6px}.custom-model-row label{font-size:11px;margin-bottom:4px}.empty-state{margin-top:14px;padding:22px;border:1px dashed #cbd3d0;border-radius:6px;text-align:center;color:var(--muted);font-size:13px}.actionbar{grid-area:actions;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px clamp(28px,5vw,72px);border-top:1px solid var(--border);background:rgba(255,255,255,.97)}.actions{display:flex;gap:10px;margin-left:auto}.save-status{font-size:13px}.save-status.success{color:var(--green);font-weight:650}.save-status.error{color:var(--coral);font-weight:650}@media(max-width:860px){.app-shell{grid-template-columns:1fr;grid-template-rows:58px minmax(0,1fr) 72px;grid-template-areas:"top" "main" "actions"}.provider-rail{display:none}.topbar{padding:0 16px}.workspace{padding:24px 18px 30px}.settings-section{grid-template-columns:1fr;gap:14px;padding:22px 0}.section-label p{display:none}.title-row{display:block}.warning{margin-top:14px}.actionbar{padding:12px 18px}.custom-toolbar{grid-template-columns:1fr 1fr}.custom-toolbar select{grid-column:1/-1}.custom-model-row{grid-template-columns:1fr 1fr 38px}.custom-model-row>div:nth-child(3),.custom-model-row>div:nth-child(4){display:none}.inline-hint{display:block;margin:8px 0 0}}@media(max-width:480px){.local-status{font-size:12px}.brand-mark{width:30px;height:30px}.topbar strong{font-size:16px}h1{font-size:25px}.field-grid{grid-template-columns:1fr}.field-grid .wide{grid-column:auto}.custom-toolbar{grid-template-columns:1fr}.custom-toolbar select{grid-column:auto}.custom-model-row{grid-template-columns:1fr 38px}.custom-model-row>div:nth-child(2){display:none}.actionbar{align-items:stretch}.save-status{position:absolute;bottom:74px;left:18px;right:18px;background:#fff}.actions{width:100%}.actions button{flex:1}}
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  color: #18201f;
+  background: #f4f6f5;
+  --ink: #18201f;
+  --muted: #66716e;
+  --border: #d7ddda;
+  --surface: #ffffff;
+  --rail: #f6f8f7;
+  --teal: #087f78;
+  --teal-dark: #066b65;
+  --teal-soft: #e9f6f4;
+  --green: #168a58;
+  --green-soft: #edf8f2;
+  --coral: #c84e41;
+  --amber: #99620a;
+  --amber-soft: #fff8e8;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; min-width: 320px; background: #f4f6f5; }
+button, input, select { font: inherit; letter-spacing: 0; }
+button { cursor: pointer; }
+.app-shell { min-height: 100vh; display: grid; grid-template-rows: 64px 76px minmax(0, 1fr) 76px; }
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 28px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.brand { display: flex; align-items: center; gap: 11px; font-size: 18px; font-weight: 730; }
+.brand-logo { width: 36px; height: 36px; overflow: visible; }
+.brand-logo * { vector-effect: non-scaling-stroke; }
+.logo-bracket { fill: none; stroke: #1c2927; stroke-width: 3.2; stroke-linecap: square; stroke-linejoin: miter; }
+.logo-path { fill: none; stroke: var(--teal); stroke-width: 3.4; stroke-linecap: square; stroke-linejoin: miter; }
+.logo-node { fill: #fff; stroke: #1c2927; stroke-width: 2.8; }
+.logo-handoff { stroke: var(--coral); stroke-width: 3.4; stroke-linecap: square; }
+.local-status { display: flex; align-items: center; gap: 8px; color: #47524f; font-size: 13px; }
+.local-status span { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.steps { display: grid; grid-template-columns: auto minmax(40px, 150px) auto minmax(40px, 150px) auto; align-items: center; justify-content: center; gap: 18px; padding: 0 24px; border-bottom: 1px solid var(--border); background: #fbfcfb; }
+.steps button { display: flex; align-items: center; gap: 9px; padding: 8px 0; border: 0; background: transparent; color: #7a8481; font-weight: 650; }
+.steps button span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #e7eae8; color: #68716f; }
+.steps button.active { color: var(--teal); }
+.steps button.active span { color: #fff; background: var(--teal); }
+.steps button.complete { color: #38534f; }
+.steps button.complete span { color: #fff; background: #315f58; }
+.step-line { height: 1px; background: #cdd3d0; }
+.workspace { width: min(1040px, calc(100% - 40px)); margin: 0 auto; padding: 38px 0 48px; }
+.screen-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
+h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.2; }
+h2 { letter-spacing: 0; }
+.screen-heading p, .form-copy p { margin: 0; color: var(--muted); }
+.primary-button, .secondary-button, .danger-button { min-height: 40px; padding: 0 16px; border-radius: 6px; font-weight: 680; }
+.primary-button { color: #fff; border: 1px solid var(--teal); background: var(--teal); }
+.primary-button:hover { background: var(--teal-dark); }
+.secondary-button { color: #26312f; border: 1px solid #c8d0cd; background: #fff; }
+.secondary-button:hover { background: #f3f6f5; }
+.danger-button { color: #a63f35; border: 1px solid #e5b8b2; background: #fff; }
+.primary-button:disabled, .secondary-button:disabled { opacity: .5; cursor: not-allowed; }
+.notice { margin-bottom: 20px; padding: 11px 13px; border-radius: 6px; font-size: 13px; }
+.warning { color: #73500d; border: 1px solid #e3c37f; background: var(--amber-soft); }
+.hero-empty { display: grid; justify-items: center; padding: 66px 24px 54px; text-align: center; }
+.hero-empty svg { width: 64px; height: 64px; margin-bottom: 16px; fill: #fff; stroke: var(--teal); stroke-width: 3; }
+.hero-empty h2 { margin: 0 0 7px; font-size: 24px; }
+.hero-empty p { margin: 0; color: var(--muted); }
+.empty-actions { display: flex; gap: 10px; margin-top: 24px; }
+.connection-list { display: grid; gap: 8px; padding-top: 22px; }
+.connection-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto auto; align-items: center; gap: 13px; min-height: 68px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+.connection-mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 6px; background: #e5efed; color: #24413c; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+.connection-name { display: block; font-weight: 700; }
+.connection-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: 12px; font-weight: 650; }
+.status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.row-actions { display: flex; gap: 6px; }
+.row-actions button { min-height: 34px; padding: 0 11px; }
+.section-actions { display: flex; align-items: center; gap: 12px; padding-top: 18px; }
+.inline-status { color: var(--muted); font-size: 13px; }
+.inline-status.error, .dialog-status.error, .save-status.error { color: var(--coral); }
+.form-band { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 50px; padding: 28px 0; border-bottom: 1px solid var(--border); }
+.form-copy h2, .review-section h2 { margin: 0 0 4px; font-size: 16px; }
+label { display: block; margin: 0 0 7px; color: #34413e; font-size: 13px; font-weight: 680; }
+input, select { width: 100%; height: 43px; padding: 0 12px; border: 1px solid #c8d0cd; border-radius: 6px; color: var(--ink); background: #fff; outline: none; }
+input:focus, select:focus, button:focus-visible, summary:focus-visible { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(8,127,120,.14); outline: none; }
+.model-details { margin-top: 12px; padding: 14px; border-left: 3px solid var(--teal); background: #f4f8f7; }
+.model-title { font-weight: 720; }
+.model-reference { margin-top: 2px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.model-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.tag { padding: 3px 7px; border-radius: 4px; color: #40504d; background: #e4e9e7; font-size: 11px; }
+.model-advanced { margin-top: 12px; }
+.model-advanced summary, .advanced summary { color: #345b55; font-weight: 670; cursor: pointer; }
+.limit-grid, .advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 13px; }
+.source-note { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.fallback-list { display: grid; gap: 7px; margin-bottom: 10px; }
+.fallback-row { display: grid; grid-template-columns: minmax(0, 1fr) 36px 36px 36px; align-items: center; gap: 5px; }
+.fallback-row button { width: 36px; height: 36px; padding: 0; border: 1px solid var(--border); border-radius: 6px; color: #586360; background: #fff; }
+.review-section { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 50px; padding: 25px 0; border-bottom: 1px solid var(--border); }
+.review-value { font-weight: 700; }
+.review-list { display: grid; gap: 7px; }
+.review-item { padding: 10px 12px; border-left: 3px solid #9fb7b3; background: #f5f7f6; }
+.completion-screen { display: grid; justify-items: center; align-content: center; min-height: 100%; padding: 60px 20px; text-align: center; }
+.completion-mark { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 18px; border-radius: 50%; color: #fff; background: var(--green); font-size: 25px; font-weight: 800; }
+.completion-mark.neutral { background: #5e6966; }
+.completion-screen h1 { margin-bottom: 8px; }
+.completion-screen p { max-width: 540px; margin: 0; color: var(--muted); }
+.actionbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px max(24px, calc((100% - 1040px) / 2)); border-top: 1px solid var(--border); background: rgba(255,255,255,.98); }
+.actions { display: flex; gap: 9px; margin-left: auto; }
+.save-status { color: var(--muted); font-size: 13px; }
+.save-status.success { color: var(--green); font-weight: 680; }
+dialog { width: min(660px, calc(100% - 28px)); max-height: calc(100vh - 40px); padding: 0; border: 1px solid #c7cfcc; border-radius: 8px; background: #fff; box-shadow: 0 18px 60px rgba(21,35,32,.2); }
+dialog::backdrop { background: rgba(23,31,29,.36); }
+.dialog-shell { padding: 24px; overflow-y: auto; max-height: calc(100vh - 42px); }
+.dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.dialog-heading h2 { margin: 0 0 4px; font-size: 22px; }
+.dialog-heading p { margin: 0; color: var(--muted); }
+.icon-button { width: 36px; height: 36px; border: 0; border-radius: 6px; color: #5d6764; background: transparent; font-weight: 800; }
+.icon-button:hover { color: var(--coral); background: #fff1ef; }
+.mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 22px 0; padding: 4px; border-radius: 7px; background: #edf1ef; }
+.mode-tabs button { min-height: 38px; border: 0; border-radius: 5px; color: #59635f; background: transparent; font-weight: 670; }
+.mode-tabs button.active { color: #183b36; background: #fff; box-shadow: 0 1px 2px rgba(21,35,32,.08); }
+.dialog-panel label:not(:first-child) { margin-top: 16px; }
+.field-hint { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.optional { color: var(--muted); font-weight: 500; }
+.wide-button { width: 100%; margin-top: 18px; }
+.discovery-result { margin-top: 16px; padding: 12px; border: 1px solid #a9d2c0; border-radius: 6px; color: #215842; background: var(--green-soft); }
+.discovery-result strong { display: block; }
+.advanced { margin-top: 14px; padding-top: 2px; }
+.advanced-body { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.advanced-models { display: grid; gap: 7px; max-height: 320px; margin-top: 18px; overflow-y: auto; }
+.model-editor { padding: 9px 11px; border: 1px solid var(--border); border-radius: 6px; }
+.model-editor summary { font-weight: 650; cursor: pointer; overflow-wrap: anywhere; }
+.model-editor-body { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding-top: 12px; }
+.model-editor-body .model-id { grid-column: 1 / -1; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.dialog-status { min-height: 20px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+@media (max-width: 760px) {
+  .app-shell { grid-template-rows: 58px 68px minmax(0, 1fr) auto; }
+  .topbar { padding: 0 16px; }
+  .steps { grid-template-columns: auto 26px auto 26px auto; gap: 8px; padding: 0 12px; }
+  .steps button { font-size: 12px; }
+  .steps button span { width: 26px; height: 26px; }
+  .workspace { width: min(100% - 28px, 1040px); padding-top: 24px; }
+  .screen-heading { align-items: stretch; flex-direction: column; }
+  .screen-heading .primary-button { width: 100%; }
+  .connection-row { grid-template-columns: 40px minmax(0, 1fr); }
+  .status-pill, .row-actions { grid-column: 2; }
+  .form-band, .review-section { grid-template-columns: 1fr; gap: 14px; }
+  .actionbar { padding: 12px 14px; flex-wrap: wrap; }
+  .save-status { width: 100%; order: 2; }
+  .actions { width: 100%; }
+  .actions button { flex: 1; }
+}
+@media (max-width: 480px) {
+  .local-status { font-size: 0; }
+  .steps button { gap: 0; font-size: 0; }
+  .steps button span { font-size: 12px; }
+  .empty-actions, .section-actions { align-items: stretch; flex-direction: column; width: 100%; }
+  .empty-actions button { width: 100%; }
+  .limit-grid, .advanced-grid, .model-editor-body { grid-template-columns: 1fr; }
+  .fallback-row { grid-template-columns: minmax(0, 1fr) 34px 34px 34px; }
+}
 `;
 const clientScript = String.raw `
 (() => {
   const boot = window.__SWARM_CONFIG__;
   const token = new URLSearchParams(location.search).get("token") || "";
   const state = {
-    providers: boot.providers,
-    models: boot.models,
+    phase: 1,
+    connections: structuredClone(boot.providers),
+    providerCatalog: boot.providerCatalog,
+    models: structuredClone(boot.models),
     customProviders: structuredClone(boot.configuration.customProviders),
-    provider: boot.configuration.primary?.split("/")[0] || boot.providers.find(p => p.ready)?.id || ["anthropic","openai","google","openrouter"].find(id => boot.providers.some(provider => provider.id === id)) || boot.providers[0]?.id || "",
+    credentials: {},
     primary: boot.configuration.primary || "",
     fallbacks: [...boot.configuration.fallbacks],
-    customIndex: boot.configuration.customProviders.findIndex(provider => provider.id === boot.configuration.primary?.split("/")[0]),
-    showAllProviders: false,
+    customDraft: null,
+    editingCustomIndex: -1,
+    dialogMode: "cloud",
+    closed: false,
   };
   const $ = id => document.getElementById(id);
-  const providerList = $("provider-list"), providerSelect = $("provider-select"), primarySelect = $("primary-model"), fallbackList = $("fallback-list"), status = $("save-status"), saveButton = $("save-button");
 
-  function escapeText(value) { return String(value ?? ""); }
-  function initials(name) { return name.split(/[\s._-]+/).map(part => part[0]).join("").slice(0, 2) || "AI"; }
-  function customProviderById(id) { return state.customProviders.find(provider => provider.id === id); }
-  function mergedProviders() {
-    const providers = [...state.providers];
-    for (const custom of state.customProviders) if (!providers.some(provider => provider.id === custom.id)) providers.push({id:custom.id,name:custom.name || custom.id,ready:false,modelCount:custom.models.length,availableModelCount:0,auth:{source:null,label:null},selection:null,custom:true});
-    const recommended = ["anthropic", "openai", "google", "openrouter"];
-    return providers.sort((left, right) => {
-      if (left.id === state.provider) return -1;
-      if (right.id === state.provider) return 1;
+  function initials(name) {
+    return String(name || "AI").split(/[\s._-]+/).filter(Boolean).map(part => part[0]).join("").slice(0, 2) || "AI";
+  }
+  function connection(id) { return state.connections.find(item => item.id === id); }
+  function customProvider(id) { return state.customProviders.find(item => item.id === id); }
+  function endpointKey(provider) {
+    try { return new URL(provider.baseUrl).toString().replace(/\/$/, "") + "|" + provider.api; }
+    catch { return String(provider.baseUrl).replace(/\/$/, "") + "|" + provider.api; }
+  }
+  function modelById(id) { return state.models.find(item => item.id === id); }
+  function providerName(id) { return connection(id)?.name || state.providerCatalog.find(item => item.id === id)?.name || id; }
+  function modelLabel(model) { return model.name === model.model ? model.model : model.name + " - " + model.model; }
+  function sourceLabel(source) {
+    return ({"endpoint":"Endpoint", "pi-catalog":"Pi catalog", "models-dev":"models.dev", "compatibility-default":"Compatibility default", "user":"Custom"})[source] || "Automatic";
+  }
+  function usableModels() {
+    const ready = new Set(state.connections.filter(item => item.ready).map(item => item.id));
+    return state.models.filter(item => item.available || ready.has(item.provider) || state.credentials[item.provider]);
+  }
+  function normalizeSelection() {
+    const usable = usableModels();
+    if (!usable.some(item => item.id === state.primary)) state.primary = usable[0]?.id || "";
+    state.fallbacks = state.fallbacks.filter((value, index, values) =>
+      value !== state.primary && values.indexOf(value) === index && usable.some(item => item.id === value),
+    );
+  }
+  function upsertConnection(value) {
+    const index = state.connections.findIndex(item => item.id === value.id);
+    if (index >= 0) state.connections[index] = value;
+    else state.connections.push(value);
+  }
+  function upsertModels(models) {
+    for (const model of models) {
+      const index = state.models.findIndex(item => item.id === model.id);
+      if (index >= 0) state.models[index] = model;
+      else state.models.push(model);
+    }
+  }
+  function availableProviderId(base) {
+    const used = new Set([
+      ...state.providerCatalog.map(item => item.id),
+      ...state.connections.map(item => item.id),
+      ...state.customProviders.map(item => item.id),
+    ]);
+    if (!used.has(base)) return base;
+    let number = 2;
+    while (true) {
+      const suffix = "-" + number;
+      const candidate = base.slice(0, 64 - suffix.length) + suffix;
+      if (!used.has(candidate)) return candidate;
+      number++;
+    }
+  }
+  function browserModels(provider) {
+    return provider.models.map(item => ({
+      id: provider.id + "/" + item.id,
+      provider: provider.id,
+      model: item.id,
+      name: item.name || item.id,
+      available: true,
+      reasoning: Boolean(item.reasoning),
+      input: item.input || ["text"],
+      contextWindow: item.contextWindow || null,
+      maxTokens: item.maxTokens || null,
+      metadata: {
+        contextWindow: item.metadata?.contextWindow || null,
+        maxTokens: item.metadata?.maxTokens || null,
+      },
+    }));
+  }
+
+  function renderSteps() {
+    document.querySelectorAll("[data-step]").forEach(button => {
+      const step = Number(button.dataset.step);
+      button.className = step === state.phase ? "active" : step < state.phase ? "complete" : "";
+      button.disabled = step > state.phase || (step > 1 && usableModels().length === 0);
+    });
+  }
+  function renderConnections() {
+    const list = $("connection-list");
+    list.replaceChildren();
+    const connections = [...state.connections].sort((left, right) => {
       if (left.ready !== right.ready) return left.ready ? -1 : 1;
-      const leftRank = recommended.indexOf(left.id), rightRank = recommended.indexOf(right.id);
-      if (leftRank !== rightRank) return (leftRank < 0 ? 999 : leftRank) - (rightRank < 0 ? 999 : rightRank);
       return left.name.localeCompare(right.name);
     });
-  }
-  function providerById(id) { return mergedProviders().find(provider => provider.id === id); }
-  function modelLabel(model) { return model.name === model.model ? model.model : model.name + " — " + model.model; }
-  function allModels() {
-    const models = [...state.models];
-    for (const provider of state.customProviders) for (const model of provider.models) {
-      const id = provider.id + "/" + model.id;
-      const existing = models.find(entry => entry.id === id);
-      if (existing) { existing.name = model.name; existing.model = model.id; }
-      else models.push({id,provider:provider.id,model:model.id,name:model.name || model.id,available:false});
-    }
-    return models;
-  }
-  function selectableModels(provider) {
-    const credentialProvider = $("api-key")?.value ? state.provider : null;
-    return allModels().filter(model => (model.available || model.provider === credentialProvider) && (!provider || model.provider === provider));
-  }
-
-  function renderProviders() {
-    providerList.replaceChildren();
-    providerSelect.replaceChildren();
-    const providers = mergedProviders();
-    for (const provider of providers) providerSelect.add(new Option(provider.name, provider.id, false, provider.id === state.provider));
-    const common = new Set(["anthropic", "openai", "google", "openrouter"]);
-    const visible = state.showAllProviders ? providers : providers.filter(provider => provider.ready || provider.custom || provider.id === state.provider || common.has(provider.id));
-    for (const provider of visible) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "provider-item" + (provider.id === state.provider ? " active" : "");
-      button.innerHTML = '<span class="provider-swatch"></span><span class="provider-copy"><span class="provider-name"></span><span class="provider-state"></span></span><span class="provider-arrow">›</span>';
-      button.querySelector(".provider-swatch").textContent = initials(provider.name);
-      button.querySelector(".provider-name").textContent = provider.name;
-      const providerState = button.querySelector(".provider-state");
-      providerState.className = "provider-state " + (provider.ready ? "ready" : "missing");
-      providerState.textContent = provider.ready ? provider.availableModelCount + " models ready" : "Missing authentication";
-      button.addEventListener("click", () => selectProvider(provider.id));
-      providerList.append(button);
-    }
-    if (!state.showAllProviders && visible.length < providers.length) {
-      const showAll = document.createElement("button"); showAll.type = "button"; showAll.className = "secondary-button show-all-providers"; showAll.textContent = "Show all " + providers.length + " providers"; showAll.addEventListener("click", () => { state.showAllProviders = true; renderProviders(); }); providerList.append(showAll);
+    $("connection-empty").hidden = connections.length > 0;
+    $("connection-actions").hidden = connections.length === 0;
+    $("open-connection").hidden = connections.length === 0;
+    for (const item of connections) {
+      const row = document.createElement("div");
+      row.className = "connection-row";
+      row.innerHTML = '<div class="connection-mark"></div><div><span class="connection-name"></span><span class="connection-meta"></span></div><span class="status-pill"></span><div class="row-actions"></div>';
+      row.querySelector(".connection-mark").textContent = initials(item.name);
+      row.querySelector(".connection-name").textContent = item.name;
+      row.querySelector(".connection-meta").textContent = item.availableModelCount + " models available" + (item.auth?.label ? " - " + item.auth.label : "");
+      row.querySelector(".status-pill").textContent = item.ready ? "Ready" : "Needs attention";
+      const actions = row.querySelector(".row-actions");
+      if (item.custom) {
+        const edit = document.createElement("button"); edit.type = "button"; edit.className = "secondary-button"; edit.textContent = "Edit"; edit.addEventListener("click", () => openCustomEditor(item.id));
+        const remove = document.createElement("button"); remove.type = "button"; remove.className = "danger-button"; remove.textContent = "Remove"; remove.addEventListener("click", () => removeCustom(item.id));
+        actions.append(edit, remove);
+      }
+      list.append(row);
     }
   }
-
-  function selectProvider(id) {
-    state.provider = id;
-    if (!state.primary.startsWith(id + "/") || !state.models.some(model => model.id === state.primary && model.available)) {
-      state.primary = (allModels().find(model => model.provider === id && model.available) || allModels().find(model => model.provider === id))?.id || "";
-    }
-    render();
-  }
-
-  function renderAuth() {
-    const provider = providerById(state.provider);
-    const box = $("auth-status");
-    box.className = "auth-status" + (provider?.ready ? " ready" : "");
-    box.replaceChildren();
-    const dot = document.createElement("span"); dot.className = "auth-dot";
-    const copy = document.createElement("div");
-    const title = document.createElement("span"); title.className = "auth-title"; title.textContent = provider?.ready ? "Connected" : "Authentication required";
-    const detail = document.createElement("span"); detail.className = "auth-detail";
-    detail.textContent = provider?.ready ? "Source: " + (provider.auth.label || provider.auth.source || "Pi credential store") : "Enter an API key below, or configure Pi authentication outside this session.";
-    copy.append(title, detail); box.append(dot, copy);
-  }
-
   function renderPrimary() {
-    primarySelect.replaceChildren();
-    const models = allModels().filter(model => model.provider === state.provider);
-    if (models.length === 0) {
-      primarySelect.add(new Option("Authenticate this provider to choose a model", ""));
-      primarySelect.disabled = true;
-      state.primary = "";
-      return;
+    normalizeSelection();
+    const select = $("primary-model");
+    select.replaceChildren();
+    const groups = new Map();
+    for (const item of usableModels()) {
+      if (!groups.has(item.provider)) groups.set(item.provider, []);
+      groups.get(item.provider).push(item);
     }
-    primarySelect.disabled = false;
-    for (const model of models) primarySelect.add(new Option(modelLabel(model), model.id, false, model.id === state.primary));
-    if (!models.some(model => model.id === state.primary)) state.primary = models[0].id;
-    primarySelect.value = state.primary;
+    for (const [provider, models] of groups) {
+      const group = document.createElement("optgroup"); group.label = providerName(provider);
+      for (const item of models.sort((left, right) => left.name.localeCompare(right.name))) {
+        group.append(new Option(modelLabel(item), item.id, false, item.id === state.primary));
+      }
+      select.append(group);
+    }
+    select.disabled = usableModels().length === 0;
+    select.value = state.primary;
+    renderModelDetails();
   }
-
+  function renderModelDetails() {
+    const target = $("model-details"); target.replaceChildren();
+    const selected = modelById(state.primary);
+    if (!selected) { target.textContent = "Connect an AI service before choosing a model."; return; }
+    const title = document.createElement("div"); title.className = "model-title"; title.textContent = selected.name;
+    const reference = document.createElement("div"); reference.className = "model-reference"; reference.textContent = selected.id;
+    const tags = document.createElement("div"); tags.className = "model-tags";
+    const values = [];
+    if (selected.reasoning) values.push("Reasoning");
+    if (selected.input.includes("image")) values.push("Vision");
+    values.push(selected.contextWindow ? Math.round(selected.contextWindow / 1000) + "K context" : "Automatic context");
+    values.push(selected.maxTokens ? Math.round(selected.maxTokens / 1000) + "K max output" : "Automatic output");
+    for (const value of values) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = value; tags.append(tag); }
+    target.append(title, reference, tags);
+    if (customProvider(selected.provider)) target.append(createModelAdvanced(selected));
+  }
+  function createModelAdvanced(selected) {
+    const details = document.createElement("details"); details.className = "model-advanced";
+    const summary = document.createElement("summary"); summary.textContent = "Advanced model limits";
+    const grid = document.createElement("div"); grid.className = "limit-grid";
+    grid.append(limitInput("Context window", "contextWindow", selected), limitInput("Max output", "maxTokens", selected));
+    details.append(summary, grid); return details;
+  }
+  function limitInput(label, field, selected) {
+    const wrap = document.createElement("div"), lab = document.createElement("label"), input = document.createElement("input"), note = document.createElement("span");
+    input.id = "model-limit-" + field; lab.htmlFor = input.id; lab.textContent = label; input.type = "number"; input.min = field === "contextWindow" ? "1024" : "1"; input.placeholder = "Automatic"; input.value = selected[field] || "";
+    note.className = "source-note"; note.textContent = "Source: " + sourceLabel(selected.metadata?.[field]);
+    input.addEventListener("change", () => updateModelLimit(selected, field, input.value));
+    wrap.append(lab, input, note); return wrap;
+  }
+  function updateModelLimit(selected, field, value) {
+    const provider = customProvider(selected.provider), configured = provider?.models.find(item => item.id === selected.model);
+    if (!configured) return;
+    const parsed = value ? Number(value) : null;
+    if (parsed && Number.isInteger(parsed) && parsed > 0) {
+      configured[field] = parsed; configured.metadata = configured.metadata || {}; configured.metadata[field] = "user";
+      selected[field] = parsed; selected.metadata[field] = "user";
+    } else {
+      delete configured[field]; if (configured.metadata) delete configured.metadata[field]; selected[field] = null; selected.metadata[field] = null;
+    }
+    renderModelDetails();
+  }
   function renderFallbacks() {
-    fallbackList.replaceChildren();
-    state.fallbacks = state.fallbacks.filter((value, index, values) => value !== state.primary && values.indexOf(value) === index && allModels().some(model => model.id === value));
+    normalizeSelection();
+    const target = $("fallback-list"); target.replaceChildren();
     state.fallbacks.forEach((value, index) => {
       const row = document.createElement("div"); row.className = "fallback-row";
-      const handle = document.createElement("span"); handle.className = "drag-handle"; handle.textContent = "⋮";
       const select = document.createElement("select"); select.setAttribute("aria-label", "Fallback model " + (index + 1));
-      const choices = allModels().filter(model => model.id !== state.primary && (model.id === value || (model.available && !state.fallbacks.includes(model.id)) || (model.provider === state.provider && $("api-key").value && !state.fallbacks.includes(model.id))));
-      for (const model of choices) select.add(new Option(model.provider + " / " + modelLabel(model) + (model.available || model.id !== value ? "" : " (authentication required)"), model.id, false, model.id === value));
-      select.value = value; select.addEventListener("change", () => { state.fallbacks[index] = select.value; renderFallbacks(); });
-      const remove = document.createElement("button"); remove.type = "button"; remove.className = "icon-button"; remove.title = "Remove fallback"; remove.setAttribute("aria-label", "Remove fallback"); remove.textContent = "×"; remove.addEventListener("click", () => { state.fallbacks.splice(index, 1); renderFallbacks(); });
-      row.append(handle, select, remove); fallbackList.append(row);
-    });
-    $("add-fallback").disabled = selectableModels().filter(model => model.id !== state.primary && !state.fallbacks.includes(model.id)).length === 0;
-  }
-
-  function syncCustomEditor() {
-    if (state.customIndex < 0) return;
-    const provider = state.customProviders[state.customIndex];
-    const previousId = provider.id;
-    provider.id = $("custom-id").value.trim(); provider.name = $("custom-name").value.trim(); provider.baseUrl = $("custom-url").value.trim(); provider.api = $("custom-api").value; provider.authHeader = $("custom-auth-header").checked;
-    if (previousId && provider.id && previousId !== provider.id) {
-      if (state.provider === previousId) state.provider = provider.id;
-      if (state.primary.startsWith(previousId + "/")) state.primary = provider.id + state.primary.slice(previousId.length);
-      state.fallbacks = state.fallbacks.map(value => value.startsWith(previousId + "/") ? provider.id + value.slice(previousId.length) : value);
-    }
-    document.querySelectorAll(".custom-model-row").forEach((row, index) => {
-      const model = provider.models[index]; if (!model) return;
-      const previousModelId = model.id;
-      model.id = row.querySelector('[data-field="id"]').value.trim(); model.name = row.querySelector('[data-field="name"]').value.trim(); model.contextWindow = Number(row.querySelector('[data-field="contextWindow"]').value); model.maxTokens = Number(row.querySelector('[data-field="maxTokens"]').value);
-      if (previousModelId && model.id && previousModelId !== model.id) {
-        const previousReference = provider.id + "/" + previousModelId, nextReference = provider.id + "/" + model.id;
-        if (state.primary === previousReference) state.primary = nextReference;
-        state.fallbacks = state.fallbacks.map(value => value === previousReference ? nextReference : value);
+      for (const item of usableModels().filter(model => model.id !== state.primary && (model.id === value || !state.fallbacks.includes(model.id)))) {
+        select.add(new Option(providerName(item.provider) + " / " + modelLabel(item), item.id, false, item.id === value));
       }
+      select.value = value; select.addEventListener("change", () => { state.fallbacks[index] = select.value; renderFallbacks(); });
+      const up = iconButton("Up", "^", () => { if (index > 0) { [state.fallbacks[index - 1], state.fallbacks[index]] = [state.fallbacks[index], state.fallbacks[index - 1]]; renderFallbacks(); } });
+      const down = iconButton("Down", "v", () => { if (index < state.fallbacks.length - 1) { [state.fallbacks[index + 1], state.fallbacks[index]] = [state.fallbacks[index], state.fallbacks[index + 1]]; renderFallbacks(); } });
+      const remove = iconButton("Remove fallback", "x", () => { state.fallbacks.splice(index, 1); renderFallbacks(); });
+      up.disabled = index === 0; down.disabled = index === state.fallbacks.length - 1;
+      row.append(select, up, down, remove); target.append(row);
     });
+    $("add-fallback").disabled = usableModels().filter(item => item.id !== state.primary && !state.fallbacks.includes(item.id)).length === 0;
   }
-
-  function renderCustom() {
-    const select = $("custom-provider-select"); select.replaceChildren(); select.add(new Option("Select a custom provider", "-1"));
-    state.customProviders.forEach((provider, index) => select.add(new Option(provider.name || provider.id || "New provider", String(index), false, index === state.customIndex)));
-    select.value = String(state.customIndex);
-    const active = state.customIndex >= 0 && state.customProviders[state.customIndex];
-    $("custom-editor").hidden = !active; $("custom-empty").hidden = Boolean(active); $("remove-custom-provider").disabled = !active;
-    if (!active) return;
-    $("custom-id").value = active.id; $("custom-name").value = active.name; $("custom-url").value = active.baseUrl; $("custom-api").value = active.api; $("custom-auth-header").checked = active.authHeader;
-    const list = $("custom-model-list"); list.replaceChildren();
-    active.models.forEach((model, index) => {
-      const row = document.createElement("div"); row.className = "custom-model-row";
-      const fields = [["id","Model ID",model.id,"text"],["name","Display name",model.name,"text"],["contextWindow","Context",model.contextWindow,"number"],["maxTokens","Max output",model.maxTokens,"number"]];
-      for (const [field,label,value,type] of fields) { const wrap = document.createElement("div"), lab = document.createElement("label"), input = document.createElement("input"); lab.textContent = label; input.type = type; input.value = value; input.dataset.field = field; input.addEventListener("input", syncCustomEditor); wrap.append(lab,input); row.append(wrap); }
-      const remove = document.createElement("button"); remove.type = "button"; remove.className = "icon-button"; remove.title = "Remove model"; remove.setAttribute("aria-label", "Remove custom model"); remove.textContent = "×"; remove.addEventListener("click", () => { syncCustomEditor(); active.models.splice(index,1); renderCustom(); }); row.append(remove); list.append(row);
-    });
+  function iconButton(title, text, handler) {
+    const button = document.createElement("button"); button.type = "button"; button.title = title; button.setAttribute("aria-label", title); button.textContent = text; button.addEventListener("click", handler); return button;
   }
-
+  function renderReview() {
+    const primary = modelById(state.primary);
+    $("review-primary").textContent = primary ? providerName(primary.provider) + " / " + modelLabel(primary) : "No primary model";
+    const fallbacks = $("review-fallbacks"); fallbacks.replaceChildren();
+    if (state.fallbacks.length === 0) fallbacks.textContent = "No fallback models";
+    state.fallbacks.forEach((id, index) => { const item = modelById(id), row = document.createElement("div"); row.className = "review-item"; row.textContent = (index + 1) + ". " + (item ? providerName(item.provider) + " / " + modelLabel(item) : id); fallbacks.append(row); });
+    const connections = $("review-connections"); connections.replaceChildren();
+    state.connections.filter(item => item.ready).forEach(item => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = item.name + " - " + item.availableModelCount + " models"; connections.append(row); });
+  }
   function render() {
-    renderProviders(); providerSelect.value = state.provider; renderAuth(); renderPrimary(); renderFallbacks(); renderCustom();
+    renderSteps(); renderConnections(); renderPrimary(); renderFallbacks(); renderReview();
+    $("connections-screen").hidden = state.phase !== 1; $("models-screen").hidden = state.phase !== 2; $("review-screen").hidden = state.phase !== 3;
+    $("cancel-button").hidden = state.phase !== 1; $("back-button").hidden = state.phase === 1; $("next-button").hidden = state.phase === 3; $("save-button").hidden = state.phase !== 3;
+    $("next-button").textContent = state.phase === 1 ? "Choose models" : "Review";
+    $("next-button").disabled = usableModels().length === 0 || (state.phase === 2 && !state.primary);
     const warning = $("registry-warning"); warning.hidden = !boot.registryError; warning.textContent = boot.registryError ? "Pi model registry: " + boot.registryError : "";
   }
+  function setPhase(phase) { if (phase > 1 && usableModels().length === 0) return; state.phase = phase; render(); window.scrollTo({top: 0, behavior: "smooth"}); }
 
-  providerSelect.addEventListener("change", () => selectProvider(providerSelect.value));
-  primarySelect.addEventListener("change", () => { state.primary = primarySelect.value; renderFallbacks(); });
-  $("add-fallback").addEventListener("click", () => { const next = selectableModels().find(model => model.id !== state.primary && !state.fallbacks.includes(model.id)); if (next) { state.fallbacks.push(next.id); renderFallbacks(); } });
-  $("custom-provider-select").addEventListener("change", () => { syncCustomEditor(); state.customIndex = Number($("custom-provider-select").value); renderCustom(); });
-  $("add-custom-provider").addEventListener("click", () => { syncCustomEditor(); let suffix = 1, id = "custom-provider"; while (state.customProviders.some(provider => provider.id === id)) id = "custom-provider-" + (++suffix); state.customProviders.push({id,name:"Custom provider",baseUrl:"http://127.0.0.1:11434/v1",api:"openai-completions",authHeader:false,models:[{id:"model-name",name:"Model name",reasoning:false,input:["text"],contextWindow:128000,maxTokens:16384}]}); state.customIndex = state.customProviders.length - 1; state.provider = id; state.primary = id + "/model-name"; render(); });
-  $("remove-custom-provider").addEventListener("click", () => { if (state.customIndex < 0) return; const removed = state.customProviders[state.customIndex]; if (!confirm("Remove " + (removed.name || removed.id) + " from this project configuration?")) return; state.customProviders.splice(state.customIndex,1); state.customIndex = -1; renderCustom(); });
-  $("add-custom-model").addEventListener("click", () => { syncCustomEditor(); const provider = state.customProviders[state.customIndex]; if (!provider) return; provider.models.push({id:"model-name",name:"Model name",reasoning:false,input:["text"],contextWindow:128000,maxTokens:16384}); renderCustom(); });
-  ["custom-id","custom-name","custom-url","custom-api","custom-auth-header"].forEach(id => $(id).addEventListener("input", syncCustomEditor));
-  $("api-key").addEventListener("input", () => { renderPrimary(); renderFallbacks(); });
+  function populateProviderCatalog() {
+    const select = $("cloud-provider"), preferred = ["openai", "anthropic", "google", "openrouter", "deepseek", "mistral", "groq", "xai"];
+    select.replaceChildren();
+    const common = document.createElement("optgroup"); common.label = "Common services";
+    preferred.map(id => state.providerCatalog.find(item => item.id === id)).filter(Boolean).forEach(item => common.append(new Option(item.name, item.id)));
+    const more = document.createElement("optgroup"); more.label = "More services";
+    state.providerCatalog.filter(item => !preferred.includes(item.id)).forEach(item => more.append(new Option(item.name, item.id)));
+    select.append(common, more);
+  }
+  function openDialog(mode) {
+    state.dialogMode = mode; state.customDraft = null; state.editingCustomIndex = -1;
+    $("dialog-title").textContent = "Add a connection"; $("cloud-key").value = ""; $("endpoint-key").value = ""; $("endpoint-url").value = ""; $("dialog-status").textContent = "";
+    renderDialog(); $("connection-dialog").showModal();
+  }
+  function openCustomEditor(id) {
+    const index = state.customProviders.findIndex(item => item.id === id); if (index < 0) return;
+    state.dialogMode = "custom"; state.editingCustomIndex = index; state.customDraft = structuredClone(state.customProviders[index]);
+    $("dialog-title").textContent = "Edit connection"; $("endpoint-url").value = state.customDraft.baseUrl; $("endpoint-key").value = ""; $("dialog-status").textContent = "";
+    renderDialog(); $("connection-dialog").showModal();
+  }
+  function renderDialog() {
+    const cloud = state.dialogMode === "cloud";
+    $("cloud-panel").hidden = !cloud; $("custom-panel").hidden = cloud; $("cloud-tab").className = cloud ? "active" : ""; $("custom-tab").className = cloud ? "" : "active";
+    $("cloud-tab").setAttribute("aria-selected", String(cloud)); $("custom-tab").setAttribute("aria-selected", String(!cloud));
+    renderCustomDraft();
+  }
+  function renderCustomDraft() {
+    const draft = state.customDraft, result = $("discovery-result"), advanced = $("advanced-connection"), accept = $("accept-endpoint");
+    result.hidden = !draft; advanced.hidden = !draft; accept.hidden = !draft;
+    if (!draft) return;
+    result.replaceChildren(); const title = document.createElement("strong"); title.textContent = "Connected to " + draft.name; const detail = document.createElement("span"); detail.textContent = draft.models.length + " models found"; result.append(title, detail);
+    $("endpoint-name").value = draft.name; $("endpoint-canonical-url").value = draft.baseUrl; $("endpoint-api").value = draft.api;
+    accept.textContent = state.editingCustomIndex >= 0 ? "Save connection" : "Add connection";
+    const models = $("advanced-models"); models.replaceChildren();
+    draft.models.forEach((item, index) => {
+      const details = document.createElement("details"); details.className = "model-editor";
+      const summary = document.createElement("summary"); summary.textContent = item.name || item.id;
+      const body = document.createElement("div"); body.className = "model-editor-body";
+      const id = document.createElement("div"); id.className = "model-id"; id.textContent = item.id;
+      body.append(id, draftLimitInput(item, index, "contextWindow", "Context window"), draftLimitInput(item, index, "maxTokens", "Max output")); details.append(summary, body); models.append(details);
+    });
+  }
+  function draftLimitInput(item, index, field, label) {
+    const wrap = document.createElement("div"), lab = document.createElement("label"), input = document.createElement("input"), note = document.createElement("span");
+    input.id = "draft-limit-" + index + "-" + field; lab.htmlFor = input.id; lab.textContent = label; input.type = "number"; input.placeholder = "Automatic"; input.value = item[field] || ""; note.className = "source-note"; note.textContent = "Source: " + sourceLabel(item.metadata?.[field]);
+    input.addEventListener("change", () => { const current = state.customDraft.models[index], value = input.value ? Number(input.value) : null; current.metadata = current.metadata || {}; if (value && Number.isInteger(value) && value > 0) { current[field] = value; current.metadata[field] = "user"; } else { delete current[field]; delete current.metadata[field]; } renderCustomDraft(); });
+    wrap.append(lab, input, note); return wrap;
+  }
+  function syncDraftFields() {
+    if (!state.customDraft) return;
+    state.customDraft.name = $("endpoint-name").value.trim() || state.customDraft.name;
+    state.customDraft.baseUrl = $("endpoint-canonical-url").value.trim();
+    state.customDraft.api = $("endpoint-api").value;
+  }
+  function acceptCustom(provider, apiKey) {
+    const matchingIndex = state.editingCustomIndex >= 0
+      ? state.editingCustomIndex
+      : state.customProviders.findIndex(item => endpointKey(item) === endpointKey(provider));
+    const oldId = matchingIndex >= 0 ? state.customProviders[matchingIndex].id : null;
+    provider.id = oldId || availableProviderId(provider.id);
+    if (matchingIndex >= 0) state.customProviders[matchingIndex] = provider; else state.customProviders.push(provider);
+    if (oldId) state.models = state.models.filter(item => item.provider !== oldId);
+    upsertModels(browserModels(provider));
+    if (apiKey) state.credentials[provider.id] = apiKey;
+    upsertConnection({id:provider.id,name:provider.name,ready:true,modelCount:provider.models.length,availableModelCount:provider.models.length,auth:{source:apiKey?"runtime":provider.requiresApiKey?"stored":"local",label:apiKey?"API key entered in this setup session":provider.requiresApiKey?"Pi credential store":"No API key required"},selection:null,custom:true});
+    normalizeSelection();
+    if ($("connection-dialog").open) $("connection-dialog").close();
+    render();
+    if (matchingIndex >= 0 && state.editingCustomIndex < 0) $("connection-status").textContent = "Existing connection refreshed.";
+  }
+  function removeCustom(id) {
+    const provider = customProvider(id); if (!provider || !confirm("Remove " + provider.name + " from this project?")) return;
+    state.customProviders = state.customProviders.filter(item => item.id !== id); state.connections = state.connections.filter(item => item.id !== id); state.models = state.models.filter(item => item.provider !== id); delete state.credentials[id];
+    if (state.primary.startsWith(id + "/")) state.primary = ""; state.fallbacks = state.fallbacks.filter(item => !item.startsWith(id + "/")); render();
+  }
 
   async function post(path, body) {
-    const response = await fetch(path, { method:"POST", headers:{"content-type":"application/json","x-swarm-token":token}, body:JSON.stringify(body ?? {}) });
-    const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Unable to save configuration"); return payload;
+    const response = await fetch(path, {method:"POST",headers:{"content-type":"application/json","x-swarm-token":token},body:JSON.stringify(body || {})});
+    const payload = await response.json(); if (!response.ok) { const error = new Error(payload.error || "Request failed"); error.code = payload.code; throw error; } return payload;
   }
-  $("configuration-form").addEventListener("submit", async event => {
-    event.preventDefault(); syncCustomEditor(); status.className = "save-status"; status.textContent = "Saving configuration…"; saveButton.disabled = true;
+  function setBusy(button, busy, label) { button.disabled = busy; if (label) button.textContent = busy ? label : button.dataset.defaultLabel || button.textContent; }
+  async function findLocal() {
+    const status = $("connection-status"); status.className = "inline-status"; status.textContent = "Looking for local AI apps...";
     try {
-      const key = $("api-key").value;
-      await post("/api/save", { primary: state.primary || null, fallbacks: state.fallbacks, customProviders: state.customProviders, ...(key ? {credential:{provider:state.provider,apiKey:key}} : {}) });
-      $("api-key").value = ""; status.className = "save-status success"; status.textContent = "Configuration saved. This local setup session is now closed.";
-      document.querySelectorAll("input,select,button").forEach(control => control.disabled = true);
-    } catch (error) { status.className = "save-status error"; status.textContent = error.message; saveButton.disabled = false; }
+      const payload = await post("/api/discover-local", {});
+      if (!payload.connections.length) { status.textContent = "No supported local AI app is currently running."; return; }
+      payload.connections.forEach(result => acceptCustom(result.provider, ""));
+      status.textContent = payload.connections.length + " local connection" + (payload.connections.length === 1 ? "" : "s") + " added.";
+    } catch (error) { status.className = "inline-status error"; status.textContent = error.message; }
+  }
+
+  $("open-connection").addEventListener("click", () => openDialog("cloud"));
+  $("empty-connect").addEventListener("click", () => openDialog("cloud"));
+  $("find-local").addEventListener("click", findLocal); $("empty-local").addEventListener("click", findLocal);
+  $("cloud-tab").addEventListener("click", () => { state.dialogMode = "cloud"; renderDialog(); });
+  $("custom-tab").addEventListener("click", () => { state.dialogMode = "custom"; renderDialog(); });
+  $("close-dialog").addEventListener("click", () => $("connection-dialog").close());
+  $("connect-cloud").dataset.defaultLabel = "Connect";
+  $("connect-cloud").addEventListener("click", async () => {
+    const button = $("connect-cloud"), provider = $("cloud-provider").value, apiKey = $("cloud-key").value, status = $("dialog-status"); status.className = "dialog-status"; status.textContent = "Checking connection..."; setBusy(button,true,"Connecting...");
+    try { const preview = await post("/api/connect-provider", {provider,apiKey}); state.credentials[provider] = apiKey; upsertConnection(preview.provider); upsertModels(preview.models); normalizeSelection(); $("connection-dialog").close(); render(); }
+    catch (error) { status.className = "dialog-status error"; status.textContent = error.message; }
+    finally { setBusy(button,false); button.textContent = "Connect"; }
   });
-  $("cancel-button").addEventListener("click", async () => { try { await post("/api/cancel", {}); status.textContent = "Configuration closed without saving."; document.querySelectorAll("input,select,button").forEach(control => control.disabled = true); } catch (error) { status.className = "save-status error"; status.textContent = error.message; } });
-  render();
+  $("test-endpoint").dataset.defaultLabel = "Test and find models";
+  $("test-endpoint").addEventListener("click", async () => {
+    const button = $("test-endpoint"), status = $("dialog-status"); status.className = "dialog-status"; status.textContent = "Testing connection and loading models..."; setBusy(button,true,"Testing...");
+    try {
+      const reservedProviderIds = state.customProviders.filter((_, index) => index !== state.editingCustomIndex).map(item => item.id);
+      const result = await post("/api/discover", {baseUrl:$("endpoint-url").value,apiKey:$("endpoint-key").value,reservedProviderIds});
+      if (state.editingCustomIndex >= 0) result.provider.id = state.customProviders[state.editingCustomIndex].id;
+      state.customDraft = result.provider; status.textContent = "Connection test passed."; renderCustomDraft();
+    } catch (error) { status.className = "dialog-status error"; status.textContent = error.message; }
+    finally { setBusy(button,false); button.textContent = "Test and find models"; }
+  });
+  $("accept-endpoint").addEventListener("click", () => { syncDraftFields(); if (state.customDraft) acceptCustom(structuredClone(state.customDraft), $("endpoint-key").value); });
+  ["endpoint-name","endpoint-canonical-url","endpoint-api"].forEach(id => $(id).addEventListener("change", syncDraftFields));
+  $("primary-model").addEventListener("change", () => { state.primary = $("primary-model").value; renderModelDetails(); renderFallbacks(); });
+  $("add-fallback").addEventListener("click", () => { const next = usableModels().find(item => item.id !== state.primary && !state.fallbacks.includes(item.id)); if (next) { state.fallbacks.push(next.id); renderFallbacks(); } });
+  $("next-button").addEventListener("click", () => setPhase(Math.min(3, state.phase + 1))); $("back-button").addEventListener("click", () => setPhase(Math.max(1, state.phase - 1)));
+  document.querySelectorAll("[data-step]").forEach(button => button.addEventListener("click", () => { const step = Number(button.dataset.step); if (step <= state.phase) setPhase(step); }));
+  $("save-button").addEventListener("click", async () => {
+    const status = $("save-status"), button = $("save-button"); status.className = "save-status"; status.textContent = "Saving configuration..."; button.disabled = true;
+    try {
+      await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,credentials:Object.entries(state.credentials).map(([provider,apiKey])=>({provider,apiKey}))});
+      showCompletion("Configuration saved", "Swarm Pi will use this configuration for the project. You can close this tab.", true);
+    } catch (error) { status.className = "save-status error"; status.textContent = error.message; button.disabled = false; }
+  });
+  $("cancel-button").addEventListener("click", async () => {
+    if (!confirm("Close setup without saving your changes?")) return;
+    try {
+      await post("/api/cancel", {});
+      showCompletion("Setup closed", "No changes were saved. You can close this tab and run configure again whenever you are ready.", false);
+    } catch (error) { $("save-status").className = "save-status error"; $("save-status").textContent = error.message; }
+  });
+
+  function showCompletion(title, message, saved) {
+    state.closed = true;
+    $("connections-screen").hidden = true; $("models-screen").hidden = true; $("review-screen").hidden = true; $("closed-screen").hidden = false;
+    $("completion-mark").textContent = saved ? "✓" : "–"; $("completion-mark").className = saved ? "completion-mark" : "completion-mark neutral";
+    $("completion-title").textContent = title; $("completion-message").textContent = message;
+    $("action-buttons").hidden = true; $("save-status").className = saved ? "save-status success" : "save-status"; $("save-status").textContent = saved ? "Saved successfully." : "Closed without saving.";
+    document.querySelectorAll("[data-step]").forEach(button => button.disabled = true);
+  }
+
+  populateProviderCatalog(); render();
 })();
 `;
