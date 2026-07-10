@@ -1,16 +1,24 @@
 import type { Host, TaskKind } from "../core/contracts.js";
 
-export type RunnerCommand = "models" | TaskKind;
+export type RunnerCommand = "init" | "models" | TaskKind;
+export type ReviewScope = "auto" | "working-tree" | "branch";
 
 export interface RunnerArguments {
   command: RunnerCommand;
   host?: Host;
   promptFile?: string;
   model?: string;
+  base?: string;
+  scope?: ReviewScope;
+  reconfigure: boolean;
+  reset: boolean;
+  modelPriority?: string[];
+  profile?: Record<string, unknown>;
   json: boolean;
 }
 
 const COMMANDS = new Set<RunnerCommand>([
+  "init",
   "models",
   "ask",
   "review",
@@ -25,12 +33,23 @@ export function parseArguments(argv: string[]): RunnerArguments {
     throw new Error(`Unknown or missing command: ${command ?? "<none>"}`);
   }
 
-  const parsed: RunnerArguments = { command, json: false };
+  const parsed: RunnerArguments = {
+    command,
+    json: false,
+    reconfigure: false,
+    reset: false,
+  };
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index];
     switch (argument) {
       case "--json":
         parsed.json = true;
+        break;
+      case "--reconfigure":
+        parsed.reconfigure = true;
+        break;
+      case "--reset":
+        parsed.reset = true;
         break;
       case "--host":
         parsed.host = parseHost(readValue(argv, ++index, argument));
@@ -41,12 +60,24 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--model":
         parsed.model = readValue(argv, ++index, argument);
         break;
+      case "--base":
+        parsed.base = readValue(argv, ++index, argument);
+        break;
+      case "--scope":
+        parsed.scope = parseScope(readValue(argv, ++index, argument));
+        break;
+      case "--set-model-priority":
+        parsed.modelPriority = parseStringArray(readValue(argv, ++index, argument), argument);
+        break;
+      case "--save-profile":
+        parsed.profile = parseObject(readValue(argv, ++index, argument), argument);
+        break;
       default:
         throw new Error(`Unknown argument: ${argument}`);
     }
   }
 
-  if (command !== "models" && !parsed.host) {
+  if (command !== "models" && command !== "init" && !parsed.host) {
     throw new Error(`--host is required for ${command}`);
   }
   if (
@@ -57,6 +88,35 @@ export function parseArguments(argv: string[]): RunnerArguments {
   }
 
   return parsed;
+}
+
+function parseScope(value: string): ReviewScope {
+  if (value === "auto" || value === "working-tree" || value === "branch") return value;
+  throw new Error(`Invalid review scope: ${value}`);
+}
+
+function parseStringArray(value: string, flag: string): string[] {
+  const parsed = parseJson(value, flag);
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+    throw new Error(`${flag} requires a JSON string array`);
+  }
+  return parsed;
+}
+
+function parseObject(value: string, flag: string): Record<string, unknown> {
+  const parsed = parseJson(value, flag);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${flag} requires a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseJson(value: string, flag: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`${flag} requires valid JSON`);
+  }
 }
 
 function parseHost(value: string): Host {

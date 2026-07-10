@@ -11,6 +11,7 @@ import {
   resolveStateDir,
   saveProfile,
   setModelPriority,
+  updateState,
 } from "../src/state/state.js";
 
 function repositoryFixture(): { repository: string; worktree: string } {
@@ -108,5 +109,24 @@ test("reset clears configuration while preserving Pi job history", async () => {
     assert.deepEqual(reset.config.modelPriority, []);
     assert.equal(reset.config.profile, undefined);
     assert.deepEqual(reset.jobs, [{ id: "pi-job", status: "succeeded" }]);
+  });
+});
+
+test("concurrent state updates do not lose job records", async () => {
+  const { repository } = repositoryFixture();
+  await withDataDir(undefined, async () => {
+    await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        updateState(repository, (state) => {
+          state.jobs.push({ id: `job-${index}`, status: "done" });
+        }),
+      ),
+    );
+    const state = await loadState(repository);
+    assert.equal(state.jobs.length, 12);
+    assert.deepEqual(
+      state.jobs.map((job) => job.id).sort(),
+      Array.from({ length: 12 }, (_, index) => `job-${index}`).sort(),
+    );
   });
 });

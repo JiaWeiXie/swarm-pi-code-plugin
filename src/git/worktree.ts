@@ -1,5 +1,8 @@
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
+
+import { resolveStateDir, resolveWorkspaceRoot } from "../state/state.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,9 +33,24 @@ export async function inspectWorktree(cwd: string): Promise<WorktreeInspection> 
     ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
     { cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 },
   );
-  const entries = parsePorcelain(stdout);
+  const entries = await excludeRuntimeState(cwd, parsePorcelain(stdout));
   const changedFiles = [...new Set(entries.map((entry) => entry.path))].sort();
   return { clean: entries.length === 0, changedFiles, entries };
+}
+
+async function excludeRuntimeState(
+  cwd: string,
+  entries: Array<{ status: string; path: string }>,
+): Promise<Array<{ status: string; path: string }>> {
+  const workspace = await resolveWorkspaceRoot(cwd);
+  const stateDir = await resolveStateDir(cwd);
+  const relativeStateDir = path.relative(workspace, stateDir);
+  if (relativeStateDir === "" || relativeStateDir.startsWith("..") || path.isAbsolute(relativeStateDir)) {
+    return entries;
+  }
+  return entries.filter(
+    (entry) => entry.path !== relativeStateDir && !entry.path.startsWith(`${relativeStateDir}${path.sep}`),
+  );
 }
 
 export async function requireCleanWorktree(cwd: string): Promise<void> {

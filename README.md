@@ -33,8 +33,12 @@ worktree-aware state, and a testable runner for `ask`, `plan`, and guarded
 ```bash
 mise run build
 node scripts/pi-runner.mjs models --json
+node scripts/pi-runner.mjs init --json
 node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/prompt.md --json
+node scripts/pi-runner.mjs review --host codex --scope working-tree --json
+node scripts/pi-runner.mjs plan --host codex --prompt-file /path/to/plan.md --json
 node scripts/pi-runner.mjs implement --host codex --prompt-file /path/to/task.md --json
+node scripts/pi-runner.mjs orchestrate --host codex --prompt-file /path/to/task.md --json
 ```
 
 `implement` requires a clean Git worktree, exposes no shell tool to Pi, confines
@@ -48,5 +52,19 @@ main repository through Git's common directory and share this state. Set
 old project profile and model preference from `.swarm-code/`; OpenCode jobs and
 provider data are deliberately excluded.
 
-`review`, `orchestrate`, host commands/skills, and the distributable plugin
+The runner stores each request, raw prompt, result, and implementation patch in
+`.swarm-pi-code/jobs/<job-id>/`. State updates use an inter-process lock and an
+atomic rename, so concurrent read-only jobs do not overwrite job history.
+
+Configure a complete primary/fallback chain atomically:
+
+```bash
+node scripts/pi-runner.mjs init \
+  --set-model-priority '["provider/primary","provider/fallback"]' \
+  --save-profile '{"goal":"Ship the migration","dirs":["src"],"tasks":["Implementation"]}' \
+  --json
+```
+
+`--reset` clears model inventory, priority, and project profile while preserving
+Pi job history and artifacts. Host commands/skills and the distributable plugin
 runtime remain tracked in [`docs/architecture.md`](docs/architecture.md).

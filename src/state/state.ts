@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -93,7 +94,7 @@ export async function loadState(cwd: string): Promise<SwarmState> {
 export async function writeState(cwd: string, state: SwarmState): Promise<void> {
   const stateFile = await resolveStateFile(cwd);
   await fs.mkdir(path.dirname(stateFile), { recursive: true });
-  const tempFile = `${stateFile}.${process.pid}.${Date.now()}.tmp`;
+  const tempFile = `${stateFile}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await fs.writeFile(tempFile, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
     await fs.rename(tempFile, stateFile);
@@ -106,15 +107,24 @@ export async function updateState(
   cwd: string,
   update: (state: SwarmState) => SwarmState | void,
 ): Promise<SwarmState> {
-  const state = structuredClone(await loadState(cwd));
-  const updated = update(state) ?? state;
-  await writeState(cwd, updated);
-  return updated;
+  return withStateLock(cwd, async () => {
+    const state = structuredClone(await loadState(cwd));
+    const updated = update(state) ?? state;
+    await writeState(cwd, updated);
+    return updated;
+  });
 }
 
 export async function setModelPriority(cwd: string, models: string[]): Promise<SwarmState> {
   return updateState(cwd, (state) => {
     state.config.modelPriority = [...models];
+  });
+}
+
+export async function setAvailableModels(cwd: string, models: string[]): Promise<SwarmState> {
+  return updateState(cwd, (state) => {
+    state.config.availableModels = [...models];
+    state.config.availableModelsCheckedAt = new Date().toISOString();
   });
 }
 
@@ -205,4 +215,33 @@ function stringArray(value: unknown): string[] {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+async function withStateLock<T>(cwd: string, run: () => Promise<T>): Promise<T> {
+  const directory = await resolveStateDir(cwd);
+  await fs.mkdir(directory, { recursive: true });
+  const lockFile = path.join(directory, "state.lock");
+  const deadline = Date.now() + 5_000;
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  while (!handle) {
+    try {
+      handle = await fs.open(lockFile, "wx", 0o600);
+      await handle.writeFile(`${process.pid}\n`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const stat = await fs.stat(lockFile).catch(() => undefined);
+      if (stat && Date.now() - stat.mtimeMs > 30_000) {
+        await fs.rm(lockFile, { force: true });
+        continue;
+      }
+      if (Date.now() >= deadline) throw new Error(`Timed out waiting for state lock: ${lockFile}`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  try {
+    return await run();
+  } finally {
+    await handle.close();
+    await fs.rm(lockFile, { force: true });
+  }
 }

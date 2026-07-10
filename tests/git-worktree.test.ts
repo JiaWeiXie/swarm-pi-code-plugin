@@ -16,7 +16,6 @@ function repositoryFixture(): string {
   execFileSync("git", ["init", repository], { stdio: "ignore" });
   execFileSync("git", ["-C", repository, "config", "user.name", "Test User"]);
   execFileSync("git", ["-C", repository, "config", "user.email", "test@example.com"]);
-  fs.writeFileSync(path.join(repository, ".gitignore"), ".swarm-pi-code/\n");
   fs.writeFileSync(path.join(repository, "tracked.txt"), "before\n");
   execFileSync("git", ["-C", repository, "add", "."]);
   execFileSync(

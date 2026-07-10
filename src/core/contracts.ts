@@ -27,6 +27,11 @@ export interface WorkerResult {
     status: "not-run" | "passed" | "failed";
     commands: string[];
   };
+  host?: Host;
+  jobId?: string;
+  attempts?: number;
+  fallbackUsed?: boolean;
+  error?: string | null;
 }
 
 export interface AvailableModel {

@@ -101,6 +101,22 @@ session:
    after the session, including partial changes from a failed session.
 5. Verification remains host-owned and is not yet enabled in this milestone.
 
+## Implemented Runner Contract
+
+The shared runner now implements all six task surfaces plus configuration:
+
+- `init` refreshes authenticated Pi models, atomically replaces model priority,
+  saves the project profile, and resets configuration without deleting jobs.
+- `ask`, `plan`, and `review` run read-only sessions. Review supports working
+  tree, branch, explicit base, auto scope, untracked files, and root commits.
+- Read-only failures retry the configured fallback chain in order.
+- `implement` uses the same fallback chain only while the worktree remains
+  unchanged; once any edit exists, another model is never started.
+- `orchestrate` runs three bounded read-only perspectives in parallel and
+  returns labeled evidence for the host to synthesize.
+- Every invocation persists request, prompt, result, and optional patch
+  artifacts. State index updates use a lock plus atomic rename.
+
 ## Implementation Milestones
 
 1. **SDK gate**: prove the pinned Pi SDK loads, tool profiles are enforced, model

@@ -41,3 +41,23 @@ export function selectModel(models: PiModel[], requested?: string): PiModel | un
 
   return models.find((model) => modelId(model) === requested);
 }
+
+export function orderModels(
+  models: PiModel[],
+  options: { requested?: string | undefined; priority?: string[] | undefined } = {},
+): PiModel[] {
+  if (options.requested) {
+    const selected = selectModel(models, options.requested);
+    return selected ? [selected] : [];
+  }
+  const byId = new Map(models.map((model) => [modelId(model), model]));
+  const ordered: PiModel[] = [];
+  for (const id of options.priority ?? []) {
+    const model = byId.get(id);
+    if (model && !ordered.includes(model)) ordered.push(model);
+  }
+  if ((options.priority?.length ?? 0) === 0 && ordered.length === 0 && models[0]) {
+    ordered.push(models[0]);
+  }
+  return ordered;
+}

@@ -15,6 +15,11 @@ const fakeModel = {
   id: "test-model",
   name: "Test Model",
 } as PiModel;
+const fallbackModel = {
+  provider: "test-provider",
+  id: "fallback-model",
+  name: "Fallback Model",
+} as PiModel;
 
 test("argument parsing requires host and prompt file for ask", () => {
   assert.deepEqual(
@@ -33,11 +38,33 @@ test("argument parsing requires host and prompt file for ask", () => {
       host: "codex",
       promptFile: "/tmp/prompt.md",
       model: "test-provider/test-model",
+      reconfigure: false,
+      reset: false,
       json: true,
     },
   );
   assert.throws(() => parseArguments(["ask", "--host", "codex"]), /--prompt-file/);
   assert.throws(() => parseArguments(["ask", "--prompt-file", "prompt.md"]), /--host/);
+  assert.deepEqual(
+    parseArguments([
+      "init",
+      "--reconfigure",
+      "--set-model-priority",
+      '["test-provider/test-model"]',
+      "--save-profile",
+      '{"goal":"ship"}',
+      "--json",
+    ]),
+    {
+      command: "init",
+      reconfigure: true,
+      reset: false,
+      modelPriority: ["test-provider/test-model"],
+      profile: { goal: "ship" },
+      json: true,
+    },
+  );
+  assert.throws(() => parseArguments(["review", "--host", "codex", "--scope", "bad"]), /scope/);
 });
 
 test("model helpers expose stable provider/model identifiers", () => {
@@ -90,6 +117,7 @@ test("session execution collects streamed output and always disposes", async () 
 });
 
 test("ask runs through injected model and session dependencies", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-ask-"));
   const session: RunnableSession = {
     subscribe(listener) {
       listener({
@@ -99,7 +127,8 @@ test("ask runs through injected model and session dependencies", async () => {
       return () => {};
     },
     async prompt(prompt) {
-      assert.equal(prompt, "Question from file");
+      assert.match(prompt, /Claude Code/);
+      assert.match(prompt, /Question from file/);
     },
     dispose() {},
   };
@@ -114,9 +143,11 @@ test("ask runs through injected model and session dependencies", async () => {
       command: "ask",
       host: "claude",
       promptFile: "prompt.md",
+      reconfigure: false,
+      reset: false,
       json: true,
     },
-    "/workspace",
+    workspace,
     dependencies,
   );
 
@@ -151,7 +182,14 @@ test("implement requires a clean worktree and captures Pi changes", async () => 
     }),
   };
   const result = await runCommand(
-    { command: "implement", host: "codex", promptFile: "prompt.md", json: true },
+    {
+      command: "implement",
+      host: "codex",
+      promptFile: "prompt.md",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
     workspace,
     dependencies,
   );
@@ -174,10 +212,243 @@ test("implement rejects a dirty worktree before creating Pi session", async () =
   };
 
   const result = await runCommand(
-    { command: "implement", host: "codex", promptFile: "prompt.md", json: true },
+    {
+      command: "implement",
+      host: "codex",
+      promptFile: "prompt.md",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
     workspace,
     dependencies,
   );
   assert.equal("status" in result && result.status, "failed");
   assert.match("output" in result ? result.output : "", /clean worktree/i);
+});
+
+test("init replaces validated model priority and preserves it in status", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-init-"));
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel, fallbackModel] },
+    readFile: async () => "unused",
+    createSession: async () => {
+      throw new Error("unused");
+    },
+  };
+  const result = await runCommand(
+    {
+      command: "init",
+      reconfigure: true,
+      reset: false,
+      modelPriority: ["test-provider/fallback-model", "test-provider/test-model"],
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+
+  assert.deepEqual("modelPriority" in result && result.modelPriority, [
+    "test-provider/fallback-model",
+    "test-provider/test-model",
+  ]);
+  await assert.rejects(
+    () =>
+      runCommand(
+        {
+          command: "init",
+          reconfigure: true,
+          reset: false,
+          modelPriority: ["missing/model"],
+          json: true,
+        },
+        workspace,
+        dependencies,
+      ),
+    /not available/i,
+  );
+});
+
+test("readonly jobs fall back through configured model priority", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-fallback-"));
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel, fallbackModel] },
+    readFile: async () => "Inspect",
+    createSession: async ({ model }) => ({
+      subscribe(listener) {
+        if (model === fallbackModel) {
+          listener({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "fallback done" },
+          });
+        }
+        return () => {};
+      },
+      async prompt() {
+        if (model === fakeModel) throw new Error("primary unavailable");
+      },
+      dispose() {},
+    }),
+  };
+  await runCommand(
+    {
+      command: "init",
+      reconfigure: false,
+      reset: false,
+      modelPriority: ["test-provider/test-model", "test-provider/fallback-model"],
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+  const result = await runCommand(
+    {
+      command: "ask",
+      host: "codex",
+      promptFile: "prompt.md",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal("success" in result && result.success, true);
+  assert.equal("model" in result && result.model, "test-provider/fallback-model");
+  assert.equal("attempts" in result && result.attempts, 2);
+  assert.equal("fallbackUsed" in result && result.fallbackUsed, true);
+});
+
+test("review builds a working-tree prompt and runs readonly", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-review-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
+  execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
+  fs.writeFileSync(path.join(workspace, "review.txt"), "before\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "fixture"], {
+    stdio: "ignore",
+  });
+  fs.writeFileSync(path.join(workspace, "review.txt"), "after\n");
+  let receivedPrompt = "";
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "unused",
+    createSession: async ({ mode }) => ({
+      subscribe() {
+        return () => {};
+      },
+      async prompt(prompt) {
+        assert.equal(mode, "readonly");
+        receivedPrompt = prompt;
+      },
+      dispose() {},
+    }),
+  };
+  await runCommand(
+    {
+      command: "review",
+      host: "claude",
+      scope: "working-tree",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+  assert.match(receivedPrompt, /review\.txt/);
+  assert.match(receivedPrompt, /-before/);
+  assert.match(receivedPrompt, /\+after/);
+});
+
+test("branch review handles a repository with only a root commit", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-root-review-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
+  execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
+  fs.writeFileSync(path.join(workspace, "root.txt"), "root commit\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "root"], {
+    stdio: "ignore",
+  });
+  let receivedPrompt = "";
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "unused",
+    createSession: async () => ({
+      subscribe() {
+        return () => {};
+      },
+      async prompt(prompt) {
+        receivedPrompt = prompt;
+      },
+      dispose() {},
+    }),
+  };
+  const result = await runCommand(
+    {
+      command: "review",
+      host: "codex",
+      scope: "branch",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+  assert.equal("success" in result && result.success, true);
+  assert.match(receivedPrompt, /root\.txt/);
+});
+
+test("orchestrate runs exactly three readonly perspectives and records artifacts", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-orchestrate-"));
+  let sessions = 0;
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Evaluate this design",
+    createSession: async ({ mode }) => {
+      sessions += 1;
+      return {
+        subscribe(listener) {
+          listener({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: `result ${sessions}` },
+          });
+          return () => {};
+        },
+        async prompt(prompt) {
+          assert.equal(mode, "readonly");
+          assert.match(prompt, /PERSPECTIVE/);
+        },
+        dispose() {},
+      };
+    },
+  };
+  const result = await runCommand(
+    {
+      command: "orchestrate",
+      host: "codex",
+      promptFile: "prompt.md",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal(sessions, 3);
+  assert.equal("success" in result && result.success, true);
+  assert.match("output" in result ? result.output : "", /Correctness and failure modes/);
+  const state = JSON.parse(
+    fs.readFileSync(path.join(workspace, ".swarm-pi-code", "state.json"), "utf8"),
+  );
+  assert.equal(state.jobs.length, 1);
+  const jobDir = path.join(workspace, ".swarm-pi-code", "jobs", state.jobs[0].id);
+  assert.equal(fs.existsSync(path.join(jobDir, "request.json")), true);
+  assert.equal(fs.existsSync(path.join(jobDir, "prompt.md")), true);
+  assert.equal(fs.existsSync(path.join(jobDir, "result.json")), true);
 });
