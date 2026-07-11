@@ -1,0 +1,4 @@
+interface:
+  display_name: "Swarm Pi Code Plugin Configure"
+  short_description: "Configure Pi delegation and project safety"
+  default_prompt: "Use $swarm-pi-code-plugin-configure to configure Pi for this project."

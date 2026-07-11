@@ -41,14 +41,22 @@ export function renderConfigurationPage(
       <div class="step-line"></div>
       <button type="button" data-step="2"><span>2</span>Choose models</button>
       <div class="step-line"></div>
-      <button type="button" data-step="3"><span>3</span>Project setup</button>
+      <button type="button" data-step="3"><span>3</span>Roles</button>
       <div class="step-line"></div>
-      <button type="button" data-step="4"><span>4</span>Review</button>
+      <button type="button" data-step="4"><span>4</span>Safety</button>
+      <div class="step-line"></div>
+      <button type="button" data-step="5"><span>5</span>Workspace</button>
+      <div class="step-line"></div>
+      <button type="button" data-step="6"><span>6</span>Review</button>
     </nav>
     <nav id="project-steps" class="steps project-steps" aria-label="Project setup progress" hidden>
-      <button type="button" data-step="3"><span>1</span>Project setup</button>
+      <button type="button" data-step="3"><span>1</span>Roles</button>
       <div class="step-line"></div>
-      <button type="button" data-step="4"><span>2</span>Review</button>
+      <button type="button" data-step="4"><span>2</span>Safety</button>
+      <div class="step-line"></div>
+      <button type="button" data-step="5"><span>3</span>Workspace</button>
+      <div class="step-line"></div>
+      <button type="button" data-step="6"><span>4</span>Review</button>
     </nav>
 
     <main class="workspace">
@@ -97,8 +105,59 @@ export function renderConfigurationPage(
         </div>
       </section>
 
+      <section id="roles-screen" class="screen" hidden>
+        <div class="screen-heading"><div><h1>Worker roles</h1><p>Assign models and reasoning effort to each delegated responsibility.</p></div></div>
+        <div id="role-policy-list" class="role-policy-list"></div>
+      </section>
+
+      <section id="safety-screen" class="screen" hidden>
+        <div class="screen-heading"><div><h1>Execution &amp; safety</h1><p>Set the enforcement policy used by new delegated jobs.</p></div></div>
+        <div id="safety-error" class="notice error-notice" role="alert" hidden></div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Sandbox mode</h2><p>Select a static or policy-controlled execution boundary.</p></div>
+          <div class="form-control">
+            <div class="scope-toggle three" role="radiogroup" aria-label="Sandbox execution mode">
+              <button id="sandbox-strict" type="button" role="radio">Strict</button>
+              <button id="sandbox-adaptive" type="button" role="radio">Adaptive</button>
+              <button id="sandbox-lenient" type="button" role="radio">Lenient</button>
+            </div>
+            <p id="sandbox-backend" class="field-hint"></p>
+            <div id="sandbox-warning" class="notice warning sandbox-warning" hidden></div>
+          </div>
+        </div>
+        <div id="adaptive-settings" class="form-band">
+          <div class="form-copy"><h2>Adaptive authorization</h2><p>Choose the classifier chain and bounded supervisor fallback.</p></div>
+          <div class="form-control">
+            <label>Classifier models</label>
+            <div id="classifier-models" class="check-list"></div>
+            <label for="classifier-thinking">Classifier thinking</label>
+            <select id="classifier-thinking"><option>low</option><option selected>medium</option><option>high</option></select>
+            <label>When classification cannot decide</label>
+            <div class="scope-toggle" role="radiogroup" aria-label="Approval policy">
+              <button id="approval-deny" type="button" role="radio">Deny</button>
+              <button id="approval-wait" type="button" role="radio">Wait for supervisor</button>
+            </div>
+            <label for="trusted-domains">Trusted outbound domains <span class="optional">optional</span></label>
+            <textarea id="trusted-domains" rows="3" placeholder="One domain per line, for example: registry.npmjs.org"></textarea>
+            <label class="inline-check"><input id="policy-diagnostics" type="checkbox"> Store redacted classifier diagnostics</label>
+            <details class="project-advanced">
+              <summary>Structured policy rules</summary>
+              <label for="policy-rules">Deny, ask, and bounded allow rules</label>
+              <textarea id="policy-rules" rows="7" spellcheck="false"></textarea>
+            </details>
+          </div>
+        </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Background implementation</h2><p>Isolate mechanical edits from the host worktree.</p></div>
+          <div class="form-control">
+            <label class="inline-check"><input id="background-mechanical" type="checkbox"> Allow mechanical executor in a job-owned worktree</label>
+          </div>
+        </div>
+      </section>
+
       <section id="project-screen" class="screen" hidden>
-        <div class="screen-heading"><div><h1>Project setup</h1><p>Tell Pi what this project is for and where it may help.</p></div></div>
+        <div class="screen-heading"><div><h1>Workspace</h1><p>Choose how Swarm Pi should work with this folder.</p></div></div>
+        <div id="workspace-state" class="notice" role="status"></div>
         <div id="profile-error" class="notice error-notice" role="alert" hidden></div>
         <div class="form-band">
           <div class="form-copy"><h2>Project goal</h2><p>A short description Pi can use to understand the desired outcome.</p></div>
@@ -130,19 +189,6 @@ export function renderConfigurationPage(
             </details>
           </div>
         </div>
-        <div class="form-band">
-          <div class="form-copy"><h2>Execution safety</h2><p>Choose whether delegated workers may run shell commands.</p></div>
-          <div class="form-control">
-            <div class="scope-toggle" role="radiogroup" aria-label="Sandbox execution mode">
-              <button id="sandbox-strict" type="button" role="radio">Strict</button>
-              <button id="sandbox-lenient" type="button" role="radio">Lenient</button>
-            </div>
-            <p id="sandbox-backend" class="field-hint"></p>
-            <div id="sandbox-warning" class="notice warning sandbox-warning" hidden>
-              Shell commands run inside an OS sandbox and may access the network. Project source visible to the worker could be sent to external services.
-            </div>
-          </div>
-        </div>
       </section>
 
       <section id="review-screen" class="screen" hidden>
@@ -150,10 +196,12 @@ export function renderConfigurationPage(
         <div class="review-section full-only"><h2>Primary model</h2><div id="review-primary" class="review-value"></div></div>
         <div class="review-section full-only"><h2>Fallback order</h2><div id="review-fallbacks" class="review-list"></div></div>
         <div class="review-section full-only"><h2>Connections</h2><div id="review-connections" class="review-list"></div></div>
+        <div class="review-section full-only"><h2>Connection test</h2><div class="review-value">The primary model and required Adaptive classifier will receive a minimal READY request before settings are saved.</div></div>
         <div class="review-section"><h2>Project goal</h2><div id="review-goal" class="review-value review-text"></div></div>
         <div class="review-section"><h2>Working area</h2><div id="review-directories" class="review-list"></div></div>
         <div class="review-section"><h2>Delegated work</h2><div id="review-tasks" class="review-list"></div></div>
         <div class="review-section"><h2>Execution safety</h2><div id="review-sandbox" class="review-value"></div></div>
+        <div class="review-section"><h2>Role routing</h2><div id="review-roles" class="review-list"></div></div>
       </section>
 
       <section id="closed-screen" class="screen completion-screen" hidden>
@@ -264,15 +312,15 @@ button { cursor: pointer; }
 .logo-handoff { stroke: var(--coral); stroke-width: 3.4; stroke-linecap: square; }
 .local-status { display: flex; align-items: center; gap: 8px; color: #47524f; font-size: 13px; }
 .local-status span { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
-.steps { display: grid; grid-template-columns: auto minmax(28px, 110px) auto minmax(28px, 110px) auto minmax(28px, 110px) auto; align-items: center; justify-content: center; gap: 14px; padding: 0 24px; border-bottom: 1px solid var(--border); background: #fbfcfb; }
-.project-steps { grid-template-columns: auto minmax(40px, 150px) auto; gap: 18px; }
+.steps { display: flex; align-items: center; justify-content: center; gap: 14px; min-width: 0; padding: 0 24px; border-bottom: 1px solid var(--border); background: #fbfcfb; }
+.project-steps { gap: 18px; }
 .steps button { display: flex; align-items: center; gap: 9px; padding: 8px 0; border: 0; background: transparent; color: #7a8481; font-weight: 650; }
 .steps button span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #e7eae8; color: #68716f; }
 .steps button.active { color: var(--teal); }
 .steps button.active span { color: #fff; background: var(--teal); }
 .steps button.complete { color: #38534f; }
 .steps button.complete span { color: #fff; background: #315f58; }
-.step-line { height: 1px; background: #cdd3d0; }
+.step-line { flex: 0 1 110px; width: 110px; min-width: 12px; height: 1px; background: #cdd3d0; }
 .workspace { width: min(1040px, calc(100% - 40px)); margin: 0 auto; padding: 38px 0 48px; }
 .screen-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
 h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.2; }
@@ -362,6 +410,14 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 .dialog-panel label:not(:first-child) { margin-top: 16px; }
 .field-hint { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
 .sandbox-warning { margin-top: 12px; }
+.scope-toggle.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.role-policy-list { display: grid; gap: 12px; }
+.role-policy-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.5fr) 130px 100px; gap: 14px; align-items: end; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.role-policy-row h2 { margin: 0; font-size: 16px; }
+.role-policy-row p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+.role-policy-row label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.inline-check { display: flex !important; align-items: center; gap: 9px; color: var(--ink) !important; }
+.inline-check input { width: auto; }
 .optional { color: var(--muted); font-weight: 500; }
 .wide-button { width: 100%; margin-top: 18px; }
 .discovery-result { margin-top: 16px; padding: 12px; border: 1px solid #a9d2c0; border-radius: 6px; color: #215842; background: var(--green-soft); }
@@ -377,10 +433,9 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 @media (max-width: 760px) {
   .app-shell { grid-template-rows: 58px 68px minmax(0, 1fr) auto; }
   .topbar { padding: 0 16px; }
-  .steps { grid-template-columns: auto 22px auto 22px auto 22px auto; gap: 6px; padding: 0 12px; }
-  .project-steps { grid-template-columns: auto 36px auto; gap: 8px; }
+  .steps, .project-steps { gap: 6px; padding: 0 12px; }
   .steps button { gap: 0; font-size: 0; }
-  .project-steps button { gap: 7px; font-size: 12px; }
+  .step-line { flex: 1 1 22px; width: auto; min-width: 6px; }
   .steps button span { width: 26px; height: 26px; }
   .workspace { width: min(100% - 28px, 1040px); padding-top: 24px; }
   .screen-heading { align-items: stretch; flex-direction: column; }
@@ -402,6 +457,7 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
   .limit-grid, .advanced-grid, .model-editor-body { grid-template-columns: 1fr; }
   .fallback-row { grid-template-columns: minmax(0, 1fr) 34px 34px 34px; }
   .scope-toggle { grid-template-columns: 1fr; }
+  .scope-toggle.three, .role-policy-row { grid-template-columns: 1fr; }
 }
 `;
 
@@ -414,6 +470,8 @@ const clientScript = String.raw`
     {value:"planning",label:"Planning",description:"Explore approaches and prepare implementation plans."},
     {value:"code-review",label:"Code review",description:"Inspect changes for bugs, risks, and missing tests."},
     {value:"analysis",label:"Analysis",description:"Investigate behavior, architecture, and technical questions."},
+    {value:"scaffolding",label:"Project scaffolding",description:"Create a verified new project in isolated staging."},
+    {value:"development-setup",label:"Development setup",description:"Configure project-local dependencies and tools."},
   ];
   const setupMode = boot.setupMode === "project" ? "project" : "full";
   const initialPhase = setupMode === "project" ? 3 : 1;
@@ -439,7 +497,10 @@ const clientScript = String.raw`
     editingCustomIndex: -1,
     dialogMode: "cloud",
     closed: false,
-    sandboxMode: boot.sandboxMode === "lenient" ? "lenient" : "strict",
+    sandboxMode: ["strict","adaptive","lenient"].includes(boot.sandboxMode) ? boot.sandboxMode : "strict",
+    rolePolicies: structuredClone(boot.rolePolicies || {}),
+    adaptivePolicy: structuredClone(boot.adaptivePolicy || {classifierModels:[],classifierThinkingLevel:"medium",approvalPolicy:"deny",trustedDomains:[],rules:[],diagnostics:false}),
+    backgroundRolePolicy: structuredClone(boot.backgroundRolePolicy || {mechanicalExecutor:false}),
     profile: {
       goal: savedProfile?.goal || "",
       scope: savedProfile?.dirs?.length ? "selected" : "all",
@@ -448,7 +509,31 @@ const clientScript = String.raw`
       customTasks: savedTasks.filter(task => !canonicalTask(task)),
     },
   };
+  const draftKey = "swarm-pi-setup-draft:" + (boot.workspaceId || "default");
+  try {
+    const draft = JSON.parse(localStorage.getItem(draftKey) || "null");
+    if (draft && typeof draft === "object") {
+      if (typeof draft.primary === "string") state.primary = draft.primary;
+      if (Array.isArray(draft.fallbacks)) state.fallbacks = draft.fallbacks;
+      if (draft.rolePolicies) state.rolePolicies = draft.rolePolicies;
+      if (draft.adaptivePolicy) state.adaptivePolicy = draft.adaptivePolicy;
+      if (draft.backgroundRolePolicy) state.backgroundRolePolicy = draft.backgroundRolePolicy;
+      if (["strict","adaptive","lenient"].includes(draft.sandboxMode)) state.sandboxMode = draft.sandboxMode;
+      if (draft.profile) state.profile = draft.profile;
+    }
+  } catch {}
   const $ = id => document.getElementById(id);
+
+  function persistDraft() {
+    if (state.closed) return;
+    localStorage.setItem(draftKey, JSON.stringify({
+      primary:state.primary,fallbacks:state.fallbacks,rolePolicies:state.rolePolicies,
+      adaptivePolicy:state.adaptivePolicy,backgroundRolePolicy:state.backgroundRolePolicy,
+      sandboxMode:state.sandboxMode,profile:state.profile,
+    }));
+  }
+  document.addEventListener("input", persistDraft);
+  document.addEventListener("change", persistDraft);
 
   function initials(name) {
     return String(name || "AI").split(/[\s._-]+/).filter(Boolean).map(part => part[0]).join("").slice(0, 2) || "AI";
@@ -639,6 +724,12 @@ const clientScript = String.raw`
     const button = document.createElement("button"); button.type = "button"; button.title = title; button.setAttribute("aria-label", title); button.textContent = text; button.addEventListener("click", handler); return button;
   }
   function renderProject() {
+    const workspace = boot.workspace || {git:false,disposition:"non-git-existing"};
+    $("workspace-state").textContent = workspace.git
+      ? "Git workspace detected. Implementation can use worktree safeguards."
+      : workspace.disposition === "non-git-empty"
+        ? "This folder is ready for a new scaffold. Configuration does not require Git."
+        : "This existing non-Git folder will require inspection and explicit adoption before file changes.";
     $("project-goal").value = state.profile.goal;
     const selectedScope = state.profile.scope === "selected";
     $("scope-all").className = selectedScope ? "" : "active";
@@ -671,16 +762,70 @@ const clientScript = String.raw`
       },
     })));
     $("custom-tasks").value = state.profile.customTasks.join(", ");
-    const lenient = state.sandboxMode === "lenient";
-    $("sandbox-strict").className = lenient ? "" : "active";
-    $("sandbox-lenient").className = lenient ? "active" : "";
-    $("sandbox-strict").setAttribute("aria-checked", String(!lenient));
-    $("sandbox-lenient").setAttribute("aria-checked", String(lenient));
-    $("sandbox-lenient").disabled = !boot.sandboxAvailability.available;
-    $("sandbox-backend").textContent = boot.sandboxAvailability.available
-      ? "Available through " + boot.sandboxAvailability.label + "."
-      : boot.sandboxAvailability.reason;
-    $("sandbox-warning").hidden = !lenient;
+  }
+  function renderRoles() {
+    const target = $("role-policy-list"); target.replaceChildren();
+    (boot.roles || []).filter(role => !["verifier","classifier"].includes(role.role)).forEach(role => {
+      const current = state.rolePolicies[role.role] || {};
+      const row = document.createElement("div"); row.className = "role-policy-row";
+      const copy = document.createElement("div"), title = document.createElement("h2"), detail = document.createElement("p");
+      title.textContent = role.role; detail.textContent = role.taskKinds.join(", ") + " · " + role.executionModes.join(", "); copy.append(title, detail);
+      const modelField = document.createElement("label"); modelField.textContent = "Primary model";
+      const model = document.createElement("select"); model.add(new Option("Inherit project model chain", ""));
+      usableModels().forEach(item => model.add(new Option(providerName(item.provider) + " / " + modelLabel(item), item.id)));
+      model.value = current.models?.[0] || "";
+      model.addEventListener("change", () => {
+        state.rolePolicies[role.role] ||= {};
+        if (!model.value) delete state.rolePolicies[role.role].models;
+        else state.rolePolicies[role.role].models = [model.value, ...state.fallbacks.filter(item => item !== model.value)];
+      }); modelField.append(model);
+      const thinkingField = document.createElement("label"); thinkingField.textContent = "Thinking";
+      const thinking = document.createElement("select"); ["off","minimal","low","medium","high","xhigh"].forEach(level => thinking.add(new Option(level, level)));
+      thinking.value = current.thinkingLevel || role.thinkingLevel;
+      thinking.addEventListener("change", () => { state.rolePolicies[role.role] ||= {}; state.rolePolicies[role.role].thinkingLevel = thinking.value; }); thinkingField.append(thinking);
+      const attemptsField = document.createElement("label"); attemptsField.textContent = "Attempts";
+      const attempts = document.createElement("select"); attempts.add(new Option("1", "1")); attempts.add(new Option("2", "2")); attempts.value = String(current.maxAttempts || role.maxAttempts || 2);
+      attempts.addEventListener("change", () => { state.rolePolicies[role.role] ||= {}; state.rolePolicies[role.role].maxAttempts = Number(attempts.value); }); attemptsField.append(attempts);
+      row.append(copy, modelField, thinkingField, attemptsField); target.append(row);
+    });
+  }
+  function renderSafety() {
+    ["strict","adaptive","lenient"].forEach(mode => {
+      const button = $("sandbox-" + mode); button.className = state.sandboxMode === mode ? "active" : "";
+      button.setAttribute("aria-checked", String(state.sandboxMode === mode)); button.disabled = mode !== "strict" && !boot.sandboxAvailability.available;
+    });
+    $("sandbox-backend").textContent = boot.sandboxAvailability.available ? "Available through " + boot.sandboxAvailability.label + "." : boot.sandboxAvailability.reason;
+    $("adaptive-settings").hidden = state.sandboxMode !== "adaptive";
+    $("sandbox-warning").hidden = state.sandboxMode === "strict";
+    $("sandbox-warning").textContent = state.sandboxMode === "lenient"
+      ? "Lenient permits outbound network access. Project source visible to the worker may be sent to external services."
+      : "Adaptive sends limited action context to the selected classifier provider and pauses high-risk bounded actions for approval.";
+    const classifier = $("classifier-models"); classifier.replaceChildren();
+    usableModels().forEach(item => classifier.append(checkRow({
+      value:item.id,label:providerName(item.provider) + " / " + modelLabel(item),checked:state.adaptivePolicy.classifierModels.includes(item.id),
+      onChange:checked => { state.adaptivePolicy.classifierModels = checked ? [...new Set([...state.adaptivePolicy.classifierModels,item.id])] : state.adaptivePolicy.classifierModels.filter(value => value !== item.id); },
+    })));
+    $("classifier-thinking").value = state.adaptivePolicy.classifierThinkingLevel;
+    const wait = state.adaptivePolicy.approvalPolicy === "wait";
+    $("approval-deny").className = wait ? "" : "active"; $("approval-wait").className = wait ? "active" : "";
+    $("approval-deny").setAttribute("aria-checked", String(!wait)); $("approval-wait").setAttribute("aria-checked", String(wait));
+    $("trusted-domains").value = state.adaptivePolicy.trustedDomains.join("\n");
+    $("policy-diagnostics").checked = Boolean(state.adaptivePolicy.diagnostics);
+    if (document.activeElement !== $("policy-rules")) $("policy-rules").value = JSON.stringify(state.adaptivePolicy.rules || [], null, 2);
+    $("background-mechanical").checked = Boolean(state.backgroundRolePolicy.mechanicalExecutor);
+  }
+  function validateSafety() {
+    let message = "";
+    if (state.sandboxMode !== "strict" && !boot.sandboxAvailability.available) message = boot.sandboxAvailability.reason || "Sandbox backend is unavailable.";
+    else if (state.sandboxMode === "adaptive" && state.adaptivePolicy.classifierModels.length === 0) message = "Choose at least one classifier model for Adaptive mode.";
+    if (!message) {
+      try {
+        const rules = JSON.parse($("policy-rules").value || "[]");
+        if (!Array.isArray(rules)) throw new Error();
+        state.adaptivePolicy.rules = rules;
+      } catch { message = "Structured policy rules must be a JSON array."; }
+    }
+    $("safety-error").hidden = !message; $("safety-error").textContent = message; return !message;
   }
   function checkRow({value,label,description,checked,onChange}) {
     const row = document.createElement("label"), input = document.createElement("input"), copy = document.createElement("span");
@@ -725,17 +870,25 @@ const clientScript = String.raw`
     profile.tasks.forEach(value => { const known = taskTypes.find(item => item.value === value), row = document.createElement("div"); row.className = "review-item"; row.textContent = known?.label || value; tasks.append(row); });
     $("review-sandbox").textContent = state.sandboxMode === "lenient"
       ? "Lenient - sandboxed shell and outbound network enabled"
-      : "Strict - scoped Pi tools only";
+      : state.sandboxMode === "adaptive"
+        ? "Adaptive - classified capabilities with " + state.adaptivePolicy.approvalPolicy + " fallback"
+        : "Strict - scoped Pi tools only";
+    const roleReview = $("review-roles"); roleReview.replaceChildren();
+    (boot.roles || []).filter(role => !["verifier","classifier"].includes(role.role)).forEach(role => {
+      const policy = state.rolePolicies[role.role] || {}, row = document.createElement("div"); row.className = "review-item";
+      row.textContent = role.role + " · " + (policy.thinkingLevel || role.thinkingLevel) + " · " + (policy.models?.[0] || "project model chain"); roleReview.append(row);
+    });
   }
   function render() {
     $("full-steps").hidden = setupMode !== "full"; $("project-steps").hidden = setupMode !== "project";
-    renderSteps(); renderConnections(); renderPrimary(); renderFallbacks(); renderProject(); renderReview();
-    $("connections-screen").hidden = state.phase !== 1; $("models-screen").hidden = state.phase !== 2; $("project-screen").hidden = state.phase !== 3; $("review-screen").hidden = state.phase !== 4;
-    $("cancel-button").hidden = state.phase !== initialPhase; $("back-button").hidden = state.phase === initialPhase; $("next-button").hidden = state.phase === 4; $("save-button").hidden = state.phase !== 4;
-    $("next-button").textContent = state.phase === 1 ? "Choose models" : state.phase === 2 ? "Project setup" : "Review";
+    renderSteps(); renderConnections(); renderPrimary(); renderFallbacks(); renderRoles(); renderSafety(); renderProject(); renderReview();
+    $("connections-screen").hidden = state.phase !== 1; $("models-screen").hidden = state.phase !== 2; $("roles-screen").hidden = state.phase !== 3; $("safety-screen").hidden = state.phase !== 4; $("project-screen").hidden = state.phase !== 5; $("review-screen").hidden = state.phase !== 6;
+    $("cancel-button").hidden = state.phase !== initialPhase; $("back-button").hidden = state.phase === initialPhase; $("next-button").hidden = state.phase === 6; $("save-button").hidden = state.phase !== 6;
+    $("next-button").textContent = state.phase === 1 ? "Choose models" : state.phase === 2 ? "Configure roles" : state.phase === 3 ? "Execution safety" : state.phase === 4 ? "Workspace" : "Review";
     $("next-button").disabled = setupMode === "full" && (usableModels().length === 0 || (state.phase === 2 && !state.primary));
     $("save-button").textContent = setupMode === "project" ? "Save project setup" : "Save configuration";
     const warning = $("registry-warning"); warning.hidden = !boot.registryError; warning.textContent = boot.registryError ? "Pi model registry: " + boot.registryError : "";
+    persistDraft();
   }
   function setPhase(phase) { if (setupMode === "full" && phase > 1 && usableModels().length === 0) return; state.phase = phase; render(); window.scrollTo({top: 0, behavior: "smooth"}); }
 
@@ -817,7 +970,7 @@ const clientScript = String.raw`
 
   async function post(path, body) {
     const response = await fetch(path, {method:"POST",headers:{"content-type":"application/json","x-swarm-token":token},body:JSON.stringify(body || {})});
-    const payload = await response.json(); if (!response.ok) { const error = new Error(payload.error || "Request failed"); error.code = payload.code; throw error; } return payload;
+    const payload = await response.json(); if (!response.ok) { const error = new Error(payload.error || "Request failed"); error.code = payload.code; error.stage = payload.stage; error.nextActions = payload.nextActions; throw error; } return payload;
   }
   function setBusy(button, busy, label) { button.disabled = busy; if (label) button.textContent = busy ? label : button.dataset.defaultLabel || button.textContent; }
   async function findLocal() {
@@ -865,21 +1018,37 @@ const clientScript = String.raw`
     state.profile.customTasks = $("custom-tasks").value.split(",").map(value => value.trim()).filter(Boolean);
     clearProfileError();
   });
-  $("sandbox-strict").addEventListener("click", () => { state.sandboxMode = "strict"; renderProject(); });
+  $("sandbox-strict").addEventListener("click", () => { state.sandboxMode = "strict"; renderSafety(); });
+  $("sandbox-adaptive").addEventListener("click", () => {
+    if (!boot.sandboxAvailability.available) return;
+    state.sandboxMode = "adaptive"; renderSafety();
+  });
   $("sandbox-lenient").addEventListener("click", () => {
     if (!boot.sandboxAvailability.available) return;
     state.sandboxMode = "lenient";
-    renderProject();
+    renderSafety();
   });
-  $("next-button").addEventListener("click", () => { if (state.phase === 3 && !validateProject()) return; setPhase(Math.min(4, state.phase + 1)); });
+  $("approval-deny").addEventListener("click", () => { state.adaptivePolicy.approvalPolicy = "deny"; renderSafety(); });
+  $("approval-wait").addEventListener("click", () => { state.adaptivePolicy.approvalPolicy = "wait"; renderSafety(); });
+  $("classifier-thinking").addEventListener("change", () => { state.adaptivePolicy.classifierThinkingLevel = $("classifier-thinking").value; });
+  $("trusted-domains").addEventListener("input", () => { state.adaptivePolicy.trustedDomains = $("trusted-domains").value.split(/\s+/).map(value => value.trim().toLowerCase()).filter(Boolean); });
+  $("policy-diagnostics").addEventListener("change", () => { state.adaptivePolicy.diagnostics = $("policy-diagnostics").checked; });
+  $("policy-rules").addEventListener("change", () => { validateSafety(); });
+  $("background-mechanical").addEventListener("change", () => { state.backgroundRolePolicy.mechanicalExecutor = $("background-mechanical").checked; });
+  $("next-button").addEventListener("click", () => {
+    if (state.phase === 4 && !validateSafety()) return;
+    if (state.phase === 5 && !validateProject()) return;
+    setPhase(Math.min(6, state.phase + 1));
+  });
   $("back-button").addEventListener("click", () => setPhase(Math.max(initialPhase, state.phase - 1)));
   document.querySelectorAll("[data-step]").forEach(button => button.addEventListener("click", () => { const step = Number(button.dataset.step); if (step >= initialPhase && step <= state.phase) setPhase(step); }));
   $("save-button").addEventListener("click", async () => {
-    const status = $("save-status"), button = $("save-button"); status.className = "save-status"; status.textContent = "Saving configuration..."; button.disabled = true;
+    const status = $("save-status"), button = $("save-button"); status.className = "save-status"; status.textContent = "Testing selected models and saving configuration..."; button.disabled = true;
     try {
       const profile = projectProfile();
-      if (setupMode === "project") await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode});
-      else await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,credentials:Object.entries(state.credentials).map(([provider,apiKey])=>({provider,apiKey})),profile,sandboxMode:state.sandboxMode});
+      const execution = {rolePolicies:state.rolePolicies,adaptivePolicy:state.adaptivePolicy,backgroundRolePolicy:state.backgroundRolePolicy};
+      if (setupMode === "project") await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution});
+      else await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,credentials:Object.entries(state.credentials).map(([provider,apiKey])=>({provider,apiKey})),profile,sandboxMode:state.sandboxMode,...execution});
       showCompletion(setupMode === "project" ? "Project setup saved" : "Configuration saved", "Swarm Pi will use these project settings for delegated work. You can close this tab.", true);
     } catch (error) { status.className = "save-status error"; status.textContent = error.message; button.disabled = false; }
   });
@@ -893,7 +1062,8 @@ const clientScript = String.raw`
 
   function showCompletion(title, message, saved) {
     state.closed = true;
-    $("connections-screen").hidden = true; $("models-screen").hidden = true; $("project-screen").hidden = true; $("review-screen").hidden = true; $("closed-screen").hidden = false;
+    localStorage.removeItem(draftKey);
+    $("connections-screen").hidden = true; $("models-screen").hidden = true; $("roles-screen").hidden = true; $("safety-screen").hidden = true; $("project-screen").hidden = true; $("review-screen").hidden = true; $("closed-screen").hidden = false;
     $("completion-mark").textContent = saved ? "✓" : "–"; $("completion-mark").className = saved ? "completion-mark" : "completion-mark neutral";
     $("completion-title").textContent = title; $("completion-message").textContent = message;
     $("action-buttons").hidden = true; $("save-status").className = saved ? "save-status success" : "save-status"; $("save-status").textContent = saved ? "Saved successfully." : "Closed without saving.";

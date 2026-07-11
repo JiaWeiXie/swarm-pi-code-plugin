@@ -16,6 +16,7 @@ test("sandbox policy separates readonly and implementation write access", async 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-home-"));
   const readonly = await sandboxConfiguration(workspace, tempRoot, "readonly");
   const implement = await sandboxConfiguration(workspace, tempRoot, "implement");
+  const adaptive = await sandboxConfiguration(workspace, tempRoot, "readonly", process.env, "adaptive", ["registry.npmjs.org"]);
 
   assert.equal(readonly.filesystem.allowWrite.includes(path.resolve(workspace)), false);
   assert.equal(implement.filesystem.allowWrite.includes(path.resolve(workspace)), true);
@@ -24,6 +25,8 @@ test("sandbox policy separates readonly and implementation write access", async 
   assert.equal(implement.filesystem.denyWrite.includes(path.resolve("/tmp/claude")), true);
   assert.deepEqual(implement.network.allowedDomains, []);
   assert.equal(implement.network.allowAllUnixSockets, false);
+  assert.deepEqual(adaptive.network.allowedDomains, []);
+  assert.equal(adaptive.network.deniedDomains.includes("localhost"), true);
 });
 
 test("sandbox environment omits host credentials and isolates user directories", () => {

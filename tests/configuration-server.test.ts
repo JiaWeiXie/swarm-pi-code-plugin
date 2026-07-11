@@ -3,9 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import http from "node:http";
+import { once } from "node:events";
 
-import { loadState } from "../src/state/state.js";
-import { defaultModelConfiguration } from "../src/state/model-config.js";
+import { loadState, resolveStateFile } from "../src/state/state.js";
+import { defaultModelConfiguration, resolveModelConfigurationFile } from "../src/state/model-config.js";
 import {
   loadConfigurationView,
   saveConfigurationSubmission,
@@ -21,6 +23,7 @@ function fixture() {
     ...process.env,
     SWARM_PI_CODE_PLUGIN_AUTH_FILE: path.join(privateDir, "auth.json"),
     SWARM_PI_CODE_PLUGIN_MODELS_FILE: path.join(privateDir, "models.json"),
+    SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST: "1",
   };
   const customProviders = [
     {
@@ -65,6 +68,10 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   }, "test-nonce");
 
   assert.match(html, /Connect an AI service/);
+  assert.match(html, /Worker roles/);
+  assert.match(html, /Execution &amp; safety/);
+  assert.match(html, /sandbox-adaptive/);
+  assert.match(html, /classifier-models/);
   assert.match(html, /class="brand-logo"/);
   assert.match(html, />Close setup</);
   assert.match(html, /id="closed-screen"/);
@@ -98,6 +105,8 @@ test("project-only page starts from the guided project setup", () => {
   assert.match(html, /Selected folders/);
   assert.match(html, /Delegated work/);
   assert.match(html, /Execution safety/);
+  assert.match(html, /data-step="3"/);
+  assert.match(html, /data-step="6"/);
   assert.match(html, /sandboxed shell and outbound network enabled/);
   assert.match(html, /\/api\/save-profile/);
 });
@@ -118,7 +127,7 @@ test("project profile save validates scope and does not create model configurati
   assert.deepEqual(profile.dirs, ["src"]);
   assert.deepEqual(profile.tasks, ["implementation", "code-review"]);
   assert.equal((await loadState(workspace)).config.sandboxMode, "strict");
-  assert.equal(fs.existsSync(path.join(workspace, ".swarm-pi-code-plugin", "model.json")), false);
+  assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
   await assert.rejects(
     () => saveProjectProfileSubmission(workspace, { goal: "Invalid", dirs: ["../outside"], tasks: ["analysis"] }),
     /outside/,
@@ -148,8 +157,8 @@ test("configuration service stores credentials outside model and state files", a
     },
     env,
   );
-  const modelFile = path.join(workspace, ".swarm-pi-code-plugin", "model.json");
-  const stateFile = path.join(workspace, ".swarm-pi-code-plugin", "state.json");
+  const modelFile = await resolveModelConfigurationFile(workspace);
+  const stateFile = await resolveStateFile(workspace);
   const authFile = path.join(privateDir, "auth.json");
 
   assert.equal(view.configuration.primary, "local-test/test-model");
@@ -162,6 +171,37 @@ test("configuration service stores credentials outside model and state files", a
   assert.deepEqual((await loadState(workspace)).config.modelPriority, ["local-test/test-model"]);
   assert.equal((await loadState(workspace)).config.profile?.goal, "Maintain a guided setup experience");
   assert.deepEqual(view.directoryOptions, ["src"]);
+});
+
+test("configuration save smoke-tests the selected model before persistence", async () => {
+  const { workspace, env } = fixture();
+  const { SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST: _skip, ...smokeEnv } = env;
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    const common = { id: "chatcmpl-ready", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: "ready-model" };
+    response.write(`data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: { role: "assistant", content: "READY" }, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+    response.end("data: [DONE]\n\n");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const view = await saveConfigurationSubmission(workspace, {
+      primary: "ready/ready-model",
+      fallbacks: [],
+      customProviders: [{
+        id: "ready", name: "Ready", baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        api: "openai-completions", authHeader: false, requiresApiKey: false,
+        models: [{ id: "ready-model", name: "Ready", reasoning: false, input: ["text"] }],
+      }],
+    }, smokeEnv);
+    assert.equal(view.configuration.primary, "ready/ready-model");
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
 });
 
 test("custom models keep unknown limits automatic in the browser view", async () => {
@@ -306,7 +346,7 @@ test("cancel closes the setup session without creating model.json", async () => 
   });
   assert.equal(response.status, 200);
   assert.equal((await server.completion).status, "cancelled");
-  assert.equal(fs.existsSync(path.join(workspace, ".swarm-pi-code-plugin", "model.json")), false);
+  assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
 });
 
 test("project-only server saves profile without changing model configuration", async () => {
@@ -336,5 +376,5 @@ test("project-only server saves profile without changing model configuration", a
   assert.equal(response.status, 200);
   assert.equal((await server.completion).status, "saved");
   assert.deepEqual((await loadState(workspace)).config.profile?.tasks, ["planning", "analysis"]);
-  assert.equal(fs.existsSync(path.join(workspace, ".swarm-pi-code-plugin", "model.json")), false);
+  assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
 });

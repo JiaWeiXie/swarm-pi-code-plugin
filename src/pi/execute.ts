@@ -1,4 +1,5 @@
 import type { TaskKind, WorkerResult } from "../core/contracts.js";
+import type { ThinkingLevel } from "../core/contracts.js";
 
 interface SessionEvent {
   type: string;
@@ -18,6 +19,7 @@ export interface RunnableSession {
   subscribe(listener: (event: SessionEvent) => void): () => void;
   abort?(): Promise<void>;
   waitForIdle?(): Promise<void>;
+  readonly thinkingLevel?: string;
   dispose(): void;
 }
 

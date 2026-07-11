@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Pi Agent backed dual-host coding plugin",
-    "version": "0.1.0"
+    "version": "0.1.2"
   },
   "plugins": [
     {
       "name": "swarm-pi-code-plugin",
       "description": "Delegate bounded analysis and implementation work to embedded Pi agent sessions.",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "author": {
         "name": "JiaWei Xie"
       },

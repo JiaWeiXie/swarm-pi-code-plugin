@@ -14,7 +14,7 @@ import {
   type CreateAgentSessionOptions,
 } from "@earendil-works/pi-coding-agent";
 
-import type { WorkerMode } from "../core/contracts.js";
+import type { SandboxMode, WorkerMode } from "../core/contracts.js";
 import { resolveStateDir, resolveWorkspaceRoot } from "../state/state.js";
 import { detectSandboxAvailability } from "./availability.js";
 
@@ -31,6 +31,9 @@ const execFileAsync = promisify(execFile);
 export async function createSandboxRunner(options: {
   cwd: string;
   mode: WorkerMode;
+  sandboxMode?: Extract<SandboxMode, "adaptive" | "lenient">;
+  trustedDomains?: string[];
+  authorizeNetwork?: (host: string, port?: number) => Promise<boolean>;
   env?: NodeJS.ProcessEnv;
 }): Promise<SandboxRunner> {
   const availability = detectSandboxAvailability();
@@ -44,7 +47,14 @@ export async function createSandboxRunner(options: {
   const env = options.env ?? process.env;
   let config: SandboxRuntimeConfig;
   try {
-    config = await sandboxConfiguration(cwd, tempRoot, options.mode, env);
+    config = await sandboxConfiguration(
+      cwd,
+      tempRoot,
+      options.mode,
+      env,
+      options.sandboxMode ?? "lenient",
+      options.trustedDomains ?? [],
+    );
   } catch (error) {
     await fs.rm(tempRoot, { recursive: true, force: true });
     throw error;
@@ -54,7 +64,10 @@ export async function createSandboxRunner(options: {
 
   activeRunner = true;
   try {
-    await SandboxManager.initialize(config, async () => true);
+    await SandboxManager.initialize(config, async ({ host, port }) => {
+      if ((options.sandboxMode ?? "lenient") === "lenient") return true;
+      return options.authorizeNetwork ? options.authorizeNetwork(host, port) : false;
+    });
   } catch (error) {
     activeRunner = false;
     restoreEnvironment("CLAUDE_TMPDIR", previousClaudeTmpdir);
@@ -92,6 +105,8 @@ export async function sandboxConfiguration(
   tempRoot: string,
   mode: WorkerMode,
   env: NodeJS.ProcessEnv = process.env,
+  sandboxMode: Extract<SandboxMode, "adaptive" | "lenient"> = "lenient",
+  trustedDomains: string[] = [],
 ): Promise<SandboxRuntimeConfig> {
   const stateDir = await resolveStateDir(cwd, env);
   const gitPaths = await resolveGitMetadataPaths(cwd);
@@ -106,6 +121,7 @@ export async function sandboxConfiguration(
     ...gitPaths,
     path.join(cwd, ".env"),
     path.join(cwd, ".env.local"),
+    path.join(cwd, ".swarm-pi-policy.json"),
     path.join(os.homedir(), ".npm", "_logs"),
     path.join(os.homedir(), ".claude", "debug"),
     "/tmp/claude",
@@ -114,7 +130,9 @@ export async function sandboxConfiguration(
   return {
     network: {
       allowedDomains: [],
-      deniedDomains: [],
+      deniedDomains: sandboxMode === "adaptive"
+        ? ["localhost", "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
+        : [],
       allowUnixSockets: [],
       allowAllUnixSockets: false,
       allowLocalBinding: false,
@@ -144,6 +162,7 @@ export function sanitizedSandboxEnvironment(
     XDG_CACHE_HOME: path.join(tempRoot, ".cache"),
     XDG_CONFIG_HOME: path.join(tempRoot, ".config"),
     XDG_DATA_HOME: path.join(tempRoot, ".local", "share"),
+    PYTHONPYCACHEPREFIX: path.join(tempRoot, "python-cache"),
     PATH: sandboxPath(cwd),
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_OPTIONAL_LOCKS: "0",
@@ -157,8 +176,31 @@ export function sanitizedSandboxEnvironment(
 }
 
 function sandboxedBashOperations(tempRoot: string, env: NodeJS.ProcessEnv): BashOperations {
+  let queue: Promise<void> = Promise.resolve();
   return {
     async exec(command, cwd, { onData, signal, timeout }) {
+      let release!: () => void;
+      const previous = queue;
+      queue = new Promise<void>((resolve) => { release = resolve; });
+      await previous;
+      try {
+        return await executeSandboxed(command, cwd, tempRoot, env, onData, signal, timeout);
+      } finally {
+        release();
+      }
+    },
+  };
+}
+
+async function executeSandboxed(
+  command: string,
+  cwd: string,
+  tempRoot: string,
+  env: NodeJS.ProcessEnv,
+  onData: (data: Buffer) => void,
+  signal: AbortSignal | undefined,
+  timeout: number | undefined,
+) {
       if (signal?.aborted) throw new Error("aborted");
       const wrapped = await SandboxManager.wrapWithSandbox(command, "/bin/bash", undefined, signal);
       if (signal?.aborted) {
@@ -201,8 +243,6 @@ function sandboxedBashOperations(tempRoot: string, env: NodeJS.ProcessEnv): Bash
         signal?.removeEventListener("abort", stop);
         SandboxManager.cleanupAfterCommand();
       }
-    },
-  };
 }
 
 function killProcessTree(pid: number | undefined): void {

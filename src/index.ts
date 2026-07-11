@@ -4,6 +4,15 @@ export type {
   WorkerMode,
   ExecutionMode,
   SandboxMode,
+  ApprovalMode,
+  ThinkingLevel,
+  RoleId,
+  WorkerRoleId,
+  RolePolicy,
+  PolicyDecision,
+  PolicySnapshot,
+  ApprovalRequest,
+  CapabilityLease,
   JobStatus,
   NotificationStatus,
   WorkerRequest,
@@ -11,6 +20,13 @@ export type {
   WorkerStatus,
   AvailableModel,
   ProviderSummary,
+  ReadinessStatus,
+  ReadinessReport,
+  SetupIssue,
+  WorkspaceAssessment,
+  WorkspaceDisposition,
+  WorkspaceStrategy,
+  ScaffoldSpec,
 } from "./core/contracts.js";
 export { main } from "./cli.js";
 export { executeSession, notImplementedResult } from "./pi/execute.js";
@@ -20,6 +36,14 @@ export { assertMutationPath, createScopedMutationTools } from "./pi/scoped-tools
 export { IMPLEMENT_TOOLS, READ_ONLY_TOOLS, toolsForMode } from "./pi/tool-profiles.js";
 export * from "./git/worktree.js";
 export * from "./git/review.js";
+export * from "./git/job-worktree.js";
+export * from "./git/scaffold.js";
+export * from "./onboarding/readiness.js";
+export * from "./onboarding/continuations.js";
+export * from "./orchestration/roles.js";
+export * from "./policy/engine.js";
+export * from "./policy/classifier.js";
+export * from "./policy/project-policy.js";
 export * from "./state/jobs.js";
 export * from "./state/state.js";
 export * from "./state/model-config.js";

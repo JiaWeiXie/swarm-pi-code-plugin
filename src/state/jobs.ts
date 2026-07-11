@@ -3,12 +3,24 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import type {
+  ApprovalMode,
+  ApprovalRequest,
+  CapabilityLease,
+  DelegationSpec,
   ExecutionMode,
   Host,
+  JobNotification,
   JobStatus,
+  PolicyDecision,
+  PolicySnapshot,
+  RoleId,
   SandboxMode,
   TaskKind,
+  ThinkingLevel,
+  WorkerRoleId,
   WorkerResult,
+  WorkspaceStrategy,
+  ScaffoldSpec,
 } from "../core/contracts.js";
 import { loadState, resolveStateDir, updateState, type JobRecord } from "./state.js";
 
@@ -24,9 +36,19 @@ export interface JobStart {
   sandboxMode?: SandboxMode;
   timeoutMs: number;
   model?: string;
+  role?: WorkerRoleId;
+  thinkingLevel?: ThinkingLevel;
+  approvalMode?: ApprovalMode;
+  delegationSpec?: DelegationSpec;
+  policySnapshot?: PolicySnapshot;
+  workspaceStrategy?: WorkspaceStrategy;
+  target?: string;
+  scaffoldSpec?: ScaffoldSpec;
+  adoptExisting?: boolean;
 }
 
 export interface JobRequest {
+  requestVersion?: 1 | 2;
   id: string;
   host: Host;
   kind: TaskKind;
@@ -35,6 +57,15 @@ export interface JobRequest {
   sandboxMode?: SandboxMode;
   timeoutMs: number;
   model?: string;
+  role?: WorkerRoleId;
+  thinkingLevel?: ThinkingLevel;
+  approvalMode?: ApprovalMode;
+  delegationSpec?: DelegationSpec;
+  policySnapshot?: PolicySnapshot;
+  workspaceStrategy?: WorkspaceStrategy;
+  target?: string;
+  scaffoldSpec?: ScaffoldSpec;
+  adoptExisting?: boolean;
   workerToken: string;
   createdAt: string;
 }
@@ -55,6 +86,13 @@ export interface JobWaitExpired {
   status: string;
 }
 
+export interface JobApprovalRequired {
+  event: "approval-required";
+  jobId: string;
+  status: "awaiting-approval";
+  approval: ApprovalRequest;
+}
+
 export async function startJob(cwd: string, input: JobStart): Promise<JobHandle> {
   await reconcileJobs(cwd);
   const id = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
@@ -63,6 +101,7 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
   const sandboxMode = input.sandboxMode ?? "strict";
   const directory = await jobDirectory(cwd, id);
   const request: JobRequest = {
+    requestVersion: 2,
     id,
     host: input.host,
     kind: input.kind,
@@ -71,6 +110,15 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
     sandboxMode,
     timeoutMs: input.timeoutMs,
     ...(input.model ? { model: input.model } : {}),
+    ...(input.role ? { role: input.role } : {}),
+    ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
+    ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
+    ...(input.delegationSpec ? { delegationSpec: input.delegationSpec } : {}),
+    ...(input.policySnapshot ? { policySnapshot: input.policySnapshot } : {}),
+    ...(input.workspaceStrategy ? { workspaceStrategy: input.workspaceStrategy } : {}),
+    ...(input.target ? { target: input.target } : {}),
+    ...(input.scaffoldSpec ? { scaffoldSpec: input.scaffoldSpec } : {}),
+    ...(input.adoptExisting ? { adoptExisting: true } : {}),
     workerToken,
     createdAt,
   };
@@ -88,6 +136,11 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       sandboxMode,
       timeoutMs: input.timeoutMs,
       ...(input.model ? { model: input.model } : {}),
+      ...(input.role ? { role: input.role } : {}),
+      generation: 1,
+      approvals: [],
+      leases: [],
+      notifications: [],
       workerToken,
       status: "queued",
       createdAt,
@@ -187,6 +240,7 @@ async function applyResultToState(
       finishedAt,
       updatedAt: finishedAt,
       notification: "pending",
+      notifications: terminalNotifications(existing?.notifications, finishedAt),
     };
     if (existing) Object.assign(existing, summary);
     else state.jobs.push(summary);
@@ -195,6 +249,25 @@ async function applyResultToState(
 
 export async function readJobRequest(cwd: string, jobId: string): Promise<JobRequest> {
   return readRequiredJson<JobRequest>(path.join(await jobDirectory(cwd, jobId), "request.json"));
+}
+
+export async function updateJobExecutionWorkspace(
+  cwd: string,
+  jobId: string,
+  workerToken: string,
+  workspace: { worktree: string; branch: string; base: string } & object,
+): Promise<void> {
+  const request = await readJobRequest(cwd, jobId);
+  if (request.workerToken !== workerToken) throw new Error(`Worker token mismatch for job: ${jobId}`);
+  await updateState(cwd, (state) => {
+    const job = requireJob(state.jobs, jobId);
+    requireWorkerToken(job, workerToken);
+    if (isTerminalJobStatus(job.status)) throw new Error(`Job is terminal: ${jobId}`);
+    job.executionWorkspace = structuredClone(workspace);
+    job.updatedAt = new Date().toISOString();
+  });
+  request.cwd = workspace.worktree;
+  await writeJson(path.join(await jobDirectory(cwd, jobId), "request.json"), request);
 }
 
 export async function readJobPrompt(cwd: string, jobId: string): Promise<string> {
@@ -218,7 +291,8 @@ export async function listJobs(cwd: string, pendingNotifications = false): Promi
   await reconcileJobs(cwd);
   const state = await loadState(cwd);
   return state.jobs
-    .filter((job) => !pendingNotifications || job.notification === "pending")
+    .filter((job) => !pendingNotifications || job.notification === "pending" ||
+      job.notifications?.some((notification) => notification.status === "pending"))
     .sort((left, right) => timestamp(right) - timestamp(left));
 }
 
@@ -226,13 +300,17 @@ export async function waitForJob(
   cwd: string,
   jobId: string,
   waitTimeoutMs?: number,
-): Promise<WorkerResult | JobWaitExpired> {
+): Promise<WorkerResult | JobWaitExpired | JobApprovalRequired> {
   const deadline = waitTimeoutMs === undefined ? undefined : Date.now() + waitTimeoutMs;
   while (true) {
     const snapshot = await getJob(cwd, jobId);
+    if (snapshot.job.status === "awaiting-approval") {
+      const approval = snapshot.job.approvals?.find((item) => item.id === snapshot.job.pendingApprovalId);
+      if (approval) return { event: "approval-required", jobId, status: "awaiting-approval", approval };
+    }
     if (isTerminalJobStatus(snapshot.job.status)) {
       if (snapshot.result) return snapshot.result;
-      return terminalResult(snapshot.job, snapshot.job.status as Exclude<JobStatus, "queued" | "running">,
+      return terminalResult(snapshot.job, snapshot.job.status as Exclude<JobStatus, "queued" | "running" | "awaiting-approval">,
         `Job ${jobId} reached ${snapshot.job.status} without a result artifact.`);
     }
     if (deadline !== undefined && Date.now() >= deadline) {
@@ -242,14 +320,217 @@ export async function waitForJob(
   }
 }
 
-export async function acknowledgeJob(cwd: string, jobId: string): Promise<JobRecord> {
+export async function acknowledgeJob(cwd: string, jobId: string, notificationId?: string): Promise<JobRecord> {
   const state = await updateState(cwd, (current) => {
     const job = requireJob(current.jobs, jobId);
-    if (!isTerminalJobStatus(job.status)) throw new Error(`Job is not terminal: ${jobId}`);
-    job.notification = "acknowledged";
+    if (notificationId) {
+      const notification = job.notifications?.find((item) => item.id === notificationId);
+      if (!notification) throw new Error(`Unknown notification: ${notificationId}`);
+      notification.status = "acknowledged";
+      notification.acknowledgedAt = new Date().toISOString();
+      if (notification.kind === "terminal") job.notification = "acknowledged";
+      if (notification.approvalId) {
+        const approval = job.approvals?.find((item) => item.id === notification.approvalId);
+        if (approval) approval.notification = "acknowledged";
+      }
+    } else {
+      if (!isTerminalJobStatus(job.status)) throw new Error(`Job is not terminal: ${jobId}`);
+      job.notification = "acknowledged";
+      for (const notification of job.notifications ?? []) {
+        if (notification.kind === "terminal") {
+          notification.status = "acknowledged";
+          notification.acknowledgedAt = new Date().toISOString();
+        }
+      }
+    }
     job.updatedAt = new Date().toISOString();
   });
   return requireJob(state.jobs, jobId);
+}
+
+export async function requestJobApproval(
+  cwd: string,
+  jobId: string,
+  workerToken: string,
+  input: {
+    actionFingerprint: string;
+    toolName: string;
+    actionSummary: string;
+    decision: PolicyDecision;
+    expiresAt: string;
+  },
+): Promise<ApprovalRequest> {
+  const requestedAt = new Date().toISOString();
+  const approval: ApprovalRequest = {
+    id: randomUUID(),
+    jobId,
+    generation: 1,
+    actionFingerprint: input.actionFingerprint,
+    toolName: input.toolName,
+    actionSummary: input.actionSummary.slice(0, 2_000),
+    decision: structuredClone(input.decision),
+    status: "pending",
+    requestedAt,
+    expiresAt: input.expiresAt,
+    notificationId: randomUUID(),
+    notification: "pending",
+  };
+  await updateState(cwd, (state) => {
+    const job = requireJob(state.jobs, jobId);
+    requireWorkerToken(job, workerToken);
+    if (isTerminalJobStatus(job.status)) throw new Error(`Job is terminal: ${jobId}`);
+    if (job.pendingApprovalId) {
+      const existing = job.approvals?.find((item) => item.id === job.pendingApprovalId && item.status === "pending");
+      if (existing) throw new Error(`Job already has a pending approval: ${existing.id}`);
+    }
+    approval.generation = job.generation ?? 1;
+    job.approvals ??= [];
+    job.notifications ??= [];
+    job.approvals.push(approval);
+    job.notifications.push({
+      id: approval.notificationId,
+      kind: "approval",
+      status: "pending",
+      createdAt: requestedAt,
+      approvalId: approval.id,
+    });
+    job.pendingApprovalId = approval.id;
+    job.status = "awaiting-approval";
+    job.updatedAt = requestedAt;
+  });
+  await writeJson(path.join(await jobDirectory(cwd, jobId), "approvals", `${approval.id}.json`), approval);
+  return approval;
+}
+
+export async function listJobApprovals(cwd: string, jobId: string): Promise<ApprovalRequest[]> {
+  await reconcileJobs(cwd);
+  return structuredClone((await getJob(cwd, jobId)).job.approvals ?? []);
+}
+
+export async function approveJob(
+  cwd: string,
+  jobId: string,
+  approvalId: string,
+  scope: "once" | "job" = "once",
+): Promise<{ job: JobRecord; approval: ApprovalRequest; lease: CapabilityLease }> {
+  const now = new Date();
+  let resolvedApproval!: ApprovalRequest;
+  let lease!: CapabilityLease;
+  const state = await updateState(cwd, (current) => {
+    const job = requireJob(current.jobs, jobId);
+    if (isTerminalJobStatus(job.status)) throw new Error(`Job is terminal: ${jobId}`);
+    const approval = requireApproval(job, approvalId);
+    assertApprovalPending(job, approval, now);
+    approval.status = "approved";
+    approval.scope = scope;
+    approval.resolvedAt = now.toISOString();
+    lease = {
+      id: randomUUID(),
+      jobId,
+      generation: approval.generation,
+      policyHash: approval.decision.policyHash,
+      role: (job.role ?? "scout") as RoleId,
+      actionFingerprint: approval.actionFingerprint,
+      scope,
+      capabilities: [...approval.decision.capabilities],
+      createdAt: now.toISOString(),
+      expiresAt: approval.expiresAt,
+    };
+    job.leases ??= [];
+    job.leases.push(lease);
+    delete job.pendingApprovalId;
+    job.status = "running";
+    job.updatedAt = now.toISOString();
+    resolvedApproval = structuredClone(approval);
+  });
+  await writeJson(path.join(await jobDirectory(cwd, jobId), "approvals", `${approvalId}.json`), resolvedApproval);
+  await writeJson(path.join(await jobDirectory(cwd, jobId), "leases", `${lease.id}.json`), lease);
+  return { job: requireJob(state.jobs, jobId), approval: resolvedApproval, lease };
+}
+
+export async function denyJobApproval(
+  cwd: string,
+  jobId: string,
+  approvalId: string,
+): Promise<{ job: JobRecord; approval: ApprovalRequest }> {
+  const now = new Date();
+  let resolvedApproval!: ApprovalRequest;
+  const state = await updateState(cwd, (current) => {
+    const job = requireJob(current.jobs, jobId);
+    if (isTerminalJobStatus(job.status)) throw new Error(`Job is terminal: ${jobId}`);
+    const approval = requireApproval(job, approvalId);
+    assertApprovalPending(job, approval, now);
+    approval.status = "denied";
+    approval.resolvedAt = now.toISOString();
+    delete job.pendingApprovalId;
+    job.status = "running";
+    job.updatedAt = now.toISOString();
+    resolvedApproval = structuredClone(approval);
+  });
+  await writeJson(path.join(await jobDirectory(cwd, jobId), "approvals", `${approvalId}.json`), resolvedApproval);
+  return { job: requireJob(state.jobs, jobId), approval: resolvedApproval };
+}
+
+export async function waitForApprovalResolution(
+  cwd: string,
+  jobId: string,
+  workerToken: string,
+  approvalId: string,
+  signal?: AbortSignal,
+): Promise<"approved" | "denied" | "expired"> {
+  while (true) {
+    if (signal?.aborted) throw new Error("Approval wait was cancelled");
+    const state = await loadState(cwd);
+    const job = requireJob(state.jobs, jobId);
+    requireWorkerToken(job, workerToken);
+    const approval = requireApproval(job, approvalId);
+    if (approval.status === "approved" || approval.status === "denied" || approval.status === "expired") {
+      return approval.status;
+    }
+    if (Date.now() >= Date.parse(approval.expiresAt)) {
+      await expireApproval(cwd, jobId, approvalId);
+      return "expired";
+    }
+    await new Promise<void>((resolve, reject) => {
+      const finish = () => { signal?.removeEventListener("abort", abort); resolve(); };
+      const timeout = setTimeout(finish, 250);
+      const abort = () => { clearTimeout(timeout); signal?.removeEventListener("abort", abort); reject(new Error("Approval wait was cancelled")); };
+      signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+}
+
+export function createJobLeaseProvider(cwd: string, jobId: string) {
+  return {
+    async find(actionFingerprint: string, snapshot: { hash: string }): Promise<CapabilityLease | null> {
+      const job = (await loadState(cwd)).jobs.find((item) => item.id === jobId);
+      const now = Date.now();
+      return structuredClone(job?.leases?.find((lease) =>
+        lease.actionFingerprint === actionFingerprint && lease.policyHash === snapshot.hash &&
+        Date.parse(lease.expiresAt) > now && (lease.scope === "job" || !lease.consumedAt),
+      ) ?? null);
+    },
+    async consume(target: CapabilityLease): Promise<boolean> {
+      let consumed = false;
+      await updateState(cwd, (state) => {
+        const job = requireJob(state.jobs, jobId);
+        const lease = job.leases?.find((item) => item.id === target.id);
+        if (!lease || lease.generation !== (job.generation ?? 1) || Date.parse(lease.expiresAt) <= Date.now()) return;
+        if (lease.scope === "once" && lease.consumedAt) return;
+        if (lease.scope === "once") lease.consumedAt = new Date().toISOString();
+        const approval = job.approvals?.find((item) => item.actionFingerprint === lease.actionFingerprint && item.status === "approved");
+        if (approval && lease.scope === "once") approval.status = "consumed";
+        consumed = true;
+      });
+      return consumed;
+    },
+  };
+}
+
+export async function appendPolicyEvent(cwd: string, jobId: string, event: unknown): Promise<void> {
+  const file = path.join(await jobDirectory(cwd, jobId), "policy-events.jsonl");
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, `${JSON.stringify(event)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 export async function cancelJob(cwd: string, jobId: string): Promise<JobRecord> {
@@ -266,7 +547,12 @@ export async function cancelJob(cwd: string, jobId: string): Promise<JobRecord> 
   if (!target || isTerminalJobStatus(target.status)) return (await getJob(cwd, jobId)).job;
   if (target.pid && processAlive(target.pid)) {
     try {
-      process.kill(target.pid, "SIGTERM");
+      try {
+        if (process.platform !== "win32") process.kill(-target.pid, "SIGTERM");
+        else process.kill(target.pid, "SIGTERM");
+      } catch {
+        process.kill(target.pid, "SIGTERM");
+      }
       return (await loadState(cwd)).jobs.find((job) => job.id === jobId)!;
     } catch {
       // The worker may have exited between the liveness check and signal delivery.
@@ -306,12 +592,12 @@ export async function jobDirectory(cwd: string, jobId: string): Promise<string> 
 }
 
 export function isTerminalJobStatus(status: string): boolean {
-  return status !== "queued" && status !== "running";
+  return ["succeeded", "failed", "cancelled", "timed-out", "orphaned", "not-implemented"].includes(status);
 }
 
 function terminalResult(
   job: JobRecord,
-  status: Exclude<JobStatus, "queued" | "running">,
+  status: Exclude<JobStatus, "queued" | "running" | "awaiting-approval">,
   output: string,
 ): WorkerResult {
   return {
@@ -327,6 +613,40 @@ function terminalResult(
     jobId: job.id,
     error: status === "succeeded" ? null : output,
   };
+}
+
+function terminalNotifications(existing: JobNotification[] | undefined, createdAt: string): JobNotification[] {
+  if (existing?.some((notification) => notification.kind === "terminal")) return existing;
+  return [
+    ...(existing ?? []),
+    { id: randomUUID(), kind: "terminal", status: "pending", createdAt },
+  ];
+}
+
+function requireApproval(job: JobRecord, approvalId: string): ApprovalRequest {
+  const approval = job.approvals?.find((item) => item.id === approvalId);
+  if (!approval) throw new Error(`Unknown approval: ${approvalId}`);
+  return approval;
+}
+
+function assertApprovalPending(job: JobRecord, approval: ApprovalRequest, now: Date): void {
+  if (approval.status !== "pending") throw new Error(`Approval is already ${approval.status}: ${approval.id}`);
+  if (approval.generation !== (job.generation ?? 1)) throw new Error(`Approval generation is stale: ${approval.id}`);
+  if (Date.parse(approval.expiresAt) <= now.getTime()) throw new Error(`Approval expired: ${approval.id}`);
+  if (job.pendingApprovalId !== approval.id) throw new Error(`Approval is not active: ${approval.id}`);
+}
+
+async function expireApproval(cwd: string, jobId: string, approvalId: string): Promise<void> {
+  await updateState(cwd, (state) => {
+    const job = requireJob(state.jobs, jobId);
+    const approval = requireApproval(job, approvalId);
+    if (approval.status !== "pending") return;
+    approval.status = "expired";
+    approval.resolvedAt = new Date().toISOString();
+    delete job.pendingApprovalId;
+    job.status = "running";
+    job.updatedAt = approval.resolvedAt;
+  });
 }
 
 function requireJob(jobs: JobRecord[], jobId: string): JobRecord {

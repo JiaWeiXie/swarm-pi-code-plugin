@@ -9,10 +9,10 @@ import { executeSession, type RunnableSession } from "../src/pi/execute.js";
 import { describeModels, describeProviders, selectModel, type PiModel } from "../src/pi/models.js";
 import { parseArguments } from "../src/runner/args.js";
 import { runCommand, type RunnerDependencies } from "../src/runner/run.js";
-import { getJob, startJob } from "../src/state/jobs.js";
+import { getJob, readJobRequest, startJob } from "../src/state/jobs.js";
 import { defaultModelConfiguration } from "../src/state/model-config.js";
 import { detectSandboxAvailability } from "../src/sandbox/availability.js";
-import { setSandboxMode } from "../src/state/state.js";
+import { resolveStateDir, setSandboxMode, updateState } from "../src/state/state.js";
 
 const fakeModel = {
   provider: "test-provider",
@@ -26,6 +26,11 @@ const fallbackModel = {
 } as PiModel;
 
 test("argument parsing requires host and prompt file for ask", () => {
+  assert.equal(parseArguments(["roles", "list", "--json"]).rolesAction, "list");
+  assert.equal(
+    parseArguments(["jobs", "approve", "--job", "job-1", "--approval", "approval-1", "--approval-scope", "job", "--json"]).approvalScope,
+    "job",
+  );
   assert.deepEqual(
     parseArguments([
       "ask",
@@ -82,6 +87,12 @@ test("argument parsing requires host and prompt file for ask", () => {
   );
   assert.throws(() => parseArguments(["configure", "--section", "models"]), /configuration section/);
   assert.throws(() => parseArguments(["init", "--section", "project"]), /only supported by configure/);
+  assert.equal(parseArguments(["status", "--json"]).command, "status");
+  assert.equal(parseArguments(["doctor", "--smoke-test", "--json"]).smokeTest, true);
+  assert.equal(parseArguments(["resume", "--continuation", "00000000-0000-0000-0000-000000000000"]).continuationId,
+    "00000000-0000-0000-0000-000000000000");
+  assert.equal(parseArguments(["scaffold", "--host", "codex", "--spec-file", "/tmp/spec.json", "--target", "/tmp/app"]).command, "scaffold");
+  assert.equal(parseArguments(["setup", "--host", "codex", "--prompt-file", "/tmp/setup.md", "--workspace-strategy", "isolated-snapshot"]).workspaceStrategy, "isolated-snapshot");
 
   assert.deepEqual(
     parseArguments([
@@ -107,8 +118,8 @@ test("argument parsing requires host and prompt file for ask", () => {
       json: true,
     },
   );
-  assert.throws(
-    () => parseArguments([
+  assert.equal(
+    parseArguments([
       "implement",
       "--host",
       "codex",
@@ -116,8 +127,10 @@ test("argument parsing requires host and prompt file for ask", () => {
       "/tmp/task.md",
       "--execution-mode",
       "background",
-    ]),
-    /background.*implement/i,
+      "--role",
+      "mechanical-executor",
+    ]).role,
+    "mechanical-executor",
   );
   assert.throws(
     () => parseArguments([
@@ -403,14 +416,18 @@ test("implement requires a clean worktree and captures Pi changes", async () => 
     readFile: async () => "Change file.txt",
     createSession: async (options) => ({
       subscribe(listener) {
+        if (options.mode === "readonly") {
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED: changes match the task" } });
+        }
         listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
         return () => {};
       },
       async prompt() {
-        assert.equal(options.mode, "implement");
-        fs.writeFileSync(path.join(workspace, "file.txt"), "after\n");
-        fs.mkdirSync(path.join(workspace, "cache"));
-        fs.writeFileSync(path.join(workspace, "cache", "artifact.bin"), "generated\n");
+        if (options.mode === "implement") {
+          fs.writeFileSync(path.join(workspace, "file.txt"), "after\n");
+          fs.mkdirSync(path.join(workspace, "cache"));
+          fs.writeFileSync(path.join(workspace, "cache", "artifact.bin"), "generated\n");
+        }
       },
       dispose() {},
     }),
@@ -432,9 +449,10 @@ test("implement requires a clean worktree and captures Pi changes", async () => 
   assert.deepEqual("changedFiles" in result && result.changedFiles, ["file.txt"]);
   assert.match("diffStat" in result ? result.diffStat : "", /file\.txt/);
   assert.deepEqual("runtimeSideEffects" in result && result.runtimeSideEffects, ["cache/"]);
+  assert.equal("agentVerification" in result && result.agentVerification?.status, "passed");
 });
 
-test("implement rejects a dirty worktree before creating Pi session", async () => {
+test("implement returns actionable isolation strategies for a dirty worktree", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-dirty-"));
   execFileSync("git", ["init", workspace], { stdio: "ignore" });
   fs.writeFileSync(path.join(workspace, "dirty.txt"), "user change\n");
@@ -458,8 +476,50 @@ test("implement rejects a dirty worktree before creating Pi session", async () =
     workspace,
     dependencies,
   );
-  assert.equal("status" in result && result.status, "failed");
-  assert.match("output" in result ? result.output : "", /clean worktree/i);
+  assert.equal("event" in result && result.event, "workspace-action-required");
+  assert.deepEqual("strategies" in result ? result.strategies : [], ["isolated-head", "isolated-snapshot"]);
+});
+
+test("mechanical executor escalates only after a side-effect-free failure", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-mechanical-escalation-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  fs.writeFileSync(path.join(workspace, "file.txt"), "before\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "base"], { stdio: "ignore" });
+  await updateState(workspace, (state) => {
+    state.config.rolePolicies = {
+      "mechanical-executor": { models: ["test-provider/test-model"], maxAttempts: 1 },
+      executor: { models: ["test-provider/fallback-model"], thinkingLevel: "high", maxAttempts: 1 },
+    };
+  });
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel, fallbackModel] },
+    readFile: async () => "Change file.txt",
+    createSession: async ({ model, mode }) => ({
+      subscribe(listener) {
+        if (mode === "readonly") {
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED" } });
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        } else if (model.id === fakeModel.id) {
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "mechanical failed" } });
+        } else {
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        }
+        return () => {};
+      },
+      async prompt() {
+        if (mode === "implement" && model.id === fallbackModel.id) fs.writeFileSync(path.join(workspace, "file.txt"), "after\n");
+      },
+      dispose() {},
+    }),
+  };
+  const result = await runCommand({
+    command: "implement", host: "codex", role: "mechanical-executor", promptFile: "prompt.md",
+    reconfigure: false, reset: false, json: true,
+  }, workspace, dependencies);
+  assert.equal("status" in result && result.status, "succeeded");
+  assert.equal("role" in result && result.role, "executor");
+  assert.deepEqual("orchestrationTrace" in result && result.orchestrationTrace?.map((item) => item.role), ["mechanical-executor", "executor"]);
 });
 
 test("init replaces validated model priority and preserves it in status", async () => {
@@ -757,11 +817,10 @@ test("orchestrate runs exactly three readonly perspectives and records artifacts
   assert.equal(sessions, 3);
   assert.equal("success" in result && result.success, true);
   assert.match("output" in result ? result.output : "", /Correctness and failure modes/);
-  const state = JSON.parse(
-    fs.readFileSync(path.join(workspace, ".swarm-pi-code-plugin", "state.json"), "utf8"),
-  );
+  const stateDir = await resolveStateDir(workspace);
+  const state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
   assert.equal(state.jobs.length, 1);
-  const jobDir = path.join(workspace, ".swarm-pi-code-plugin", "jobs", state.jobs[0].id);
+  const jobDir = path.join(stateDir, "jobs", state.jobs[0].id);
   assert.equal(fs.existsSync(path.join(jobDir, "request.json")), true);
   assert.equal(fs.existsSync(path.join(jobDir, "prompt.md")), true);
   assert.equal(fs.existsSync(path.join(jobDir, "result.json")), true);
@@ -807,6 +866,33 @@ test("background submission returns an accepted job without creating a Pi sessio
   assert.equal(snapshot.job.pid, 424_242);
   assert.equal(snapshot.job.timeoutMs, 30 * 60_000);
   assert.equal(snapshot.job.sandboxMode, "lenient");
+});
+
+test("background mechanical implementation uses an isolated job worktree", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-background-mechanical-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  fs.writeFileSync(path.join(workspace, "file.txt"), "base\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "base"], { stdio: "ignore" });
+  await updateState(workspace, (state) => { state.config.backgroundRolePolicy = { mechanicalExecutor: true }; });
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Mechanical change",
+    createSession: async () => { throw new Error("background must not create a foreground session"); },
+  };
+  const result = await runCommand({
+    command: "implement", host: "codex", role: "mechanical-executor", promptFile: "prompt.md",
+    executionMode: "background", reconfigure: false, reset: false, json: true,
+  }, workspace, dependencies, { spawnWorker: async () => 424_242 });
+  assert.equal("event" in result && result.event, "accepted");
+  const jobId = "jobId" in result ? result.jobId : "";
+  const request = await readJobRequest(workspace, jobId);
+  assert.notEqual(request.cwd, workspace);
+  assert.equal(fs.existsSync(request.cwd), true);
+  assert.equal((await getJob(workspace, jobId)).job.executionWorkspace !== undefined, true);
+  await runCommand({ command: "jobs", jobsAction: "cancel", jobId, reconfigure: false, reset: false, json: true }, workspace, dependencies);
+  await runCommand({ command: "jobs", jobsAction: "cleanup", jobId, discard: true, reconfigure: false, reset: false, json: true }, workspace, dependencies);
+  assert.equal(fs.existsSync(request.cwd), false);
 });
 
 test("supervised lenient jobs inject one shared sandbox runner", {

@@ -14,11 +14,12 @@ configuration server during first-run setup and reconfiguration.
 
 Users are not expected to edit configuration JSON by hand.
 
-The product model has three layers:
+The product model has four layers:
 
 1. **Connections** are AI services the user can actually use.
 2. **Models** are discovered from those connections.
-3. **Routing** selects one primary model and ordered fallbacks.
+3. **Role routing** selects per-role model chains and thinking levels.
+4. **Execution policy** selects sandbox, classifier, approval, and background behavior.
 
 Pi's complete provider catalog is implementation data, not user configuration.
 The interface must never present every provider merely because Pi knows about
@@ -26,7 +27,9 @@ it.
 
 ## Configuration Ownership
 
-The shared workspace data directory contains two files with distinct roles:
+Git workspaces store shared runtime data under the common Git directory;
+non-Git folders use an OS user-state namespace keyed by canonical path. The
+directory contains two files with distinct roles:
 
 - `model.json` is the canonical provider and model configuration. It contains
   the primary model, ordered fallbacks, and non-secret custom provider
@@ -36,7 +39,9 @@ The shared workspace data directory contains two files with distinct roles:
   releases.
 
 Linked Git worktrees resolve the same shared data directory and therefore read
-the same `model.json`.
+the same `model.json`. Legacy project-root `.swarm-pi-code-plugin` data is
+migrated under lock; two populated locations produce a recovery issue instead
+of an automatic merge.
 
 The provider identifier is encoded by every model reference as
 `provider/model`. A separate selected-provider field is not persisted because
@@ -100,7 +105,9 @@ The configuration server:
 5. sets a restrictive Content Security Policy and no-store cache headers;
 6. opens the system browser when permitted and always prints the local URL as a
    fallback;
-7. shuts down after save, cancel, or a ten-minute idle timeout.
+7. tests the primary and required Adaptive classifier with a minimal request;
+8. commits credential, model, and state changes as a recoverable transaction;
+9. shuts down after save, cancel, or a ten-minute idle timeout.
 
 User-entered endpoint requests accept only HTTP(S), reject embedded URL
 credentials and cloud metadata addresses, use bounded timeouts and response
@@ -125,12 +132,16 @@ setup session, not a daemon.
    inventory. Technical overrides remain under an Advanced disclosure.
 7. The user chooses a primary model and optional ordered fallbacks from models
    on usable connections.
-8. Project setup asks for one project goal, whole-project or selected-folder
-   scope, delegated task types, and strict or lenient execution safety.
-9. Review shows the complete model and project profile before save.
-10. The server validates the complete draft, writes `model.json` atomically,
-    updates the shared project profile and compatibility priority mirror,
-    reports success, and exits.
+8. Role setup assigns models and thinking to analysis, execution, architecture,
+   scaffolding, and environment roles.
+9. Execution setup selects strict, adaptive, or lenient policy, classifier
+   models, approval behavior, trusted domains, and optional background mechanical work.
+10. Workspace setup reports Git, empty non-Git, or existing non-Git state and
+    asks for goal, folder scope, and delegated task types.
+11. Review shows the complete role, safety, model, and project profile.
+12. The server validates and smoke-tests the complete draft, transactionally
+    updates credentials, model configuration, and shared profile, then reports
+    success and exits.
 
 Provider identifiers are internal implementation details. Rediscovering the
 same canonical endpoint and protocol refreshes the existing connection instead
@@ -140,12 +151,13 @@ collision check before adding a connection. Users must never be asked to repair
 duplicate provider identifiers manually.
 
 Wizard navigation uses **Back** after the first step. **Close setup** appears
-only on the Connections step and confirms that unsaved changes will be lost.
+only on the Connections step. Non-sensitive unsaved fields are retained as a
+workspace-bound browser draft; API keys are never included.
 After save or close, the page renders an explicit completion state with the
 next action instead of leaving a disabled form on screen.
 
 `/swarm-pi-code-plugin:project` and `$swarm-pi-code-plugin-project` launch the
-same page in project-only mode. This mode starts at **Project setup**, shows a
+same page in project-only mode. This mode starts at **Workspace**, shows a
 project-only Review, and writes `state.config.profile` plus
 `state.config.sandboxMode`. It pre-populates the current goal, directories,
 task types, and safety mode and is safe to run repeatedly; Provider, model
@@ -153,13 +165,14 @@ priority, credentials, and jobs are not rewritten.
 
 ## Sandbox Setting
 
-`state.config.sandboxMode` is `strict` or `lenient`; missing values from older
+`state.config.sandboxMode` is `strict`, `adaptive`, or `lenient`; missing values from older
 state files normalize to `strict`. The browser disables lenient mode when the
 current platform or required backend dependencies are unavailable.
 
-Strict mode exposes only the existing scoped Pi tools. Lenient mode adds an
-OS-sandboxed Bash tool, permits outbound network access, and displays a source
-exfiltration warning. Its shell uses an isolated HOME/TMP and does not inherit
+Strict exposes only scoped tools. Adaptive adds classifier-controlled shell and
+network capabilities, durable approval, and a classifier-provider warning.
+Lenient adds OS-sandboxed Bash, permits outbound network, and displays a source
+exfiltration warning. Every shell uses an isolated HOME/TMP and does not inherit
 provider credentials, SSH agent sockets, or other host secrets. Saving a new
 mode affects newly submitted jobs only because each durable job stores its
 resolved sandbox mode in `request.json`.
@@ -171,7 +184,9 @@ connection preserves explicit user model-metadata overrides.
 ## Screenshots
 
 The screenshots below use a local mock endpoint and contain no credentials.
-They document the current four-step flow and the repeatable project-only flow:
+The existing screenshots predate the expanded role and safety steps; they
+remain useful for connection and project controls until refreshed UI captures
+are published:
 
 ### Empty connections
 

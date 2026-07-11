@@ -13,6 +13,7 @@ import {
   requireCleanWorktree,
   validateChangedPaths,
 } from "../src/git/worktree.js";
+import { resolveStateDir } from "../src/state/state.js";
 
 function repositoryFixture(): string {
   const repository = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-git-"));
@@ -77,7 +78,7 @@ test("implementation leases serialize writers and preserve the HEAD baseline", a
 test("a failed worktree baseline does not leave a stale lease", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-non-git-"));
   await assert.rejects(() => acquireWorktreeLease(workspace, "failed-job"));
-  const leaseDirectory = path.join(workspace, ".swarm-pi-code-plugin", "worktree-leases");
+  const leaseDirectory = path.join(await resolveStateDir(workspace), "worktree-leases");
   assert.deepEqual(fs.readdirSync(leaseDirectory), []);
 });
 

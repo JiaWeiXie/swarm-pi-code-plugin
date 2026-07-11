@@ -28,3 +28,10 @@ test("mutation paths reject symlinks that escape the worktree", async () => {
     /outside/i,
   );
 });
+
+test("mutation paths protect Git, runtime state, policy, and environment files", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-protected-"));
+  for (const candidate of [".git/config", ".swarm-pi-code-plugin/state.json", ".swarm-pi-policy.json", ".env"]) {
+    await assert.rejects(() => assertMutationPath(workspace, candidate), /protected/);
+  }
+});

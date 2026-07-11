@@ -89,9 +89,14 @@ export async function startConfigurationServer(cwd, options = {}) {
             json(response, 404, { error: "Not found" });
         }
         catch (error) {
+            const problem = setupProblem(error);
             json(response, statusForError(error), {
-                error: error instanceof Error ? error.message : "Configuration failed",
-                ...(error instanceof EndpointDiscoveryError ? { code: error.code } : {}),
+                error: problem.message,
+                code: problem.code,
+                stage: problem.stage,
+                recoverable: problem.recoverable,
+                preserved: problem.preserved,
+                nextActions: problem.nextActions,
             });
         }
     });
@@ -125,6 +130,7 @@ export async function startConfigurationServer(cwd, options = {}) {
             status,
             saved: status === "saved",
             modelConfigurationFile: await resolveModelConfigurationFile(cwd),
+            ...(options.continuationId ? { continuationId: options.continuationId } : {}),
         });
     }
     function resetTimer() {
@@ -137,6 +143,29 @@ export async function startConfigurationServer(cwd, options = {}) {
         url,
         completion,
         close: () => finish("cancelled"),
+    };
+}
+function setupProblem(error) {
+    const message = error instanceof Error ? error.message : "Configuration failed";
+    const code = error instanceof EndpointDiscoveryError
+        ? error.code
+        : message.includes("smoke test")
+            ? "model-smoke-test-failed"
+            : message.includes("recovery-required")
+                ? "configuration-recovery-required"
+                : /sandbox/i.test(message)
+                    ? "sandbox-backend-unavailable"
+                    : /model|authenticated/i.test(message)
+                        ? "model-configuration-invalid"
+                        : "configuration-save-failed";
+    const stage = code.includes("sandbox") ? "execution-safety" : code.includes("model") ? "models" : code.includes("recovery") ? "recovery" : "workspace";
+    return {
+        code,
+        stage,
+        recoverable: true,
+        message,
+        preserved: ["form input", "previous saved configuration"],
+        nextActions: code === "sandbox-backend-unavailable" ? ["use-strict", "doctor"] : ["review-current-step", "doctor"],
     };
 }
 function normalizeProjectSubmission(value) {
@@ -152,6 +181,15 @@ function normalizeProjectSubmission(value) {
         profile: profile,
         ...(record.sandboxMode !== undefined
             ? { sandboxMode: record.sandboxMode }
+            : {}),
+        ...(record.rolePolicies !== undefined
+            ? { rolePolicies: record.rolePolicies }
+            : {}),
+        ...(record.adaptivePolicy !== undefined
+            ? { adaptivePolicy: record.adaptivePolicy }
+            : {}),
+        ...(record.backgroundRolePolicy !== undefined
+            ? { backgroundRolePolicy: record.backgroundRolePolicy }
             : {}),
     };
 }

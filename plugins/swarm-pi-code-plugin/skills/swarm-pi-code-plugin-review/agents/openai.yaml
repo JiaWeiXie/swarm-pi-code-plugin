@@ -1,0 +1,4 @@
+interface:
+  display_name: "Swarm Pi Code Plugin Review"
+  short_description: "Review repository changes with Pi"
+  default_prompt: "Use $swarm-pi-code-plugin-review to review the current changes."

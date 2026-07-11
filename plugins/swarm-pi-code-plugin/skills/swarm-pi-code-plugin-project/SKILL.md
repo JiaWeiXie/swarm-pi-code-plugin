@@ -1,13 +1,14 @@
 ---
 name: swarm-pi-code-plugin-project
-description: Reopen the guided Swarm Pi project goal, working area, delegated task, and sandbox setup without changing Provider or model configuration.
+description: Reopen guided Pi role routing, execution safety, project scope, and sandbox settings from Codex or Claude Code without changing provider credentials or connections.
 ---
 
 # Configure Swarm Pi Project Setup
 
-1. Resolve the plugin root two directories above this `SKILL.md`. Set host to `claude` when `CLAUDE_PLUGIN_ROOT` is present; otherwise use `codex`.
-2. Run `node "$PLUGIN_ROOT/scripts/pi-runner.mjs" configure --host "$HOST" --section project`. Keep the command active while the user completes the local browser form. Relay its printed local URL when the browser does not open automatically.
-3. Stop when the result is cancelled or timed out. Never ask for an API key or repeat the project setup questions in the host conversation.
-4. After a successful save, run `node "$PLUGIN_ROOT/scripts/pi-runner.mjs" init --host "$HOST" --json` and report the saved project goal, working directories, delegated task types, and sandbox mode.
+Read the [cross-host control protocol](../references/host-protocol.md).
 
-This skill is safe to run repeatedly. It reads and updates only the shared project profile and sandbox mode in `.swarm-pi-code-plugin/state.json`; it does not change Provider, model priority, credentials, or job history. Lenient mode enables OS-sandboxed Bash and outbound network access for newly submitted jobs only.
+1. Run `$RUNNER configure --host "$HOST" --section project` and keep the command active while the user completes the local browser form.
+2. Relay its loopback URL when the browser does not open. Stop cleanly on cancellation or timeout; never request an API key in chat.
+3. After save, run `$RUNNER roles list --json` and `$RUNNER status --json`; report routing, classifier policy, workspace classification, task types, and sandbox mode.
+
+This workflow is repeatable. It changes only role overrides, execution safety, and project profile; immutable job snapshots keep active jobs unchanged.

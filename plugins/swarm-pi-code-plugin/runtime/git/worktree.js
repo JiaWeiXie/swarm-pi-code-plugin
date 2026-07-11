@@ -14,22 +14,142 @@ export class WorktreeDirtyError extends Error {
     }
 }
 export async function inspectWorktree(cwd) {
-    const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
-    const entries = await excludeRuntimeState(cwd, parsePorcelain(stdout));
-    const changedFiles = [...new Set(entries.map((entry) => entry.path))].sort();
-    return { clean: entries.length === 0, changedFiles, entries };
-}
-async function excludeRuntimeState(cwd, entries) {
-    const workspace = await resolveWorkspaceRoot(cwd);
-    const stateDir = await resolveStateDir(cwd);
-    const relativeStateDir = path.relative(workspace, stateDir);
-    const runtimeStateDirs = [".swarm-pi-code", ".swarm-code"];
-    if (relativeStateDir !== "" &&
-        !relativeStateDir.startsWith("..") &&
-        !path.isAbsolute(relativeStateDir)) {
-        runtimeStateDirs.push(relativeStateDir);
+    const assessment = await assessWorkspace(cwd);
+    if (!assessment.git) {
+        throw new Error(`Implementation requires a Git repository; workspace is ${assessment.disposition}`);
     }
-    return entries.filter((entry) => runtimeStateDirs.every((directory) => entry.path !== directory && !entry.path.startsWith(`${directory}${path.sep}`)));
+    const relevant = assessment.entries.filter((entry) => entry.category === "user" || entry.category === "unsafe");
+    const entries = relevant.map(({ status, path: entryPath }) => ({ status, path: entryPath }));
+    const changedFiles = [...new Set(entries.map((entry) => entry.path))].sort();
+    return { clean: entries.length === 0, changedFiles, entries, assessment };
+}
+export async function assessWorkspace(cwd) {
+    const root = await fs.realpath(await resolveWorkspaceRoot(cwd)).catch(() => path.resolve(cwd));
+    let output;
+    try {
+        output = await gitOutput(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    }
+    catch {
+        const inventory = await inventoryDirectory(root);
+        const visible = inventory.entries.filter((entry) => entry.category === "user" || entry.category === "unsafe");
+        const disposition = visible.length === 0 ? "non-git-empty" : "non-git-existing";
+        return { root, git: false, disposition, entries: inventory.entries, fingerprint: fingerprint(inventory.fingerprints) };
+    }
+    const raw = parsePorcelain(output);
+    const assessments = [];
+    for (const entry of raw)
+        assessments.push(await assessEntry(root, entry));
+    const disposition = assessments.some((entry) => entry.category === "unsafe")
+        ? "unsafe"
+        : assessments.some((entry) => entry.category === "user")
+            ? "user-dirty"
+            : assessments.length > 0
+                ? "safe-dirty"
+                : "clean";
+    return {
+        root,
+        git: true,
+        disposition,
+        entries: assessments,
+        fingerprint: await gitWorkspaceFingerprint(root, assessments),
+    };
+}
+async function assessEntry(root, entry) {
+    const absolute = path.resolve(root, entry.path);
+    const stat = await fs.lstat(absolute).catch(() => undefined);
+    if (entry.status.includes("U") || stat?.isSymbolicLink() || (stat && !stat.isFile() && !stat.isDirectory())) {
+        return { ...entry, category: "unsafe", reason: "conflict, link, or unsupported file type" };
+    }
+    if (entry.status === "??" && isRuntimePath(entry.path)) {
+        return { ...entry, category: "runtime", reason: "plugin runtime state" };
+    }
+    if (entry.status === "??" && isSafeGeneratedPath(entry.path)) {
+        return { ...entry, category: "ephemeral", reason: "recognized generated artifact" };
+    }
+    return { ...entry, category: "user", reason: entry.status === "??" ? "unknown untracked content" : "tracked or staged content" };
+}
+function isRuntimePath(value) {
+    const normalized = value.split(path.sep).join("/");
+    return [".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"]
+        .some((directory) => normalized === directory || normalized.startsWith(`${directory}/`));
+}
+function isSafeGeneratedPath(value) {
+    const normalized = value.split(path.sep).join("/");
+    const basename = path.posix.basename(normalized);
+    return basename === ".DS_Store" || normalized.split("/").includes("__pycache__") || /\.(?:pyc|pyo)$/.test(basename);
+}
+function fingerprint(value) {
+    return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+async function gitWorkspaceFingerprint(root, entries) {
+    const head = await headRevision(root);
+    const content = await Promise.all(entries.map(async (entry) => ({
+        path: entry.path,
+        status: entry.status,
+        category: entry.category,
+        digest: await digestWorkspacePath(path.join(root, entry.path)),
+    })));
+    return fingerprint({ head, entries: content });
+}
+async function digestWorkspacePath(file) {
+    const stat = await fs.lstat(file).catch((error) => {
+        if (error.code === "ENOENT")
+            return undefined;
+        throw error;
+    });
+    if (!stat)
+        return { missing: true };
+    if (stat.isSymbolicLink())
+        return { link: await fs.readlink(file), mode: stat.mode };
+    if (stat.isFile()) {
+        return {
+            file: true,
+            mode: stat.mode,
+            size: stat.size,
+            digest: createHash("sha256").update(await fs.readFile(file)).digest("hex"),
+        };
+    }
+    if (!stat.isDirectory())
+        return { unsupported: true, mode: stat.mode, size: stat.size };
+    const children = await fs.readdir(file, { withFileTypes: true });
+    return {
+        directory: true,
+        mode: stat.mode,
+        children: await Promise.all(children.sort((left, right) => left.name.localeCompare(right.name)).map(async (child) => ({
+            name: child.name,
+            digest: await digestWorkspacePath(path.join(file, child.name)),
+        }))),
+    };
+}
+async function inventoryDirectory(root) {
+    const entries = [];
+    const fingerprints = [];
+    async function visit(directory, prefix = "") {
+        const children = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+        for (const child of children.sort((left, right) => left.name.localeCompare(right.name))) {
+            const relative = prefix ? `${prefix}/${child.name}` : child.name;
+            const absolute = path.join(directory, child.name);
+            const stat = await fs.lstat(absolute);
+            const category = isRuntimePath(relative) ? "runtime" : isSafeGeneratedPath(relative) ? "ephemeral" : "user";
+            if (child.isSymbolicLink() || (!child.isFile() && !child.isDirectory())) {
+                entries.push({ path: relative, status: "??", category: "unsafe", reason: "link or unsupported file type" });
+                fingerprints.push([relative, "unsafe", stat.mode, stat.size]);
+                continue;
+            }
+            if (child.isDirectory()) {
+                if (category === "runtime" || category === "ephemeral") {
+                    entries.push({ path: relative, status: "??", category, reason: category === "runtime" ? "plugin runtime state" : "recognized generated artifact" });
+                }
+                await visit(absolute, relative);
+                continue;
+            }
+            entries.push({ path: relative, status: "??", category, reason: category === "user" ? "existing non-Git content" : category === "runtime" ? "plugin runtime state" : "recognized generated artifact" });
+            const digest = createHash("sha256").update(await fs.readFile(absolute)).digest("hex");
+            fingerprints.push([relative, stat.mode, stat.size, digest]);
+        }
+    }
+    await visit(root);
+    return { entries, fingerprints };
 }
 export async function requireCleanWorktree(cwd) {
     const inspection = await inspectWorktree(cwd);
@@ -169,9 +289,12 @@ export async function captureWorktreeChanges(cwd) {
     };
 }
 async function captureWorktreeBaseline(cwd) {
+    const assessment = await assessWorkspace(cwd);
     return {
         head: await headRevision(cwd),
         ignoredPaths: await captureIgnoredPaths(cwd),
+        safePaths: assessment.entries.filter((entry) => entry.category === "runtime" || entry.category === "ephemeral").map((entry) => entry.path),
+        workspaceFingerprint: assessment.fingerprint,
     };
 }
 async function headRevision(cwd) {

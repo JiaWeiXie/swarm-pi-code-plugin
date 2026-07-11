@@ -1,9 +1,21 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { DEFAULT_ADAPTIVE_POLICY, DEFAULT_BACKGROUND_ROLE_POLICY, isWorkerRole, normalizeAdaptivePolicy, } from "../orchestration/roles.js";
 const execFileAsync = promisify(execFile);
+export class StateMigrationConflictError extends Error {
+    legacyDir;
+    destinationDir;
+    constructor(legacyDir, destinationDir) {
+        super(`Runtime state exists in both ${legacyDir} and ${destinationDir}`);
+        this.legacyDir = legacyDir;
+        this.destinationDir = destinationDir;
+        this.name = "StateMigrationConflictError";
+    }
+}
 export function defaultState() {
     return {
         version: 1,
@@ -12,6 +24,9 @@ export function defaultState() {
             availableModels: [],
             availableModelsCheckedAt: null,
             sandboxMode: "strict",
+            rolePolicies: {},
+            adaptivePolicy: structuredClone(DEFAULT_ADAPTIVE_POLICY),
+            backgroundRolePolicy: structuredClone(DEFAULT_BACKGROUND_ROLE_POLICY),
         },
         jobs: [],
     };
@@ -43,12 +58,18 @@ export async function resolveStateDir(cwd, env = process.env) {
     if (env.SWARM_PI_CODE_PLUGIN_DATA_DIR) {
         return path.resolve(cwd, env.SWARM_PI_CODE_PLUGIN_DATA_DIR);
     }
-    return path.join(await resolveSharedWorkspaceRoot(cwd), ".swarm-pi-code-plugin");
+    const commonDir = await resolveGitCommonDir(cwd);
+    if (commonDir)
+        return path.join(commonDir, "swarm-pi-code-plugin");
+    const workspace = await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd));
+    const key = createHash("sha256").update(workspace).digest("hex");
+    return path.join(userStateRoot(env), "workspaces", key);
 }
 export async function resolveStateFile(cwd) {
     return path.join(await resolveStateDir(cwd), "state.json");
 }
 export async function loadState(cwd) {
+    await migrateCurrentStateDirectory(cwd);
     const current = await readJson(await resolveStateFile(cwd));
     if (current)
         return normalizeState(current);
@@ -59,9 +80,51 @@ export async function loadState(cwd) {
     }
     return defaultState();
 }
+export async function migrateCurrentStateDirectory(cwd) {
+    if (process.env.SWARM_PI_CODE_PLUGIN_DATA_DIR)
+        return false;
+    const workspace = await resolveWorkspaceRoot(cwd);
+    const legacyDir = path.join(workspace, ".swarm-pi-code-plugin");
+    const destinationDir = await resolveStateDir(cwd);
+    if (path.resolve(legacyDir) === path.resolve(destinationDir))
+        return false;
+    const parent = path.dirname(destinationDir);
+    await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+    const lock = path.join(parent, `${path.basename(destinationDir)}.migration.lock`);
+    const handle = await acquireFileLock(lock);
+    try {
+        const legacy = await fs.stat(legacyDir).catch(() => undefined);
+        if (!legacy?.isDirectory())
+            return false;
+        const destination = await fs.stat(destinationDir).catch(() => undefined);
+        if (destination)
+            throw new StateMigrationConflictError(legacyDir, destinationDir);
+        try {
+            await fs.rename(legacyDir, destinationDir);
+        }
+        catch (error) {
+            if (error.code !== "EXDEV")
+                throw error;
+            await fs.cp(legacyDir, destinationDir, { recursive: true, errorOnExist: true });
+            await fs.rm(legacyDir, { recursive: true, force: true });
+        }
+        const stateFile = path.join(destinationDir, "state.json");
+        const current = await readJson(stateFile);
+        if (current) {
+            const state = normalizeState(current);
+            state.migration = { source: ".swarm-pi-code-plugin", migratedAt: new Date().toISOString() };
+            await writeJsonAtomic(stateFile, state);
+        }
+        return true;
+    }
+    finally {
+        await handle.close();
+        await fs.rm(lock, { force: true });
+    }
+}
 export async function writeState(cwd, state) {
     const stateFile = await resolveStateFile(cwd);
-    await fs.mkdir(path.dirname(stateFile), { recursive: true });
+    await fs.mkdir(path.dirname(stateFile), { recursive: true, mode: 0o700 });
     const tempFile = `${stateFile}.${process.pid}.${randomUUID()}.tmp`;
     try {
         await fs.writeFile(tempFile, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
@@ -95,18 +158,37 @@ export async function saveProfile(cwd, profile) {
         state.config.profile = { ...profile, configuredAt: profile.configuredAt ?? new Date().toISOString() };
     });
 }
-export async function saveProjectSettings(cwd, profile, sandboxMode) {
+export async function saveProjectSettings(cwd, profile, sandboxMode, execution) {
     return updateState(cwd, (state) => {
         state.config.profile = {
             ...profile,
             configuredAt: profile.configuredAt ?? new Date().toISOString(),
         };
         state.config.sandboxMode = sandboxMode;
+        if (execution?.rolePolicies)
+            state.config.rolePolicies = structuredClone(execution.rolePolicies);
+        if (execution?.adaptivePolicy)
+            state.config.adaptivePolicy = normalizeAdaptivePolicy(execution.adaptivePolicy);
+        if (execution?.backgroundRolePolicy) {
+            state.config.backgroundRolePolicy = {
+                mechanicalExecutor: execution.backgroundRolePolicy.mechanicalExecutor === true,
+            };
+        }
     });
 }
 export async function setSandboxMode(cwd, sandboxMode) {
     return updateState(cwd, (state) => {
         state.config.sandboxMode = sandboxMode;
+    });
+}
+export async function saveExecutionSettings(cwd, sandboxMode, execution) {
+    return updateState(cwd, (state) => {
+        state.config.sandboxMode = sandboxMode;
+        state.config.rolePolicies = structuredClone(execution.rolePolicies ?? {});
+        state.config.adaptivePolicy = normalizeAdaptivePolicy(execution.adaptivePolicy);
+        state.config.backgroundRolePolicy = {
+            mechanicalExecutor: execution.backgroundRolePolicy?.mechanicalExecutor === true,
+        };
     });
 }
 export async function clearConfiguration(cwd) {
@@ -116,6 +198,9 @@ export async function clearConfiguration(cwd) {
             availableModels: [],
             availableModelsCheckedAt: null,
             sandboxMode: "strict",
+            rolePolicies: {},
+            adaptivePolicy: structuredClone(DEFAULT_ADAPTIVE_POLICY),
+            backgroundRolePolicy: structuredClone(DEFAULT_BACKGROUND_ROLE_POLICY),
         };
     });
 }
@@ -177,6 +262,10 @@ function normalizeState(value) {
     state.config.availableModels = stringArray(config.availableModels);
     state.config.availableModelsCheckedAt = stringValue(config.availableModelsCheckedAt) ?? null;
     state.config.sandboxMode = sandboxModeValue(config.sandboxMode);
+    state.config.rolePolicies = rolePolicyOverrides(config.rolePolicies);
+    state.config.adaptivePolicy = normalizeAdaptivePolicy(asRecord(config.adaptivePolicy));
+    const background = asRecord(config.backgroundRolePolicy);
+    state.config.backgroundRolePolicy = { mechanicalExecutor: background.mechanicalExecutor === true };
     if (Object.keys(profile).length > 0) {
         state.config.profile = {
             goal: stringValue(profile.goal),
@@ -189,11 +278,59 @@ function normalizeState(value) {
         ? value.jobs.filter((job) => typeof job === "object" && job !== null && typeof job.id === "string")
         : [];
     const migration = asRecord(value.migration);
-    if ((migration.source === ".swarm-pi-code" || migration.source === ".swarm-code") &&
+    if ((migration.source === ".swarm-pi-code-plugin" || migration.source === ".swarm-pi-code" || migration.source === ".swarm-code") &&
         typeof migration.migratedAt === "string") {
         state.migration = { source: migration.source, migratedAt: migration.migratedAt };
     }
     return state;
+}
+async function resolveGitCommonDir(cwd) {
+    try {
+        const { stdout } = await execFileAsync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, encoding: "utf8" });
+        return await fs.realpath(stdout.trim());
+    }
+    catch {
+        return undefined;
+    }
+}
+function userStateRoot(env) {
+    if (env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR)
+        return path.resolve(env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR);
+    if (process.platform === "darwin")
+        return path.join(os.homedir(), "Library", "Application Support", "swarm-pi-code-plugin");
+    if (process.platform === "win32")
+        return path.join(env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "swarm-pi-code-plugin");
+    return path.join(env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "swarm-pi-code-plugin");
+}
+async function writeJsonAtomic(file, value) {
+    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+        await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+        await fs.rename(temporary, file);
+    }
+    finally {
+        await fs.rm(temporary, { force: true });
+    }
+}
+async function acquireFileLock(file) {
+    const deadline = Date.now() + 5_000;
+    while (true) {
+        try {
+            return await fs.open(file, "wx", 0o600);
+        }
+        catch (error) {
+            if (error.code !== "EEXIST")
+                throw error;
+            const existing = await fs.stat(file).catch(() => undefined);
+            if (existing && Date.now() - existing.mtimeMs > 30_000) {
+                await fs.rm(file, { force: true });
+                continue;
+            }
+            if (Date.now() >= deadline)
+                throw new Error(`Timed out waiting for migration lock: ${file}`);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+    }
 }
 function asRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -207,7 +344,22 @@ function stringValue(value) {
     return typeof value === "string" ? value : undefined;
 }
 function sandboxModeValue(value) {
-    return value === "lenient" ? "lenient" : "strict";
+    return value === "adaptive" || value === "lenient" ? value : "strict";
+}
+function rolePolicyOverrides(value) {
+    const record = asRecord(value);
+    const result = {};
+    for (const [key, raw] of Object.entries(record)) {
+        if (!isWorkerRole(key))
+            continue;
+        const candidate = asRecord(raw);
+        result[key] = {
+            ...(stringArray(candidate.models).length ? { models: stringArray(candidate.models) } : {}),
+            ...(typeof candidate.thinkingLevel === "string" ? { thinkingLevel: candidate.thinkingLevel } : {}),
+            ...(typeof candidate.maxAttempts === "number" ? { maxAttempts: candidate.maxAttempts } : {}),
+        };
+    }
+    return result;
 }
 async function withStateLock(cwd, run) {
     const directory = await resolveStateDir(cwd);

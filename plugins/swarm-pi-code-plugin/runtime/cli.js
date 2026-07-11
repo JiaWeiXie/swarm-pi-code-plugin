@@ -2,6 +2,7 @@ import { parseArguments } from "./runner/args.js";
 import { runCommand } from "./runner/run.js";
 import { startConfigurationServer } from "./web/configuration-server.js";
 export async function main(argv = process.argv.slice(2)) {
+    const wantsJson = argv.includes("--json");
     try {
         const args = parseArguments(argv);
         if (args.command === "configure") {
@@ -10,6 +11,7 @@ export async function main(argv = process.argv.slice(2)) {
                 port: args.port,
                 openBrowser: !args.noOpen,
                 mode: args.configurationSection === "project" ? "project" : "full",
+                ...(args.continuationId ? { continuationId: args.continuationId } : {}),
             });
             process.stdout.write(args.json
                 ? `${JSON.stringify({ event: "ready", url: session.url })}\n`
@@ -21,7 +23,8 @@ export async function main(argv = process.argv.slice(2)) {
         const controller = new AbortController();
         const abort = () => controller.abort();
         const delegated = args.command === "ask" || args.command === "review" ||
-            args.command === "plan" || args.command === "implement" || args.command === "orchestrate";
+            args.command === "plan" || args.command === "implement" || args.command === "orchestrate" ||
+            args.command === "scaffold" || args.command === "setup";
         if (delegated) {
             process.once("SIGINT", abort);
             process.once("SIGTERM", abort);
@@ -34,11 +37,20 @@ export async function main(argv = process.argv.slice(2)) {
         process.stdout.write(`${serialized}\n`);
         if ("event" in result && result.event === "wait-timed-out")
             return 3;
+        if ("event" in result && result.event === "approval-required")
+            return 4;
+        if ("event" in result && (result.event === "setup-required" || result.event === "workspace-action-required"))
+            return 5;
         return "success" in result && !result.success ? 1 : 0;
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        process.stderr.write(`${message}\n`);
+        if (wantsJson) {
+            process.stdout.write(`${JSON.stringify({ event: "system-error", errorCode: "system-error", message })}\n`);
+        }
+        else {
+            process.stderr.write(`${message}\n`);
+        }
         return 2;
     }
 }

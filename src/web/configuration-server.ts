@@ -27,6 +27,7 @@ export type ConfigurationCompletion = {
   status: "saved" | "cancelled" | "timed-out";
   saved: boolean;
   modelConfigurationFile: string;
+  continuationId?: string;
 };
 
 export interface ConfigurationServerOptions {
@@ -37,6 +38,7 @@ export interface ConfigurationServerOptions {
   env?: NodeJS.ProcessEnv | undefined;
   openUrl?: ((url: string) => Promise<void> | void) | undefined;
   mode?: "full" | "project" | undefined;
+  continuationId?: string | undefined;
 }
 
 export interface ConfigurationServerSession {
@@ -128,9 +130,14 @@ export async function startConfigurationServer(
       }
       json(response, 404, { error: "Not found" });
     } catch (error) {
+      const problem = setupProblem(error);
       json(response, statusForError(error), {
-        error: error instanceof Error ? error.message : "Configuration failed",
-        ...(error instanceof EndpointDiscoveryError ? { code: error.code } : {}),
+        error: problem.message,
+        code: problem.code,
+        stage: problem.stage,
+        recoverable: problem.recoverable,
+        preserved: problem.preserved,
+        nextActions: problem.nextActions,
       });
     }
   });
@@ -163,6 +170,7 @@ export async function startConfigurationServer(
       status,
       saved: status === "saved",
       modelConfigurationFile: await resolveModelConfigurationFile(cwd),
+      ...(options.continuationId ? { continuationId: options.continuationId } : {}),
     });
   }
 
@@ -179,6 +187,37 @@ export async function startConfigurationServer(
   };
 }
 
+function setupProblem(error: unknown): {
+  code: string;
+  stage: string;
+  recoverable: boolean;
+  message: string;
+  preserved: string[];
+  nextActions: string[];
+} {
+  const message = error instanceof Error ? error.message : "Configuration failed";
+  const code = error instanceof EndpointDiscoveryError
+    ? error.code
+    : message.includes("smoke test")
+      ? "model-smoke-test-failed"
+      : message.includes("recovery-required")
+        ? "configuration-recovery-required"
+        : /sandbox/i.test(message)
+          ? "sandbox-backend-unavailable"
+          : /model|authenticated/i.test(message)
+            ? "model-configuration-invalid"
+            : "configuration-save-failed";
+  const stage = code.includes("sandbox") ? "execution-safety" : code.includes("model") ? "models" : code.includes("recovery") ? "recovery" : "workspace";
+  return {
+    code,
+    stage,
+    recoverable: true,
+    message,
+    preserved: ["form input", "previous saved configuration"],
+    nextActions: code === "sandbox-backend-unavailable" ? ["use-strict", "doctor"] : ["review-current-step", "doctor"],
+  };
+}
+
 function normalizeProjectSubmission(value: unknown): ProjectSettingsSubmission {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new HttpError(400, "Project profile request must be a JSON object");
@@ -192,6 +231,15 @@ function normalizeProjectSubmission(value: unknown): ProjectSettingsSubmission {
     profile: profile as ProjectSettingsSubmission["profile"],
     ...(record.sandboxMode !== undefined
       ? { sandboxMode: record.sandboxMode as ProjectSettingsSubmission["sandboxMode"] }
+      : {}),
+    ...(record.rolePolicies !== undefined
+      ? { rolePolicies: record.rolePolicies as ProjectSettingsSubmission["rolePolicies"] }
+      : {}),
+    ...(record.adaptivePolicy !== undefined
+      ? { adaptivePolicy: record.adaptivePolicy as ProjectSettingsSubmission["adaptivePolicy"] }
+      : {}),
+    ...(record.backgroundRolePolicy !== undefined
+      ? { backgroundRolePolicy: record.backgroundRolePolicy as ProjectSettingsSubmission["backgroundRolePolicy"] }
       : {}),
   };
 }

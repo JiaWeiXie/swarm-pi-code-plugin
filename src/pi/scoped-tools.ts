@@ -13,11 +13,21 @@ export async function assertMutationPath(cwd: string, candidate: string): Promis
   const root = await fs.realpath(cwd);
   const absolute = path.resolve(cwd, candidate);
   assertInside(lexicalRoot, absolute);
+  assertUnprotected(lexicalRoot, absolute);
 
   const existingAncestor = await closestExistingPath(absolute);
   const realAncestor = await fs.realpath(existingAncestor);
   assertInside(root, realAncestor);
   return absolute;
+}
+
+function assertUnprotected(root: string, candidate: string): void {
+  const relative = path.relative(root, candidate);
+  const first = relative.split(path.sep)[0] ?? "";
+  if ([".git", ".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].includes(first) ||
+      [".env", ".env.local", ".swarm-pi-policy.json"].includes(relative)) {
+    throw new Error(`Mutation path is protected by the delegated worker boundary: ${candidate}`);
+  }
 }
 
 export function createScopedMutationTools(

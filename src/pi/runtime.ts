@@ -1,6 +1,8 @@
-import { createAgentSession, SessionManager, SettingsManager, type CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, SessionManager, SettingsManager, type AuthStorage, type ModelRegistry, type CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
 
-import type { WorkerMode } from "../core/contracts.js";
+import type { PolicyDecision, ThinkingLevel, WorkerMode } from "../core/contracts.js";
+import type { PolicyAction, PolicyEngine } from "../policy/engine.js";
+import { createTrustedResourceLoader } from "../policy/extension.js";
 import type { SandboxRunner } from "../sandbox/runner.js";
 import type { ModelConfiguration } from "../state/model-config.js";
 import { createPiEnvironment } from "./environment.js";
@@ -13,22 +15,44 @@ export interface CreateWorkerSessionOptions {
   model?: CreateAgentSessionOptions["model"];
   modelConfiguration: ModelConfiguration;
   sandboxRunner?: SandboxRunner;
+  thinkingLevel?: ThinkingLevel;
+  policyEngine?: PolicyEngine;
+  onApproval?: (
+    action: PolicyAction,
+    decision: PolicyDecision,
+    fingerprint: string,
+    signal?: AbortSignal,
+  ) => Promise<"approved" | "denied" | "expired">;
+  authStorage?: AuthStorage;
+  modelRegistry?: ModelRegistry;
 }
 
 export async function createWorkerSession(options: CreateWorkerSessionOptions) {
-  const { authStorage, modelRegistry } = createPiEnvironment(options.modelConfiguration);
+  const environment = options.authStorage && options.modelRegistry
+    ? { authStorage: options.authStorage, modelRegistry: options.modelRegistry }
+    : createPiEnvironment(options.modelConfiguration);
+  const { authStorage, modelRegistry } = environment;
+  const settingsManager = SettingsManager.inMemory();
+  const resourceLoader = await createTrustedResourceLoader({
+    cwd: options.cwd,
+    settingsManager,
+    ...(options.policyEngine ? { engine: options.policyEngine } : {}),
+    ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+  });
 
   return createAgentSession({
     cwd: options.cwd,
     authStorage,
     modelRegistry,
     sessionManager: SessionManager.inMemory(),
-    settingsManager: SettingsManager.inMemory(),
+    settingsManager,
+    resourceLoader,
     tools: toolsForMode(options.mode),
     customTools: [
       ...(options.mode === "implement" ? createScopedMutationTools(options.cwd) : []),
       ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
     ],
     ...(options.model ? { model: options.model } : {}),
+    ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel as never } : {}),
   });
 }

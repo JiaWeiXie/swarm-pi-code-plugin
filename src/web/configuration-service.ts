@@ -1,22 +1,46 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
-import type { AvailableModel, ProviderSummary, SandboxMode } from "../core/contracts.js";
+import type {
+  AdaptivePolicyConfig,
+  AvailableModel,
+  BackgroundRolePolicy,
+  ProviderSummary,
+  SandboxMode,
+  WorkspaceAssessment,
+} from "../core/contracts.js";
+import {
+  DEFAULT_ADAPTIVE_POLICY,
+  DEFAULT_BACKGROUND_ROLE_POLICY,
+  isThinkingLevel,
+  isWorkerRole,
+  normalizeAdaptivePolicy,
+  listDefaultRoles,
+  type RolePolicyOverrides,
+} from "../orchestration/roles.js";
 import { createPiEnvironment } from "../pi/environment.js";
+import { executeSession } from "../pi/execute.js";
+import { createWorkerSession } from "../pi/runtime.js";
 import { createModelCatalog, describeProviders, modelId, type PiModel } from "../pi/models.js";
 import { detectSandboxAvailability, type SandboxAvailability } from "../sandbox/availability.js";
+import { assessWorkspace } from "../git/worktree.js";
 import {
   loadModelConfiguration,
   modelPriority,
   parseModelConfiguration,
   saveModelConfiguration,
+  resolveModelConfigurationFile,
   type CustomProviderConfiguration,
   type ModelConfiguration,
 } from "../state/model-config.js";
 import {
   loadState,
+  resolveStateDir,
+  resolveStateFile,
   resolveWorkspaceRoot,
   saveProjectSettings,
+  saveExecutionSettings,
   setModelPriority,
   setSandboxMode,
   type SwarmProfile,
@@ -55,6 +79,12 @@ export interface ConfigurationView {
   registryError: string | null;
   sandboxMode: SandboxMode;
   sandboxAvailability: SandboxAvailability;
+  rolePolicies?: RolePolicyOverrides;
+  adaptivePolicy?: AdaptivePolicyConfig;
+  backgroundRolePolicy?: BackgroundRolePolicy;
+  roles?: ReturnType<typeof listDefaultRoles>;
+  workspace?: WorkspaceAssessment;
+  workspaceId?: string;
 }
 
 export interface ConfigurationSubmission {
@@ -71,6 +101,9 @@ export interface ConfigurationSubmission {
   }> | undefined;
   profile?: ProjectProfileSubmission | undefined;
   sandboxMode?: SandboxMode | undefined;
+  rolePolicies?: RolePolicyOverrides | undefined;
+  adaptivePolicy?: AdaptivePolicyConfig | undefined;
+  backgroundRolePolicy?: BackgroundRolePolicy | undefined;
 }
 
 export interface ProjectProfileSubmission {
@@ -82,6 +115,9 @@ export interface ProjectProfileSubmission {
 export interface ProjectSettingsSubmission {
   profile: ProjectProfileSubmission;
   sandboxMode?: SandboxMode | undefined;
+  rolePolicies?: RolePolicyOverrides | undefined;
+  adaptivePolicy?: AdaptivePolicyConfig | undefined;
+  backgroundRolePolicy?: BackgroundRolePolicy | undefined;
 }
 
 export interface ProviderConnectionPreview {
@@ -178,6 +214,12 @@ export async function loadConfigurationView(
     registryError: catalog.error?.() ?? null,
     sandboxMode: state.config.sandboxMode ?? "strict",
     sandboxAvailability: detectSandboxAvailability(),
+    rolePolicies: structuredClone(state.config.rolePolicies ?? {}),
+    adaptivePolicy: normalizeAdaptivePolicy(state.config.adaptivePolicy),
+    backgroundRolePolicy: structuredClone(state.config.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY),
+    roles: listDefaultRoles(),
+    workspace: await assessWorkspace(cwd),
+    workspaceId: createHash("sha256").update(await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd))).digest("hex").slice(0, 24),
   };
 }
 
@@ -225,6 +267,7 @@ export async function saveConfigurationSubmission(
     ? await normalizeProjectProfile(cwd, submission.profile)
     : undefined;
   const sandboxMode = normalizeSandboxMode(submission.sandboxMode, current.sandboxMode);
+  const execution = normalizeExecutionSettings(submission, current);
   assertSandboxModeAvailable(sandboxMode);
   const candidate = parseModelConfiguration({
     version: 1,
@@ -257,17 +300,106 @@ export async function saveConfigurationSubmission(
   if (unavailable.length > 0) {
     throw new Error(`Selected models are not authenticated: ${unavailable.join(", ")}`);
   }
+  assertExecutionModels(execution, all, available, sandboxMode);
 
-  for (const credential of credentials) {
-    pi.authStorage.removeRuntimeApiKey(credential.provider);
-    pi.authStorage.set(credential.provider, { type: "api_key", key: credential.apiKey });
+  if (env.SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST !== "1") {
+    const smokeModels = [...new Set([
+      ...(candidate.primary ? [candidate.primary] : []),
+      ...(sandboxMode === "adaptive" ? execution.adaptivePolicy.classifierModels : []),
+    ])];
+    for (const reference of smokeModels) {
+      const model = all.get(reference)!;
+      const { session } = await createWorkerSession({
+        cwd,
+        mode: "readonly",
+        model,
+        modelConfiguration: candidate,
+        authStorage: pi.authStorage,
+        modelRegistry: pi.modelRegistry,
+        thinkingLevel: "minimal",
+      });
+      const smoke = await executeSession({
+        kind: "ask",
+        model: reference,
+        prompt: "Reply with exactly READY.",
+        session,
+        timeoutMs: 15_000,
+      });
+      if (!smoke.success) throw new Error(`Model smoke test failed for ${reference}: ${smoke.error ?? smoke.output}`);
+    }
   }
 
-  const saved = await saveModelConfiguration(cwd, candidate);
-  await setModelPriority(cwd, modelPriority(saved));
-  if (profile) await saveProjectSettings(cwd, profile, sandboxMode);
-  else await setSandboxMode(cwd, sandboxMode);
+  const modelFile = await resolveModelConfigurationFile(cwd);
+  const stateFile = await resolveStateFile(cwd);
+  const fileSnapshots = await Promise.all([snapshotFile(modelFile), snapshotFile(stateFile)]);
+  const credentialSnapshots = credentials.map((credential) => ({
+    provider: credential.provider,
+    value: pi.authStorage.get(credential.provider),
+  }));
+  try {
+    for (const credential of credentials) {
+      pi.authStorage.removeRuntimeApiKey(credential.provider);
+      pi.authStorage.set(credential.provider, { type: "api_key", key: credential.apiKey });
+    }
+    const saved = await saveModelConfiguration(cwd, candidate);
+    await setModelPriority(cwd, modelPriority(saved));
+    if (profile) await saveProjectSettings(cwd, profile, sandboxMode, execution);
+    else await saveExecutionSettings(cwd, sandboxMode, execution);
+  } catch (error) {
+    const rollbackErrors: string[] = [];
+    for (const snapshot of credentialSnapshots) {
+      try {
+        if (snapshot.value) pi.authStorage.set(snapshot.provider, snapshot.value);
+        else pi.authStorage.remove(snapshot.provider);
+      } catch (rollbackError) {
+        rollbackErrors.push(`credential:${snapshot.provider}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
+    }
+    for (const snapshot of fileSnapshots) {
+      try {
+        await restoreFile(snapshot);
+      } catch (rollbackError) {
+        rollbackErrors.push(`file:${snapshot.file}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      await writeRecoveryJournal(cwd, rollbackErrors);
+      throw new Error("Configuration failed and could not be fully rolled back; run doctor (configuration-recovery-required)");
+    }
+    throw error;
+  }
   return loadConfigurationView(cwd, env);
+}
+
+interface FileSnapshot { file: string; contents?: Buffer; }
+
+async function snapshotFile(file: string): Promise<FileSnapshot> {
+  const contents = await fs.readFile(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  return { file, ...(contents ? { contents } : {}) };
+}
+
+async function restoreFile(snapshot: FileSnapshot): Promise<void> {
+  if (!snapshot.contents) {
+    await fs.rm(snapshot.file, { force: true });
+    return;
+  }
+  await fs.mkdir(path.dirname(snapshot.file), { recursive: true, mode: 0o700 });
+  const temporary = `${snapshot.file}.${process.pid}.rollback`;
+  await fs.writeFile(temporary, snapshot.contents, { mode: 0o600 });
+  await fs.rename(temporary, snapshot.file);
+}
+
+async function writeRecoveryJournal(cwd: string, errors: string[]): Promise<void> {
+  const directory = path.join(await resolveStateDir(cwd), "recovery");
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  await fs.writeFile(path.join(directory, "configuration.json"), `${JSON.stringify({
+    code: "configuration-recovery-required",
+    createdAt: new Date().toISOString(),
+    errors: errors.map((error) => error.replace(/(?:sk-|key=)[^\s:]+/gi, "[redacted]")),
+  }, null, 2)}\n`, { mode: 0o600 });
 }
 
 export async function saveProjectProfileSubmission(
@@ -281,21 +413,106 @@ export async function saveProjectProfileSubmission(
     settings.sandboxMode,
     current.config.sandboxMode ?? "strict",
   );
+  const execution = normalizeExecutionSettings(settings, {
+    rolePolicies: current.config.rolePolicies ?? {},
+    adaptivePolicy: normalizeAdaptivePolicy(current.config.adaptivePolicy),
+    backgroundRolePolicy: current.config.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY,
+  });
   assertSandboxModeAvailable(sandboxMode);
-  const state = await saveProjectSettings(cwd, profile, sandboxMode);
+  const modelConfiguration = await loadModelConfiguration(cwd, current.config.modelPriority);
+  const catalog = createModelCatalog(modelConfiguration);
+  const all = new Map((catalog.all?.() ?? catalog.available()).map((model) => [modelId(model), model]));
+  const available = new Set(catalog.available().map(modelId));
+  assertExecutionModels(execution, all, available, sandboxMode);
+  const state = await saveProjectSettings(cwd, profile, sandboxMode, execution);
   return state.config.profile!;
 }
 
 function normalizeSandboxMode(value: unknown, fallback: SandboxMode): SandboxMode {
   if (value === undefined) return fallback;
-  if (value === "strict" || value === "lenient") return value;
-  throw new Error("Sandbox mode must be strict or lenient");
+  if (value === "strict" || value === "adaptive" || value === "lenient") return value;
+  throw new Error("Sandbox mode must be strict, adaptive, or lenient");
 }
 
 function assertSandboxModeAvailable(mode: SandboxMode): void {
-  if (mode !== "lenient") return;
+  if (mode === "strict") return;
   const availability = detectSandboxAvailability();
   if (!availability.available) throw new Error(availability.reason ?? "Lenient sandboxing is unavailable");
+}
+
+function normalizeExecutionSettings(
+  value: {
+    rolePolicies?: RolePolicyOverrides | undefined;
+    adaptivePolicy?: AdaptivePolicyConfig | undefined;
+    backgroundRolePolicy?: BackgroundRolePolicy | undefined;
+  },
+  fallback: Pick<ConfigurationView, "rolePolicies" | "adaptivePolicy" | "backgroundRolePolicy">,
+) {
+  const rolePolicies: RolePolicyOverrides = {};
+  const source = value.rolePolicies ?? fallback.rolePolicies ?? {};
+  for (const [role, raw] of Object.entries(source)) {
+    if (!isWorkerRole(role) || !raw || typeof raw !== "object") continue;
+    const policy = raw as NonNullable<RolePolicyOverrides[typeof role]>;
+    if (policy.thinkingLevel !== undefined && !isThinkingLevel(policy.thinkingLevel)) {
+      throw new Error(`Invalid thinking level for ${role}`);
+    }
+    if (policy.maxAttempts !== undefined && (!Number.isInteger(policy.maxAttempts) || policy.maxAttempts < 1 || policy.maxAttempts > 2)) {
+      throw new Error(`Role ${role} max attempts must be 1 or 2`);
+    }
+    rolePolicies[role] = {
+      ...(Array.isArray(policy.models) ? { models: [...new Set(policy.models)] } : {}),
+      ...(policy.thinkingLevel ? { thinkingLevel: policy.thinkingLevel } : {}),
+      ...(policy.maxAttempts ? { maxAttempts: policy.maxAttempts } : {}),
+    };
+  }
+  const adaptivePolicy = normalizeAdaptivePolicy(value.adaptivePolicy ?? fallback.adaptivePolicy ?? DEFAULT_ADAPTIVE_POLICY);
+  validateAdaptivePolicy(adaptivePolicy);
+  return {
+    rolePolicies,
+    adaptivePolicy,
+    backgroundRolePolicy: {
+      mechanicalExecutor: (value.backgroundRolePolicy ?? fallback.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY).mechanicalExecutor === true,
+    },
+  };
+}
+
+function validateAdaptivePolicy(policy: AdaptivePolicyConfig): void {
+  const capabilities = new Set([
+    "filesystem.read-workspace", "filesystem.write-workspace", "filesystem.write-temp",
+    "git.read", "shell.execute", "network.connect",
+  ]);
+  for (const domain of policy.trustedDomains) {
+    if (!/^(?:\*\.)?[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(domain) ||
+        domain === "localhost" || /^\d+(?:\.\d+){3}$/.test(domain)) {
+      throw new Error(`Invalid trusted domain: ${domain}`);
+    }
+  }
+  if (policy.rules.length > 128) throw new Error("Adaptive policy supports at most 128 rules");
+  for (const rule of policy.rules) {
+    if (!rule || typeof rule.id !== "string" || !rule.id || !["deny", "ask", "allow"].includes(rule.effect) ||
+        !capabilities.has(rule.capability)) {
+      throw new Error("Adaptive policy rules require an id, valid effect, and capability");
+    }
+  }
+}
+
+function assertExecutionModels(
+  execution: ReturnType<typeof normalizeExecutionSettings>,
+  all: Map<string, PiModel>,
+  available: Set<string>,
+  sandboxMode: SandboxMode,
+): void {
+  const selected = [
+    ...Object.values(execution.rolePolicies).flatMap((policy) => policy?.models ?? []),
+    ...execution.adaptivePolicy.classifierModels,
+  ];
+  const unknown = selected.filter((model) => !all.has(model));
+  if (unknown.length) throw new Error(`Unknown role or classifier model: ${[...new Set(unknown)].join(", ")}`);
+  const unavailable = selected.filter((model) => !available.has(model));
+  if (unavailable.length) throw new Error(`Role or classifier models are not authenticated: ${[...new Set(unavailable)].join(", ")}`);
+  if (sandboxMode === "adaptive" && execution.adaptivePolicy.classifierModels.length === 0) {
+    throw new Error("Adaptive mode requires at least one classifier model");
+  }
 }
 
 async function projectDirectoryOptions(cwd: string, selected: string[]): Promise<string[]> {

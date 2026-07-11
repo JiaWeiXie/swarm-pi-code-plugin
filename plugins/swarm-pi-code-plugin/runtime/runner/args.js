@@ -1,8 +1,13 @@
+import { isThinkingLevel, isWorkerRole } from "../orchestration/roles.js";
 const COMMANDS = new Set([
     "init",
+    "status",
+    "doctor",
+    "resume",
     "models",
     "providers",
     "configure",
+    "roles",
     "jobs",
     "__worker",
     "ask",
@@ -10,6 +15,8 @@ const COMMANDS = new Set([
     "plan",
     "implement",
     "orchestrate",
+    "scaffold",
+    "setup",
 ]);
 export function parseArguments(argv) {
     const command = argv[0];
@@ -17,14 +24,16 @@ export function parseArguments(argv) {
         throw new Error(`Unknown or missing command: ${command ?? "<none>"}`);
     }
     const jobsAction = command === "jobs" ? parseJobsAction(argv[1]) : undefined;
+    const rolesAction = command === "roles" ? parseRolesAction(argv[1]) : undefined;
     const parsed = {
         command,
         ...(jobsAction ? { jobsAction } : {}),
+        ...(rolesAction ? { rolesAction } : {}),
         json: false,
         reconfigure: false,
         reset: false,
     };
-    for (let index = command === "jobs" ? 2 : 1; index < argv.length; index += 1) {
+    for (let index = command === "jobs" || command === "roles" ? 2 : 1; index < argv.length; index += 1) {
         const argument = argv[index];
         switch (argument) {
             case "--json":
@@ -42,11 +51,29 @@ export function parseArguments(argv) {
             case "--no-open":
                 parsed.noOpen = true;
                 break;
+            case "--smoke-test":
+                parsed.smokeTest = true;
+                break;
             case "--host":
                 parsed.host = parseHost(readValue(argv, ++index, argument));
                 break;
             case "--prompt-file":
                 parsed.promptFile = readValue(argv, ++index, argument);
+                break;
+            case "--spec-file":
+                parsed.specFile = readValue(argv, ++index, argument);
+                break;
+            case "--target":
+                parsed.target = readValue(argv, ++index, argument);
+                break;
+            case "--continuation":
+                parsed.continuationId = readValue(argv, ++index, argument);
+                break;
+            case "--workspace-strategy":
+                parsed.workspaceStrategy = parseWorkspaceStrategy(readValue(argv, ++index, argument));
+                break;
+            case "--adopt-existing":
+                parsed.adoptExisting = true;
                 break;
             case "--model":
                 parsed.model = readValue(argv, ++index, argument);
@@ -63,6 +90,15 @@ export function parseArguments(argv) {
             case "--execution-mode":
                 parsed.executionMode = parseExecutionMode(readValue(argv, ++index, argument));
                 break;
+            case "--role":
+                parsed.role = parseRole(readValue(argv, ++index, argument));
+                break;
+            case "--thinking-level":
+                parsed.thinkingLevel = parseThinking(readValue(argv, ++index, argument));
+                break;
+            case "--approval-mode":
+                parsed.approvalMode = parseApprovalMode(readValue(argv, ++index, argument));
+                break;
             case "--timeout-ms":
                 parsed.timeoutMs = parseDuration(readValue(argv, ++index, argument), argument);
                 break;
@@ -77,6 +113,18 @@ export function parseArguments(argv) {
                 break;
             case "--pending-notifications":
                 parsed.pendingNotifications = true;
+                break;
+            case "--approval":
+                parsed.approvalId = readValue(argv, ++index, argument);
+                break;
+            case "--approval-scope":
+                parsed.approvalScope = parseApprovalScope(readValue(argv, ++index, argument));
+                break;
+            case "--notification":
+                parsed.notificationId = readValue(argv, ++index, argument);
+                break;
+            case "--discard":
+                parsed.discard = true;
                 break;
             case "--base":
                 parsed.base = readValue(argv, ++index, argument);
@@ -103,7 +151,11 @@ export function parseArguments(argv) {
     if (command !== "models" &&
         command !== "providers" &&
         command !== "configure" &&
+        command !== "roles" &&
         command !== "init" &&
+        command !== "status" &&
+        command !== "doctor" &&
+        command !== "resume" &&
         command !== "jobs" &&
         command !== "__worker" &&
         !parsed.host) {
@@ -112,15 +164,21 @@ export function parseArguments(argv) {
     if (parsed.configurationSection && command !== "configure") {
         throw new Error("--section is only supported by configure");
     }
-    if ((command === "ask" || command === "plan" || command === "implement" || command === "orchestrate") &&
+    if ((command === "ask" || command === "plan" || command === "implement" || command === "orchestrate" || command === "setup") &&
         !parsed.promptFile) {
         throw new Error(`--prompt-file is required for ${command}`);
     }
-    if (command === "implement" && parsed.executionMode === "background") {
-        throw new Error("Background execution is not supported for implement");
+    if (command === "scaffold" && (!parsed.specFile || !parsed.target)) {
+        throw new Error("scaffold requires --spec-file and --target");
     }
-    if ((parsed.executionMode || parsed.timeoutMs) && !isTaskCommand(command)) {
-        throw new Error("--execution-mode and --timeout-ms are only supported by delegated task commands");
+    if (command === "resume" && !parsed.continuationId)
+        throw new Error("resume requires --continuation");
+    if (parsed.adoptExisting && command !== "scaffold")
+        throw new Error("--adopt-existing is only supported by scaffold");
+    if (parsed.smokeTest && command !== "doctor")
+        throw new Error("--smoke-test is only supported by doctor");
+    if ((parsed.executionMode || parsed.timeoutMs || parsed.role || parsed.thinkingLevel || parsed.approvalMode || parsed.specFile) && !isTaskCommand(command)) {
+        throw new Error("Delegation options are only supported by delegated task commands");
     }
     if (command === "jobs")
         validateJobsArguments(parsed);
@@ -131,13 +189,26 @@ export function parseArguments(argv) {
 }
 function isTaskCommand(command) {
     return command === "ask" || command === "review" || command === "plan" ||
-        command === "implement" || command === "orchestrate";
+        command === "implement" || command === "orchestrate" || command === "scaffold" || command === "setup";
 }
 function parseJobsAction(value) {
     if (value === "list" || value === "status" || value === "wait" ||
-        value === "cancel" || value === "acknowledge")
+        value === "cancel" || value === "acknowledge" || value === "approvals" ||
+        value === "approve" || value === "deny" || value === "cleanup")
+        return value;
+    if (value === "materialize")
         return value;
     throw new Error(`Unknown or missing jobs action: ${value ?? "<none>"}`);
+}
+function parseWorkspaceStrategy(value) {
+    if (value === "auto" || value === "isolated-head" || value === "isolated-snapshot")
+        return value;
+    throw new Error(`Invalid workspace strategy: ${value}`);
+}
+function parseRolesAction(value) {
+    if (value === "list")
+        return value;
+    throw new Error(`Unknown or missing roles action: ${value ?? "<none>"}`);
 }
 function validateJobsArguments(args) {
     if (args.jobsAction !== "list" && !args.jobId) {
@@ -149,11 +220,43 @@ function validateJobsArguments(args) {
     if (args.waitTimeoutMs && args.jobsAction !== "wait") {
         throw new Error("--wait-timeout-ms is only supported by jobs wait");
     }
+    if ((args.jobsAction === "approve" || args.jobsAction === "deny") && !args.approvalId) {
+        throw new Error(`jobs ${args.jobsAction} requires --approval`);
+    }
+    if (args.approvalScope && args.jobsAction !== "approve") {
+        throw new Error("--approval-scope is only supported by jobs approve");
+    }
+    if (args.notificationId && args.jobsAction !== "acknowledge") {
+        throw new Error("--notification is only supported by jobs acknowledge");
+    }
+    if (args.discard && args.jobsAction !== "cleanup") {
+        throw new Error("--discard is only supported by jobs cleanup");
+    }
 }
 function parseExecutionMode(value) {
     if (value === "supervised" || value === "background")
         return value;
     throw new Error(`Invalid execution mode: ${value}`);
+}
+function parseRole(value) {
+    if (isWorkerRole(value))
+        return value;
+    throw new Error(`Invalid worker role: ${value}`);
+}
+function parseThinking(value) {
+    if (isThinkingLevel(value))
+        return value;
+    throw new Error(`Invalid thinking level: ${value}`);
+}
+function parseApprovalMode(value) {
+    if (value === "deny" || value === "wait")
+        return value;
+    throw new Error(`Invalid approval mode: ${value}`);
+}
+function parseApprovalScope(value) {
+    if (value === "once" || value === "job")
+        return value;
+    throw new Error(`Invalid approval scope: ${value}`);
 }
 function parseDuration(value, flag) {
     const duration = Number(value);

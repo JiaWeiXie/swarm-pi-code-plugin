@@ -1,17 +1,31 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import type {
+  AdaptivePolicyConfig,
+  ApprovalRequest,
+  BackgroundRolePolicy,
+  CapabilityLease,
   ExecutionMode,
   Host,
+  JobNotification,
   JobStatus,
   NotificationStatus,
   SandboxMode,
   TaskKind,
+  WorkerRoleId,
 } from "../core/contracts.js";
+import {
+  DEFAULT_ADAPTIVE_POLICY,
+  DEFAULT_BACKGROUND_ROLE_POLICY,
+  isWorkerRole,
+  normalizeAdaptivePolicy,
+  type RolePolicyOverrides,
+} from "../orchestration/roles.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -27,6 +41,9 @@ export interface SwarmConfig {
   availableModels: string[];
   availableModelsCheckedAt: string | null;
   sandboxMode?: SandboxMode;
+  rolePolicies?: RolePolicyOverrides;
+  adaptivePolicy?: AdaptivePolicyConfig;
+  backgroundRolePolicy?: BackgroundRolePolicy;
   profile?: SwarmProfile;
 }
 
@@ -41,6 +58,12 @@ export interface JobRecord {
   model?: string;
   pid?: number;
   workerToken?: string;
+  role?: WorkerRoleId;
+  generation?: number;
+  pendingApprovalId?: string;
+  approvals?: ApprovalRequest[];
+  leases?: CapabilityLease[];
+  notifications?: JobNotification[];
   createdAt?: string;
   startedAt?: string;
   updatedAt?: string;
@@ -54,7 +77,14 @@ export interface SwarmState {
   version: 1;
   config: SwarmConfig;
   jobs: JobRecord[];
-  migration?: { source: ".swarm-pi-code" | ".swarm-code"; migratedAt: string };
+  migration?: { source: ".swarm-pi-code-plugin" | ".swarm-pi-code" | ".swarm-code"; migratedAt: string };
+}
+
+export class StateMigrationConflictError extends Error {
+  constructor(readonly legacyDir: string, readonly destinationDir: string) {
+    super(`Runtime state exists in both ${legacyDir} and ${destinationDir}`);
+    this.name = "StateMigrationConflictError";
+  }
 }
 
 export function defaultState(): SwarmState {
@@ -65,6 +95,9 @@ export function defaultState(): SwarmState {
       availableModels: [],
       availableModelsCheckedAt: null,
       sandboxMode: "strict",
+      rolePolicies: {},
+      adaptivePolicy: structuredClone(DEFAULT_ADAPTIVE_POLICY),
+      backgroundRolePolicy: structuredClone(DEFAULT_BACKGROUND_ROLE_POLICY),
     },
     jobs: [],
   };
@@ -104,7 +137,11 @@ export async function resolveStateDir(
   if (env.SWARM_PI_CODE_PLUGIN_DATA_DIR) {
     return path.resolve(cwd, env.SWARM_PI_CODE_PLUGIN_DATA_DIR);
   }
-  return path.join(await resolveSharedWorkspaceRoot(cwd), ".swarm-pi-code-plugin");
+  const commonDir = await resolveGitCommonDir(cwd);
+  if (commonDir) return path.join(commonDir, "swarm-pi-code-plugin");
+  const workspace = await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd));
+  const key = createHash("sha256").update(workspace).digest("hex");
+  return path.join(userStateRoot(env), "workspaces", key);
 }
 
 export async function resolveStateFile(cwd: string): Promise<string> {
@@ -112,6 +149,7 @@ export async function resolveStateFile(cwd: string): Promise<string> {
 }
 
 export async function loadState(cwd: string): Promise<SwarmState> {
+  await migrateCurrentStateDirectory(cwd);
   const current = await readJson(await resolveStateFile(cwd));
   if (current) return normalizeState(current);
   const migrated = await readLegacyState(cwd);
@@ -122,9 +160,45 @@ export async function loadState(cwd: string): Promise<SwarmState> {
   return defaultState();
 }
 
+export async function migrateCurrentStateDirectory(cwd: string): Promise<boolean> {
+  if (process.env.SWARM_PI_CODE_PLUGIN_DATA_DIR) return false;
+  const workspace = await resolveWorkspaceRoot(cwd);
+  const legacyDir = path.join(workspace, ".swarm-pi-code-plugin");
+  const destinationDir = await resolveStateDir(cwd);
+  if (path.resolve(legacyDir) === path.resolve(destinationDir)) return false;
+  const parent = path.dirname(destinationDir);
+  await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+  const lock = path.join(parent, `${path.basename(destinationDir)}.migration.lock`);
+  const handle = await acquireFileLock(lock);
+  try {
+    const legacy = await fs.stat(legacyDir).catch(() => undefined);
+    if (!legacy?.isDirectory()) return false;
+    const destination = await fs.stat(destinationDir).catch(() => undefined);
+    if (destination) throw new StateMigrationConflictError(legacyDir, destinationDir);
+    try {
+      await fs.rename(legacyDir, destinationDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+      await fs.cp(legacyDir, destinationDir, { recursive: true, errorOnExist: true });
+      await fs.rm(legacyDir, { recursive: true, force: true });
+    }
+    const stateFile = path.join(destinationDir, "state.json");
+    const current = await readJson(stateFile);
+    if (current) {
+      const state = normalizeState(current);
+      state.migration = { source: ".swarm-pi-code-plugin", migratedAt: new Date().toISOString() };
+      await writeJsonAtomic(stateFile, state);
+    }
+    return true;
+  } finally {
+    await handle.close();
+    await fs.rm(lock, { force: true });
+  }
+}
+
 export async function writeState(cwd: string, state: SwarmState): Promise<void> {
   const stateFile = await resolveStateFile(cwd);
-  await fs.mkdir(path.dirname(stateFile), { recursive: true });
+  await fs.mkdir(path.dirname(stateFile), { recursive: true, mode: 0o700 });
   const tempFile = `${stateFile}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await fs.writeFile(tempFile, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
@@ -169,6 +243,11 @@ export async function saveProjectSettings(
   cwd: string,
   profile: SwarmProfile,
   sandboxMode: SandboxMode,
+  execution?: {
+    rolePolicies?: RolePolicyOverrides;
+    adaptivePolicy?: AdaptivePolicyConfig;
+    backgroundRolePolicy?: BackgroundRolePolicy;
+  },
 ): Promise<SwarmState> {
   return updateState(cwd, (state) => {
     state.config.profile = {
@@ -176,12 +255,38 @@ export async function saveProjectSettings(
       configuredAt: profile.configuredAt ?? new Date().toISOString(),
     };
     state.config.sandboxMode = sandboxMode;
+    if (execution?.rolePolicies) state.config.rolePolicies = structuredClone(execution.rolePolicies);
+    if (execution?.adaptivePolicy) state.config.adaptivePolicy = normalizeAdaptivePolicy(execution.adaptivePolicy);
+    if (execution?.backgroundRolePolicy) {
+      state.config.backgroundRolePolicy = {
+        mechanicalExecutor: execution.backgroundRolePolicy.mechanicalExecutor === true,
+      };
+    }
   });
 }
 
 export async function setSandboxMode(cwd: string, sandboxMode: SandboxMode): Promise<SwarmState> {
   return updateState(cwd, (state) => {
     state.config.sandboxMode = sandboxMode;
+  });
+}
+
+export async function saveExecutionSettings(
+  cwd: string,
+  sandboxMode: SandboxMode,
+  execution: {
+    rolePolicies?: RolePolicyOverrides;
+    adaptivePolicy?: AdaptivePolicyConfig;
+    backgroundRolePolicy?: BackgroundRolePolicy;
+  },
+): Promise<SwarmState> {
+  return updateState(cwd, (state) => {
+    state.config.sandboxMode = sandboxMode;
+    state.config.rolePolicies = structuredClone(execution.rolePolicies ?? {});
+    state.config.adaptivePolicy = normalizeAdaptivePolicy(execution.adaptivePolicy);
+    state.config.backgroundRolePolicy = {
+      mechanicalExecutor: execution.backgroundRolePolicy?.mechanicalExecutor === true,
+    };
   });
 }
 
@@ -192,6 +297,9 @@ export async function clearConfiguration(cwd: string): Promise<SwarmState> {
       availableModels: [],
       availableModelsCheckedAt: null,
       sandboxMode: "strict",
+      rolePolicies: {},
+      adaptivePolicy: structuredClone(DEFAULT_ADAPTIVE_POLICY),
+      backgroundRolePolicy: structuredClone(DEFAULT_BACKGROUND_ROLE_POLICY),
     };
   });
 }
@@ -253,6 +361,10 @@ function normalizeState(value: Record<string, unknown>): SwarmState {
   state.config.availableModels = stringArray(config.availableModels);
   state.config.availableModelsCheckedAt = stringValue(config.availableModelsCheckedAt) ?? null;
   state.config.sandboxMode = sandboxModeValue(config.sandboxMode);
+  state.config.rolePolicies = rolePolicyOverrides(config.rolePolicies);
+  state.config.adaptivePolicy = normalizeAdaptivePolicy(asRecord(config.adaptivePolicy));
+  const background = asRecord(config.backgroundRolePolicy);
+  state.config.backgroundRolePolicy = { mechanicalExecutor: background.mechanicalExecutor === true };
   if (Object.keys(profile).length > 0) {
     state.config.profile = {
       goal: stringValue(profile.goal),
@@ -269,12 +381,58 @@ function normalizeState(value: Record<string, unknown>): SwarmState {
     : [];
   const migration = asRecord(value.migration);
   if (
-    (migration.source === ".swarm-pi-code" || migration.source === ".swarm-code") &&
+    (migration.source === ".swarm-pi-code-plugin" || migration.source === ".swarm-pi-code" || migration.source === ".swarm-code") &&
     typeof migration.migratedAt === "string"
   ) {
     state.migration = { source: migration.source, migratedAt: migration.migratedAt };
   }
   return state;
+}
+
+async function resolveGitCommonDir(cwd: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, encoding: "utf8" },
+    );
+    return await fs.realpath(stdout.trim());
+  } catch {
+    return undefined;
+  }
+}
+
+function userStateRoot(env: NodeJS.ProcessEnv): string {
+  if (env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR) return path.resolve(env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR);
+  if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Application Support", "swarm-pi-code-plugin");
+  if (process.platform === "win32") return path.join(env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "swarm-pi-code-plugin");
+  return path.join(env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "swarm-pi-code-plugin");
+}
+
+async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    await fs.rename(temporary, file);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
+}
+
+async function acquireFileLock(file: string): Promise<Awaited<ReturnType<typeof fs.open>>> {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    try {
+      return await fs.open(file, "wx", 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const existing = await fs.stat(file).catch(() => undefined);
+      if (existing && Date.now() - existing.mtimeMs > 30_000) {
+        await fs.rm(file, { force: true });
+        continue;
+      }
+      if (Date.now() >= deadline) throw new Error(`Timed out waiting for migration lock: ${file}`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -292,7 +450,22 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function sandboxModeValue(value: unknown): SandboxMode {
-  return value === "lenient" ? "lenient" : "strict";
+  return value === "adaptive" || value === "lenient" ? value : "strict";
+}
+
+function rolePolicyOverrides(value: unknown): RolePolicyOverrides {
+  const record = asRecord(value);
+  const result: RolePolicyOverrides = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (!isWorkerRole(key)) continue;
+    const candidate = asRecord(raw);
+    result[key] = {
+      ...(stringArray(candidate.models).length ? { models: stringArray(candidate.models) } : {}),
+      ...(typeof candidate.thinkingLevel === "string" ? { thinkingLevel: candidate.thinkingLevel as never } : {}),
+      ...(typeof candidate.maxAttempts === "number" ? { maxAttempts: candidate.maxAttempts } : {}),
+    };
+  }
+  return result;
 }
 
 async function withStateLock<T>(cwd: string, run: () => Promise<T>): Promise<T> {

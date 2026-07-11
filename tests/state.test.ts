@@ -41,6 +41,24 @@ function workerResult(status: WorkerResult["status"] = "succeeded"): WorkerResul
   };
 }
 
+test("adaptive role and approval settings survive state normalization", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-adaptive-state-"));
+  await updateState(workspace, (state) => {
+    state.config.sandboxMode = "adaptive";
+    state.config.rolePolicies = { planner: { models: ["test/planner"], thinkingLevel: "xhigh", maxAttempts: 2 } };
+    state.config.adaptivePolicy = {
+      classifierModels: ["test/classifier"], classifierThinkingLevel: "medium",
+      approvalPolicy: "wait", trustedDomains: ["registry.npmjs.org"], rules: [], diagnostics: true,
+    };
+    state.config.backgroundRolePolicy = { mechanicalExecutor: true };
+  });
+  const loaded = await loadState(workspace);
+  assert.equal(loaded.config.sandboxMode, "adaptive");
+  assert.equal(loaded.config.rolePolicies?.planner?.thinkingLevel, "xhigh");
+  assert.equal(loaded.config.adaptivePolicy?.approvalPolicy, "wait");
+  assert.equal(loaded.config.backgroundRolePolicy?.mechanicalExecutor, true);
+});
+
 function repositoryFixture(): { repository: string; worktree: string } {
   const repository = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-state-"));
   const worktree = `${repository}-feature`;
@@ -75,8 +93,8 @@ async function withDataDir<T>(value: string | undefined, run: () => Promise<T>):
 test("linked worktrees resolve one shared state directory", async () => {
   const { repository, worktree } = repositoryFixture();
   await withDataDir(undefined, async () => {
-    assert.equal(await resolveStateDir(repository), path.join(repository, ".swarm-pi-code-plugin"));
-    assert.equal(await resolveStateDir(worktree), path.join(repository, ".swarm-pi-code-plugin"));
+    assert.equal(await resolveStateDir(repository), path.join(repository, ".git", "swarm-pi-code-plugin"));
+    assert.equal(await resolveStateDir(worktree), path.join(repository, ".git", "swarm-pi-code-plugin"));
 
     await setModelPriority(repository, ["test/primary", "test/fallback"]);
     await setSandboxMode(repository, "lenient");
@@ -114,7 +132,7 @@ test("previous swarm-pi-code state migrates with configuration and Pi jobs", asy
     assert.equal(state.config.sandboxMode, "strict");
     assert.equal(state.migration?.source, ".swarm-pi-code");
     assert.equal(
-      fs.existsSync(path.join(repository, ".swarm-pi-code-plugin", "state.json")),
+      fs.existsSync(path.join(repository, ".git", "swarm-pi-code-plugin", "state.json")),
       true,
     );
   });

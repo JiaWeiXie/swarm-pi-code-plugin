@@ -1,6 +1,6 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Dual-host Claude Code and Codex plugin backed by the embedded Pi coding-agent SDK",
@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.build.json && npm run build:plugin",
     "build:plugin": "tsc -p tsconfig.plugin.json",
     "test:build": "tsc -p tsconfig.test.json",
-    "test": "npm run test:build && node --test .test-dist/tests/*.test.js",
+    "test": "npm run test:build && SWARM_PI_CODE_PLUGIN_USER_STATE_DIR=/tmp/swarm-pi-code-plugin-test-state node --test .test-dist/tests/*.test.js",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test"
   },

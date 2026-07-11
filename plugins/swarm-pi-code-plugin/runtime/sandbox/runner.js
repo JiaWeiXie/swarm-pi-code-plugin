@@ -21,7 +21,7 @@ export async function createSandboxRunner(options) {
     const env = options.env ?? process.env;
     let config;
     try {
-        config = await sandboxConfiguration(cwd, tempRoot, options.mode, env);
+        config = await sandboxConfiguration(cwd, tempRoot, options.mode, env, options.sandboxMode ?? "lenient", options.trustedDomains ?? []);
     }
     catch (error) {
         await fs.rm(tempRoot, { recursive: true, force: true });
@@ -31,7 +31,11 @@ export async function createSandboxRunner(options) {
     process.env.CLAUDE_TMPDIR = tempRoot;
     activeRunner = true;
     try {
-        await SandboxManager.initialize(config, async () => true);
+        await SandboxManager.initialize(config, async ({ host, port }) => {
+            if ((options.sandboxMode ?? "lenient") === "lenient")
+                return true;
+            return options.authorizeNetwork ? options.authorizeNetwork(host, port) : false;
+        });
     }
     catch (error) {
         activeRunner = false;
@@ -63,7 +67,7 @@ export async function createSandboxRunner(options) {
         },
     };
 }
-export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.env) {
+export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.env, sandboxMode = "lenient", trustedDomains = []) {
     const stateDir = await resolveStateDir(cwd, env);
     const gitPaths = await resolveGitMetadataPaths(cwd);
     const denyRead = [
@@ -77,6 +81,7 @@ export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.en
         ...gitPaths,
         path.join(cwd, ".env"),
         path.join(cwd, ".env.local"),
+        path.join(cwd, ".swarm-pi-policy.json"),
         path.join(os.homedir(), ".npm", "_logs"),
         path.join(os.homedir(), ".claude", "debug"),
         "/tmp/claude",
@@ -85,7 +90,9 @@ export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.en
     return {
         network: {
             allowedDomains: [],
-            deniedDomains: [],
+            deniedDomains: sandboxMode === "adaptive"
+                ? ["localhost", "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
+                : [],
             allowUnixSockets: [],
             allowAllUnixSockets: false,
             allowLocalBinding: false,
@@ -110,6 +117,7 @@ export function sanitizedSandboxEnvironment(cwd, tempRoot, env = process.env) {
         XDG_CACHE_HOME: path.join(tempRoot, ".cache"),
         XDG_CONFIG_HOME: path.join(tempRoot, ".config"),
         XDG_DATA_HOME: path.join(tempRoot, ".local", "share"),
+        PYTHONPYCACHEPREFIX: path.join(tempRoot, "python-cache"),
         PATH: sandboxPath(cwd),
         GIT_CONFIG_NOSYSTEM: "1",
         GIT_OPTIONAL_LOCKS: "0",
@@ -123,57 +131,70 @@ export function sanitizedSandboxEnvironment(cwd, tempRoot, env = process.env) {
     return safe;
 }
 function sandboxedBashOperations(tempRoot, env) {
+    let queue = Promise.resolve();
     return {
         async exec(command, cwd, { onData, signal, timeout }) {
-            if (signal?.aborted)
-                throw new Error("aborted");
-            const wrapped = await SandboxManager.wrapWithSandbox(command, "/bin/bash", undefined, signal);
-            if (signal?.aborted) {
-                SandboxManager.cleanupAfterCommand();
-                throw new Error("aborted");
-            }
-            const child = spawn("/bin/bash", ["-c", wrapped], {
-                cwd,
-                detached: process.platform !== "win32",
-                env: sanitizedSandboxEnvironment(cwd, tempRoot, env),
-                stdio: ["ignore", "pipe", "pipe"],
-            });
-            child.stdout?.on("data", onData);
-            child.stderr?.on("data", onData);
-            let timedOut = false;
-            let timeoutHandle;
-            const stop = () => killProcessTree(child.pid);
-            if (timeout !== undefined && timeout > 0) {
-                timeoutHandle = setTimeout(() => {
-                    timedOut = true;
-                    stop();
-                }, timeout * 1000);
-            }
-            if (signal) {
-                if (signal.aborted)
-                    stop();
-                else
-                    signal.addEventListener("abort", stop, { once: true });
-            }
+            let release;
+            const previous = queue;
+            queue = new Promise((resolve) => { release = resolve; });
+            await previous;
             try {
-                const exitCode = await new Promise((resolve, reject) => {
-                    child.once("error", reject);
-                    child.once("close", resolve);
-                });
-                if (signal?.aborted)
-                    throw new Error("aborted");
-                if (timedOut)
-                    throw new Error(`timeout:${timeout}`);
-                return { exitCode };
+                return await executeSandboxed(command, cwd, tempRoot, env, onData, signal, timeout);
             }
             finally {
-                if (timeoutHandle)
-                    clearTimeout(timeoutHandle);
-                signal?.removeEventListener("abort", stop);
-                SandboxManager.cleanupAfterCommand();
+                release();
             }
         },
     };
+}
+async function executeSandboxed(command, cwd, tempRoot, env, onData, signal, timeout) {
+    if (signal?.aborted)
+        throw new Error("aborted");
+    const wrapped = await SandboxManager.wrapWithSandbox(command, "/bin/bash", undefined, signal);
+    if (signal?.aborted) {
+        SandboxManager.cleanupAfterCommand();
+        throw new Error("aborted");
+    }
+    const child = spawn("/bin/bash", ["-c", wrapped], {
+        cwd,
+        detached: process.platform !== "win32",
+        env: sanitizedSandboxEnvironment(cwd, tempRoot, env),
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
+    let timedOut = false;
+    let timeoutHandle;
+    const stop = () => killProcessTree(child.pid);
+    if (timeout !== undefined && timeout > 0) {
+        timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            stop();
+        }, timeout * 1000);
+    }
+    if (signal) {
+        if (signal.aborted)
+            stop();
+        else
+            signal.addEventListener("abort", stop, { once: true });
+    }
+    try {
+        const exitCode = await new Promise((resolve, reject) => {
+            child.once("error", reject);
+            child.once("close", resolve);
+        });
+        if (signal?.aborted)
+            throw new Error("aborted");
+        if (timedOut)
+            throw new Error(`timeout:${timeout}`);
+        return { exitCode };
+    }
+    finally {
+        if (timeoutHandle)
+            clearTimeout(timeoutHandle);
+        signal?.removeEventListener("abort", stop);
+        SandboxManager.cleanupAfterCommand();
+    }
 }
 function killProcessTree(pid) {
     if (!pid)

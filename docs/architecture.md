@@ -5,6 +5,12 @@ This document describes the stable runtime boundaries of
 [README](../README.md); provider discovery and browser setup details live in
 the [configuration reference](configuration.md). Documentation maintenance and
 validation practices live in the [documentation update SOP](documentation-sop.md).
+Role routing, adaptive policy, and durable approval are specified in
+[Orchestration and Adaptive Policy](orchestration-and-policy.md). Security
+assumptions and immutable denials are specified in the
+[delegated worker threat model](threat-model.md).
+Readiness, state placement, workspace assessment, and project creation are
+specified in [Bootstrap, Onboarding, and Workspace Hygiene](bootstrap-and-onboarding.md).
 
 ## System Boundary
 
@@ -20,8 +26,9 @@ flowchart TB
     I --> W[Assigned Git worktree]
     R --> B{Sandbox mode}
     B --> T[Strict scoped tools]
+    B --> A[Adaptive policy and approvals]
     B --> L[Lenient OS-sandboxed Bash]
-    R --> D[.swarm-pi-code-plugin]
+    R --> D[Git common dir or user-state namespace]
     D --> M[model.json]
     D --> S[state.json and jobs]
     H --> V[Host-owned verification and delivery]
@@ -34,17 +41,16 @@ project profiles.
 
 ## Host Adapters
 
-Claude Code exposes commands for setup and agents for delegation:
+Claude Code exposes one command per workflow: `init`, `project`, `ask`,
+`review`, `plan`, `implement`, `orchestrate`, `scaffold`, and `setup` under
+the `/swarm-pi-code-plugin:` prefix. Its `pi-worker` and `pi-builder` agents
+classify natural-language requests and route them to the matching workflow.
 
-- `/swarm-pi-code-plugin:init` opens full setup.
-- `/swarm-pi-code-plugin:project` opens repeatable project-only setup.
-- `pi-worker` handles ask, review, and plan requests without mutation.
-- `pi-builder` handles explicit implementation requests only.
-
-Codex exposes the equivalent skills under the
-`swarm-pi-code-plugin-` prefix. The `configure` skill opens full setup and the
-`project` skill opens project-only setup. Ask, review, plan, implement, and
-orchestrate skills all invoke the shared runner with an explicit host value.
+Codex exposes the equivalent skills under the `swarm-pi-code-plugin-` prefix.
+Every Codex skill has `agents/openai.yaml` UI metadata. Both hosts share the
+same task-specific workflow content and cross-host protocol: readiness and
+pending notifications first, supervised execution by default, durable
+continuations, explicit approval, and host-owned verification/delivery.
 
 Host adapters write user-controlled prompts to temporary files outside the
 repository. They validate the runner result, inspect implementation diffs, and
@@ -64,25 +70,28 @@ node scripts/pi-runner.mjs review --host <host> [--base <ref>] [--scope <scope>]
 node scripts/pi-runner.mjs plan --host <host> --prompt-file <file> --json
 node scripts/pi-runner.mjs implement --host <host> --prompt-file <file> --json
 node scripts/pi-runner.mjs orchestrate --host <host> --prompt-file <file> --json
-node scripts/pi-runner.mjs jobs <list|status|wait|cancel|acknowledge> [options] --json
+node scripts/pi-runner.mjs roles list --json
+node scripts/pi-runner.mjs status|doctor|resume [options] --json
+node scripts/pi-runner.mjs scaffold|setup --host <claude|codex> [options] --json
+node scripts/pi-runner.mjs jobs <list|status|wait|cancel|acknowledge|approvals|approve|deny|cleanup|materialize> [options] --json
 ```
 
 Every worker result includes the task kind, status, success flag, selected
 model, output, changed files, diff summary, and verification status.
 
-Task commands accept `--execution-mode supervised|background` and
-`--timeout-ms`. Supervised is the default. Background is read-only and returns
-an accepted job ID after durable artifacts and a detached worker both exist;
-`implement` rejects background mode.
+Task commands accept role, thinking, execution, approval, timeout, and optional
+delegation-spec arguments. Background readonly work returns an accepted job ID
+after durable artifacts and a detached worker exist. Opt-in mechanical
+implementation first creates an isolated job worktree.
 
 The runner creates one in-memory Pi session per delegated model attempt.
-Strict jobs use scoped repository tools only. Lenient jobs share one job-level
-sandbox manager and add Bash; orchestration perspectives share that manager so
+Strict jobs use scoped repository tools only. Adaptive and Lenient jobs share
+one job-level sandbox manager and add Bash; orchestration perspectives share that manager so
 parallel sessions cannot reset each other's process boundary. Pi provider failures are read
 from the terminal assistant message rather than inferred from whether
 `prompt()` rejected; only a terminal `stop` is successful.
 
-Each job moves through `queued`, `running`, and one terminal state:
+Each job moves through `queued`, `running`, optional `awaiting-approval`, and one terminal state:
 `succeeded`, `failed`, `cancelled`, `timed-out`, or `orphaned`. Workers maintain
 a heartbeat and process lease. Queries reconcile result artifacts, stale
 leases, and cancellation requests before returning state.
@@ -96,6 +105,8 @@ leases, and cancellation requests before returning state.
   postflight capture completes.
 - Scoped write and edit operations reject traversal and symlinks that resolve
   outside the assigned worktree.
+- Tool authorization independently denies workspace escape, Git metadata,
+  runtime state, credentials, local/private networking, and delivery commands.
 - Once an implementation session writes files, the runner does not start a
   second fallback model in the same job.
 - The host captures tracked, untracked, and newly created ignored side effects
@@ -113,14 +124,17 @@ The shared data directory is resolved through Git's common directory so linked
 worktrees normally observe the same setup:
 
 ```text
-.swarm-pi-code-plugin/
+.git/swarm-pi-code-plugin/
 ├── model.json                  # provider, custom endpoint, primary, fallbacks
 ├── state.json                  # project profile, migration data, job index
 └── jobs/<job-id>/
     ├── request.json            # durable execution request and worker token
     ├── prompt.md               # copied prompt, safe after host temp cleanup
     ├── heartbeat.json          # PID lease updated while running
-    ├── result.json             # terminal WorkerResult
+    ├── approvals/              # generation-bound approval requests
+    ├── leases/                 # bounded capability leases
+    ├── policy-events.jsonl     # redacted authorization decisions
+    ├── result.json             # terminal WorkerResult and verifier outcome
     ├── changes.patch           # optional implementation diff
     └── worker.*.log            # detached worker stdout and stderr
 ```
@@ -130,9 +144,10 @@ project goal, directory scope, delegated task types, sandbox mode, migration
 metadata, and job index. State updates use an inter-process lock, a
 same-directory temporary file, and an atomic rename.
 
-`SWARM_PI_CODE_PLUGIN_DATA_DIR` can override the resolved data directory. The
-current worktree remains the Pi session working directory even when its shared
-configuration is resolved from the primary checkout.
+Non-Git workspaces use an OS user-state namespace keyed by canonical path.
+`SWARM_PI_CODE_PLUGIN_DATA_DIR` can override either location. The current
+worktree remains the Pi session working directory while control state remains
+outside the checked-out tree.
 
 Terminal results are written before the state index is updated. Reconciliation
 repairs a crash between those writes. Every terminal job starts with a pending
@@ -159,10 +174,10 @@ ephemeral port, uses a random per-session token, rejects non-loopback and
 cross-origin writes, applies a restrictive CSP, limits request and response
 sizes, and shuts down after save, close, or timeout.
 
-Full setup saves model configuration, project profile, and sandbox mode
-together. Project-only setup starts at **Project setup**, pre-populates the
-existing project settings, and writes `state.config.profile` plus
-`state.config.sandboxMode`. Neither flow deletes jobs or global Pi credentials.
+Full setup saves model configuration, role policy, execution safety, and project
+profile together. Project-only setup starts at **Roles**, pre-populates the
+existing settings, and writes only shared state. Neither flow deletes jobs or
+global Pi credentials.
 
 ## Migration
 
