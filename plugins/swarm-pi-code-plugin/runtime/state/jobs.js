@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadState, resolveStateDir, updateState } from "./state.js";
@@ -11,8 +11,11 @@ export async function startJob(cwd, input) {
     const createdAt = new Date().toISOString();
     const sandboxMode = input.sandboxMode ?? "strict";
     const directory = await jobDirectory(cwd, id);
+    const providerSnapshotHash = input.modelConfiguration
+        ? modelConfigurationSnapshotHash(input.modelConfiguration)
+        : undefined;
     const request = {
-        requestVersion: 2,
+        requestVersion: input.modelConfiguration ? 3 : 2,
         id,
         host: input.host,
         kind: input.kind,
@@ -30,6 +33,8 @@ export async function startJob(cwd, input) {
         ...(input.target ? { target: input.target } : {}),
         ...(input.scaffoldSpec ? { scaffoldSpec: input.scaffoldSpec } : {}),
         ...(input.adoptExisting ? { adoptExisting: true } : {}),
+        ...(input.modelConfiguration ? { modelConfiguration: structuredClone(input.modelConfiguration) } : {}),
+        ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
         workerToken,
         createdAt,
     };
@@ -48,6 +53,7 @@ export async function startJob(cwd, input) {
             timeoutMs: input.timeoutMs,
             ...(input.model ? { model: input.model } : {}),
             ...(input.role ? { role: input.role } : {}),
+            ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
             generation: 1,
             approvals: [],
             leases: [],
@@ -62,6 +68,20 @@ export async function startJob(cwd, input) {
         });
     });
     return { id, workerToken };
+}
+export function modelConfigurationSnapshotHash(configuration) {
+    return createHash("sha256").update(canonicalJson(configuration)).digest("hex");
+}
+function canonicalJson(value) {
+    if (Array.isArray(value))
+        return `[${value.map(canonicalJson).join(",")}]`;
+    if (typeof value === "object" && value !== null) {
+        return `{${Object.entries(value)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
+            .join(",")}}`;
+    }
+    return JSON.stringify(value);
 }
 export async function attachJobProcess(cwd, jobId, workerToken, pid) {
     const updatedAt = new Date().toISOString();

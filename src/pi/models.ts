@@ -45,6 +45,7 @@ export function describeProviders(
     ...availableModels.map((model) => model.provider),
     ...custom,
     ...selectedProviders,
+    ...configuration.providerProfiles.map((profile) => profile.provider),
   ])].sort((left, right) =>
     (catalog.displayName?.(left) ?? left).localeCompare(catalog.displayName?.(right) ?? right),
   );

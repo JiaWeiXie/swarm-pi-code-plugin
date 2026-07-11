@@ -1,279 +1,247 @@
 # Configuration Reference
 
-This reference describes the temporary browser setup used by Claude Code and
-Codex. For installation, common workflows, and troubleshooting, start with
-the [README](../README.md). For runtime ownership and worker safety, see the
-[architecture reference](architecture.md). For the process used to keep these
-guides current, see the [documentation update SOP](documentation-sop.md).
+This reference describes the temporary browser setup shared by Claude Code and
+Codex. For installation and common workflows, start with the
+[README](../README.md). Runtime boundaries are documented in
+[architecture.md](architecture.md), and immutable security constraints are in
+[threat-model.md](threat-model.md).
 
 ## Product Model
 
-`swarm-pi-code-plugin` provides a temporary local web application for
-provider and model setup. Claude Code and Codex both launch the same shared
-configuration server during first-run setup and reconfiguration.
+The setup flow creates executable Pi connections, not generic provider cards.
+Every connection must map to a Pi runtime adapter, a supported authentication
+method, a model source, and a verification state.
 
-Users are not expected to edit configuration JSON by hand.
+The six full-setup steps are:
 
-The product model has four layers:
+1. Connect a built-in provider, subscription, cloud identity, or custom endpoint.
+2. Choose the primary model and ordered fallbacks.
+3. Assign model chains and thinking levels to worker roles.
+4. Configure sandbox, classifier, approval, and background behavior.
+5. Review the workspace and project delegation profile.
+6. Review, smoke-test required models, and save transactionally.
 
-1. **Connections** are AI services the user can actually use.
-2. **Models** are discovered from those connections.
-3. **Role routing** selects per-role model chains and thinking levels.
-4. **Execution policy** selects sandbox, classifier, approval, and background behavior.
+Project-only setup retains Roles, Execution & Safety, Workspace, and Review. It
+does not rewrite provider credentials or model configuration.
 
-Pi's complete provider catalog is implementation data, not user configuration.
-The interface must never present every provider merely because Pi knows about
-it.
+## Provider Capability Registry
+
+`ProviderCapabilityRegistry` is the single source for:
+
+- provider name and Common, Subscription, Cloud, Local, or Custom category;
+- fixed, managed-per-model, or selectable protocol behavior;
+- supported authentication methods;
+- required, optional, advanced, and conditional form fields;
+- field destinations in AuthStorage, provider-scoped environment, controlled
+  headers, or non-secret profiles;
+- model source and runtime adapter support.
+
+Coverage tests compare the Registry with every provider exposed by the pinned
+Pi model catalog. A newly added Pi provider fails CI until it is classified; the
+UI never guesses that an unknown provider uses a simple API-key form.
+
+Built-in examples include:
+
+| Connection | Protocol/runtime | Authentication | Additional fields |
+| --- | --- | --- | --- |
+| OpenAI API | OpenAI Responses | API key | organization and project IDs |
+| ChatGPT Plus/Pro | OpenAI Codex Responses | Pi device/browser OAuth | none |
+| Anthropic | Anthropic Messages | API key or Pi OAuth | optional beta header |
+| GitHub Copilot | managed per model | Pi OAuth | none |
+| Azure OpenAI | Azure Responses | API key | endpoint/resource, API version, deployment map |
+| Amazon Bedrock | Bedrock Converse | ambient identity | AWS profile and region |
+| Google Vertex AI | Vertex runtime | ambient identity or API key | project and location |
+| Cloudflare | managed or Chat-compatible | API key | account and optional gateway IDs |
+
+Azure Microsoft Entra identity is shown only as a capability notice because the
+pinned Pi runtime cannot execute it. It is never marked ready.
+
+## Wire Protocols
+
+Custom connections select exactly one upstream protocol before discovery:
+
+- `openai-chat-completions`
+- `openai-responses`
+- `anthropic-messages`
+
+One connection cannot change protocol per model. OpenAI Chat and Responses have
+different request, tool-call, and state semantics, so the runtime does not
+probe both and guess. Pi-specific APIs such as Google, Azure, Bedrock, Vertex,
+Mistral, and OpenAI Codex remain fixed runtime adapters and are not presented in
+the generic three-way selector.
+
+OpenAI-compatible roots are stored as versioned API roots, normally ending in
+`/v1`. Anthropic stores a service root; Pi appends `/v1/messages`. A legacy
+Anthropic root ending in one `/v1` is normalized in memory and written back only
+after a successful save.
+
+Full generation URLs such as `/chat/completions`, `/responses`, or
+`/v1/messages` are rejected. A non-standard model-list URL is stored separately
+as `modelsEndpoint` and must use the same origin as the generation root.
 
 ## Configuration Ownership
 
-Git workspaces store shared runtime data under the common Git directory;
-non-Git folders use an OS user-state namespace keyed by canonical path. The
-directory contains two files with distinct roles:
+Git workspaces store shared state in the Git common directory. Non-Git folders
+use a user-state namespace keyed by canonical workspace path. The relevant
+files are:
 
-- `model.json` is the canonical provider and model configuration. It contains
-  the primary model, ordered fallbacks, and non-secret custom provider
-  definitions.
-- `state.json` contains the project profile, job index, migration metadata, and
-  sandbox mode, plus a compatibility mirror of model priority for older plugin
-  releases.
+```text
+swarm-pi-code-plugin/
+├── model.json
+├── state.json
+└── jobs/<job-id>/request.json
+```
 
-Linked Git worktrees resolve the same shared data directory and therefore read
-the same `model.json`. Legacy project-root `.swarm-pi-code-plugin` data is
-migrated under lock; two populated locations produce a recovery issue instead
-of an automatic merge.
-
-The provider identifier is encoded by every model reference as
-`provider/model`. A separate selected-provider field is not persisted because
-it could disagree with the primary model.
-
-## File Format
+`model.json.version` remains `1`. Additive optional fields preserve old files:
 
 ```json
 {
   "version": 1,
-  "primary": "anthropic/claude-sonnet-4-5",
-  "fallbacks": ["openai/gpt-5.2"],
+  "primary": "openai/gpt-5.4",
+  "fallbacks": ["anthropic/claude-sonnet-4-5"],
   "customProviders": [],
-  "updatedAt": "2026-07-10T00:00:00.000Z"
+  "providerProfiles": [
+    {
+      "id": "openai",
+      "provider": "openai",
+      "name": "OpenAI",
+      "connectionKind": "builtin",
+      "auth": { "method": "api-key", "secretRef": "auth:openai" },
+      "protocol": "openai-responses",
+      "runtimeApi": "openai-responses",
+      "readiness": "verified",
+      "settings": {},
+      "headers": [],
+      "verifiedModel": "openai/gpt-5.4",
+      "verifiedAt": "2026-07-11T00:00:00.000Z"
+    }
+  ],
+  "updatedAt": "2026-07-11T00:00:00.000Z"
 }
 ```
 
-Custom provider definitions contain endpoint and model metadata only. They may
-not contain API keys, bearer tokens, cookies, secret headers, shell commands,
-or command-backed Pi configuration values.
+Profiles contain only non-secret settings, controlled literal headers, and
+opaque `secretRef` values. Custom definitions contain protocol roots, model
+metadata, structured auth policy, and optional controlled headers. They reject
+embedded API keys, OAuth tokens, raw header JSON, command-backed values, and
+credential-bearing URLs.
 
-When `model.json` does not exist, the loader reads the existing
-`state.config.modelPriority` value. The next successful configuration write
-creates `model.json` without deleting state or job history.
+New custom provider IDs are a stable hash of canonical endpoint and protocol.
+Existing IDs remain unchanged when their endpoint and protocol match exactly.
 
 ## Credential Boundary
 
-Provider credentials remain user-scoped and use Pi `AuthStorage`, which
-defaults to `~/.pi/agent/auth.json`. The web form accepts an optional API key,
-but the server sends it directly to `AuthStorage` and never writes it to:
+Secrets remain in Pi `AuthStorage`. A browser secret first enters the
+session-local `CredentialDraftVault`; the response contains only an opaque draft
+ID, provider, auth method, masked flag, and expiry. Draft IDs are bound to the
+loopback setup session and are removed after save, cancel, timeout, or expiry.
 
-- `model.json`
-- `state.json`
-- job prompts or output
-- stdout, stderr, logs, URLs, or error messages
-- HTML returned after the form submission
+Secrets never enter:
 
-An existing key or OAuth token is never returned to the browser. Reconfigure
-shows only a readiness state and a non-secret source label. A blank API-key
-field preserves the current credential. Project reset does not remove global
-Pi credentials.
+- `model.json`, `state.json`, or job artifacts;
+- browser localStorage or returned HTML;
+- model discovery, verification, or save payloads after draft creation;
+- stdout, worker logs, URLs, stack traces, or recovery journals.
 
-Automatic connection detection is limited to credentials Pi can resolve
-through its own `AuthStorage` and documented environment-variable map. This
-includes Pi-managed subscription OAuth for ChatGPT Plus/Pro, Claude Pro/Max,
-and GitHub Copilot. The plugin does not scan `.env` files or copy tokens from
-Claude Code, Codex, or another application's private credential store.
+Blank secret fields retain an existing credential. **Replace credential**,
+**Sign out**, and **Remove from project** are distinct operations.
 
-A resolved credential adds the provider to the connection list. An unresolved
-provider stays absent instead of appearing as an unfinished setup task.
+ChatGPT Plus/Pro is the `openai-codex` subscription connection. It is not an
+OpenAI API-key option. The browser drives Pi's browser or device-code OAuth with
+bounded long polling, explicit prompt responses, cancellation, and timeout.
+Anthropic and GitHub Copilot use the same generic OAuth session machinery.
+OAuth completes in an in-memory AuthStorage and becomes a credential draft;
+the real AuthStorage changes only during final save.
 
-## Server Lifecycle and Security
+AWS and Google ambient identities are detected without importing host secret
+files. Project, region, and location values are non-secret profile data passed
+as a provider-scoped environment overlay. The plugin never mutates
+`process.env`.
 
-The configuration server:
+## Controlled Headers
 
-1. listens on `127.0.0.1` with an ephemeral port by default;
-2. creates a cryptographically random, single-session URL token;
-3. requires that token on document and API requests;
-4. rejects non-loopback host headers, cross-origin requests, unsupported
-   methods, oversized request bodies, and unexpected content types;
-5. sets a restrictive Content Security Policy and no-store cache headers;
-6. opens the system browser when permitted and always prints the local URL as a
-   fallback;
-7. tests the primary and required Adaptive classifier with a minimal request;
-8. commits credential, model, and state changes as a recoverable transaction;
-9. shuts down after save, cancel, or a ten-minute idle timeout.
+Raw header JSON is not accepted. Literal headers use a fixed allowlist such as
+`HTTP-Referer`, `X-Title`, and `Anthropic-Beta`. Secret headers use `secretRef`
+and provider-scoped AuthStorage environment values.
 
-User-entered endpoint requests accept only HTTP(S), reject embedded URL
-credentials and cloud metadata addresses, use bounded timeouts and response
-sizes, and do not forward credentials across redirects. Local application port
-probing runs only after the user explicitly requests it.
+Pi configuration values interpret `$ENV` and `!command`. The runtime escapes
+all literal header values before registering them, so a literal cannot read an
+environment variable or execute a command. Secret references are the only
+values intentionally passed as Pi environment templates.
 
-There is no CORS support and no network-listen option. The server is a bounded
-setup session, not a daemon.
+Custom `API key + secret header` authentication uses the same secret for the
+protocol-standard credential and the selected additional controlled header.
+This keeps the native Pi adapter executable without a translation proxy.
 
-## User Flow
+## Discovery and Verification
 
-1. The host starts `pi-runner.mjs configure --host <host>`.
-2. The server loads `model.json`, then detects usable Pi OAuth and API-key
-   connections without returning secrets to the browser.
-3. With no connections, the browser shows a true empty state with actions to
-   connect an AI service or explicitly search for a local AI application.
-4. A known cloud provider asks only for its supported sign-in method. Provider
-   URLs, protocol, headers, and identifiers remain internal defaults.
-5. A custom endpoint initially asks only for a server URL and optional API key.
-   The user runs **Test and find models** before selecting a model.
-6. Discovery identifies the endpoint type, canonical URL, protocol, and model
-   inventory. Technical overrides remain under an Advanced disclosure.
-7. The user chooses a primary model and optional ordered fallbacks from models
-   on usable connections.
-8. Role setup assigns models and thinking to analysis, execution, architecture,
-   scaffolding, and environment roles.
-9. Execution setup selects strict, adaptive, or lenient policy, classifier
-   models, approval behavior, trusted domains, and optional background mechanical work.
-10. Workspace setup reports Git, empty non-Git, or existing non-Git state and
-    asks for goal, folder scope, and delegated task types.
-11. Review shows the complete role, safety, model, and project profile.
-12. The server validates and smoke-tests the complete draft, transactionally
-    updates credentials, model configuration, and shared profile, then reports
-    success and exits.
+Model discovery and API verification are separate states:
 
-Provider identifiers are internal implementation details. Rediscovering the
-same canonical endpoint and protocol refreshes the existing connection instead
-of creating a duplicate. For distinct endpoints, discovery reserves identifiers
-already present in the current browser draft, and the client performs a second
-collision check before adding a connection. Users must never be asked to repair
-duplicate provider identifiers manually.
+- `configured`: schema and authentication settings are valid;
+- `discovered`: a protocol-specific model endpoint returned a valid inventory;
+- `verified`: a selected model completed a minimal generation request;
+- `blocked`: the connection cannot currently execute.
 
-Wizard navigation uses **Back** after the first step. **Close setup** appears
-only on the Connections step. Non-sensitive unsaved fields are retained as a
-workspace-bound browser draft; API keys are never included.
-After save or close, the page renders an explicit completion state with the
-next action instead of leaving a disabled form on screen.
+Custom discovery performs one request determined by the selected protocol.
+OpenAI Chat and Responses use `<root>/models`; Anthropic uses
+`<service-root>/v1/models`. Ollama and LM Studio are recognized only when the
+user explicitly runs **Find local AI apps**. When a model endpoint is missing,
+the user can enter model IDs manually; this remains `configured`, not
+`verified`.
 
-`/swarm-pi-code-plugin:project` and `$swarm-pi-code-plugin-project` launch the
-same page in project-only mode. This mode starts at **Workspace**, shows a
-project-only Review, and writes `state.config.profile` plus
-`state.config.sandboxMode`. It pre-populates the current goal, directories,
-task types, and safety mode and is safe to run repeatedly; Provider, model
-priority, credentials, and jobs are not rewritten.
+**Verify API** is explicit and warns through its action text that it sends a
+minimal request. Final save always verifies the primary model and every
+required Adaptive classifier. Fallbacks may remain discovered, and Review shows
+their actual readiness.
 
-## Sandbox Setting
+Endpoint requests use bounded timeouts and response sizes, reject redirects,
+URL credentials, cloud metadata addresses, and cross-origin model endpoints.
+Credentials may use HTTP only for loopback endpoints.
 
-`state.config.sandboxMode` is `strict`, `adaptive`, or `lenient`; missing values from older
-state files normalize to `strict`. The browser disables lenient mode when the
-current platform or required backend dependencies are unavailable.
+## Transaction and Background Jobs
 
-Strict exposes only scoped tools. Adaptive adds classifier-controlled shell and
-network capabilities, durable approval, and a classifier-provider warning.
-Lenient adds OS-sandboxed Bash, permits outbound network, and displays a source
-exfiltration warning. Every shell uses an isolated HOME/TMP and does not inherit
-provider credentials, SSH agent sockets, or other host secrets. Saving a new
-mode affects newly submitted jobs only because each durable job stores its
-resolved sandbox mode in `request.json`.
+Save builds a candidate Pi environment from the proposed profiles and an
+in-memory clone of AuthStorage. It validates every selected model, runs required
+smoke tests, then commits credentials, `model.json`, and `state.json`. A failure
+restores prior values. An incomplete rollback writes a redacted recovery journal
+and returns `configuration-recovery-required`.
 
-Reconfiguration opens the connection overview instead of the raw provider
-form. Existing connections can be refreshed, edited, or removed. Refreshing a
-connection preserves explicit user model-metadata overrides.
+New durable jobs use `requestVersion: 3`. `request.json` contains the complete
+non-secret `ModelConfiguration` snapshot and a SHA-256 integrity hash. A
+background worker uses that snapshot even if the settings page changes later,
+while resolving current credentials at execution time. Credential revocation
+therefore fails explicitly instead of falling back to unauthenticated execution.
 
-## Screenshots
+## Server Lifecycle
 
-The screenshots below use a local mock endpoint and contain no credentials.
-The existing screenshots predate the expanded role and safety steps; they
-remain useful for connection and project controls until refreshed UI captures
-are published:
+The setup server binds to `127.0.0.1` on an ephemeral port, requires a random
+session token, rejects cross-origin writes, limits request sizes, sends a
+restrictive CSP and `no-store`, and closes after save, cancel, or idle timeout.
+OAuth sessions and credential drafts are aborted and cleared with the server.
 
-### Empty connections
-
-![Empty connections](assets/setup/01-empty-connections.png)
-
-### Endpoint discovery
-
-![Endpoint discovery](assets/setup/02-endpoint-discovery.png)
-
-### Project setup
-
-![Project setup](assets/setup/03-project-setup.png)
-
-### Full review
-
-![Full review](assets/setup/04-review.png)
-
-### Saved completion
-
-![Saved completion](assets/setup/05-saved.png)
-
-### Project-only setup
-
-![Project-only setup](assets/setup/06-project-only.png)
-
-## Endpoint Discovery
-
-Endpoint testing is adapter-based. The first implementation supports:
-
-- OpenAI-compatible `GET /v1/models`;
-- Anthropic `GET /v1/models`;
-- Google Generative AI `GET /v1beta/models`;
-- Ollama `GET /api/tags` plus `POST /api/show` model details;
-- LM Studio `GET /api/v1/models`.
-
-Known response shapes determine the provider label, Pi API type, authentication
-header behavior, model identifiers, capabilities, and any limits the endpoint
-actually reports. A successful OpenAI-compatible list is not treated as proof
-that context or output limits are known.
-
-The metadata precedence is:
-
-1. explicit user override;
-2. native endpoint metadata;
-3. Pi's bundled model catalog;
-4. an optional cached models.dev record;
-5. Pi's runtime compatibility default.
-
-Unknown values remain unknown in the normal UI. Runtime defaults may still be
-materialized when registering a model with Pi, but the interface must label
-them as compatibility defaults instead of presenting them as provider facts.
-
-Connection testing only reads discovery endpoints and should not consume model
-quota. A future optional generation test must be a separate explicit action,
-warn that it may use quota, and never run automatically.
-
-`/swarm-pi-code-plugin:init --reconfigure` and
-`$swarm-pi-code-plugin-configure` always load the current `model.json`, so users
-edit rather than recreate their setup.
+The server is not a daemon, does not support CORS, and has no network-listen
+mode. If browser launch fails, it stays active and returns the one-time URL.
 
 ## Compatibility
 
-The existing non-interactive `init --set-model-priority[-file]` contract stays
-available for automation. It writes the canonical `model.json` and the legacy
-state mirror through the same validation path.
-
-`models --json` and worker execution load custom provider definitions before
-model discovery. Discovery and execution must use the same Pi environment so a
-provider visible in setup cannot disappear when a job starts.
+- Missing `providerProfiles` load as an empty list.
+- Legacy custom providers infer auth and wire protocol from existing fields.
+- Existing custom IDs are not rewritten.
+- Legacy jobs keep request version 1 or 2 semantics and never receive a new
+  provider snapshot retroactively.
+- `init --set-model-priority[-file]`, `models --json`, and `providers --json`
+  remain available for automation.
 
 ## Acceptance Criteria
 
-- First-run and reconfigure work without hand-editing JSON.
-- With no usable credentials and no custom connections, the connection list is
-  empty; there is no catalog of unfinished providers.
-- Pi-resolvable OAuth and documented environment credentials appear as detected
-  connections without exposing their secret value.
-- A custom endpoint can be tested and its models selected without entering a
-  provider ID, API type, context window, or maximum output value.
-- Discovery errors distinguish unreachable server, rejected authentication,
-  unsupported model-list endpoint, malformed response, and timeout states.
-- Model metadata displays its source, and a manual override survives refresh.
-- Reconfigure pre-populates provider, primary model, fallbacks, and custom
-  endpoint fields from `model.json`.
-- A submitted API key is usable but absent from every project artifact and
-  response body.
-- Built-in and custom providers can execute through the same model registry.
-- Desktop and mobile layouts expose the complete setup flow without overlap or
-  clipped controls.
-- Claude Code and Codex invoke the same implementation.
+- Every pinned Pi provider is explicitly classified by the Registry.
+- ChatGPT subscription and OpenAI API-key connections remain separate.
+- Browser responses, localStorage, state, model config, and jobs contain no
+  credential values.
+- Discovery never guesses among Chat, Responses, and Anthropic protocols.
+- `discovered` never implies `verified`.
+- Unsupported model-list endpoints permit manual IDs without claiming an API
+  verification.
+- Runtime and browser use the same provider definitions and policy validation.
+- Background jobs use the submitted non-secret snapshot and current credential.
+- Desktop and mobile setup remain usable without clipped or overlapping fields.

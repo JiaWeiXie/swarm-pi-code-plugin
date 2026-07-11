@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
+import { AuthStorage, type AuthCredential } from "@earendil-works/pi-coding-agent";
+
 import type {
   AdaptivePolicyConfig,
   AvailableModel,
@@ -19,10 +21,20 @@ import {
   listDefaultRoles,
   type RolePolicyOverrides,
 } from "../orchestration/roles.js";
-import { createPiEnvironment } from "../pi/environment.js";
+import { createPiEnvironment, customProviderHeaderVariable } from "../pi/environment.js";
 import { executeSession } from "../pi/execute.js";
 import { createWorkerSession } from "../pi/runtime.js";
 import { createModelCatalog, describeProviders, modelId, type PiModel } from "../pi/models.js";
+import {
+  getProviderDefinition,
+  listProviderDefinitions,
+  unknownProviderIds,
+  type ProviderAuthMethod,
+  type ProviderDefinition,
+  type WireProtocol,
+} from "../providers/capabilities.js";
+import { CredentialDraftVault, type CredentialDraftSummary } from "../providers/credentials.js";
+import { normalizeModelsEndpoint, normalizeProtocolRoot, stableCustomProviderId } from "../providers/endpoints.js";
 import { detectSandboxAvailability, type SandboxAvailability } from "../sandbox/availability.js";
 import { assessWorkspace } from "../git/worktree.js";
 import {
@@ -31,8 +43,11 @@ import {
   parseModelConfiguration,
   saveModelConfiguration,
   resolveModelConfigurationFile,
+  providerHeaderSecretRef,
+  providerSecretRef,
   type CustomProviderConfiguration,
   type ModelConfiguration,
+  type ProviderProfile,
 } from "../state/model-config.js";
 import {
   loadState,
@@ -64,9 +79,12 @@ export interface BrowserModel extends AvailableModel {
   };
 }
 
-export interface ProviderCatalogEntry {
-  id: string;
-  name: string;
+export interface ProviderCatalogEntry extends ProviderDefinition {
+  auth: {
+    configured: boolean;
+    source: string | null;
+    label: string | null;
+  };
 }
 
 export interface ConfigurationView {
@@ -91,13 +109,10 @@ export interface ConfigurationSubmission {
   primary: string | null;
   fallbacks: string[];
   customProviders: CustomProviderConfiguration[];
-  credential?: {
+  providerProfiles?: ProviderProfile[] | undefined;
+  credentialDrafts?: Array<{
     provider: string;
-    apiKey: string;
-  } | undefined;
-  credentials?: Array<{
-    provider: string;
-    apiKey: string;
+    draftId: string;
   }> | undefined;
   profile?: ProjectProfileSubmission | undefined;
   sandboxMode?: SandboxMode | undefined;
@@ -123,54 +138,336 @@ export interface ProjectSettingsSubmission {
 export interface ProviderConnectionPreview {
   provider: ProviderSummary;
   models: BrowserModel[];
+  profile: ProviderProfile;
+  credentialDraft?: CredentialDraftSummary | undefined;
 }
 
-export async function previewProviderConnection(
+export interface BuiltInProviderConnectionRequest {
+  provider: string;
+  authMethod: ProviderAuthMethod;
+  fields: Record<string, string>;
+  credentialDraftId?: string | undefined;
+}
+
+export async function configureBuiltInProvider(
   cwd: string,
-  credential: { provider: string; apiKey: string },
+  request: BuiltInProviderConnectionRequest,
+  credentialVault: CredentialDraftVault,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ProviderConnectionPreview> {
-  const normalized = normalizeCredential(credential);
-  if (!normalized) throw new Error("Choose a provider and enter its API key");
+  const definition = getProviderDefinition(request.provider);
+  if (!definition || definition.id === "custom" || !definition.configurable) {
+    throw new Error(`Unknown configurable provider: ${request.provider}`);
+  }
+  if (!definition.authMethods.includes(request.authMethod)) {
+    throw new Error(`${definition.name} does not support ${request.authMethod} authentication`);
+  }
+  const persistentAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  const { settings, secret } = normalizeProviderFields(definition, request.authMethod, request.fields);
+  let credentialDraft: CredentialDraftSummary | undefined;
+  if (request.authMethod === "api-key" && secret) {
+    credentialDraft = credentialVault.stageApiKey(definition.id, secret);
+  } else if (request.credentialDraftId) {
+    credentialDraft = credentialVault.summary(definition.id, request.credentialDraftId);
+    if (credentialDraft.authMethod !== request.authMethod) {
+      throw new Error("Credential draft does not match the selected authentication method");
+    }
+  }
+  if ((request.authMethod === "api-key" || request.authMethod === "oauth") && !credentialDraft && !persistentAuth.hasAuth(definition.id)) {
+    throw new Error(`${definition.name} requires a credential`);
+  }
+  const profile = providerProfile(definition, request.authMethod, settings, "configured");
   const state = await loadState(cwd);
   const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
-  const pi = createPiEnvironment(configuration, env);
-  pi.authStorage.setRuntimeApiKey(normalized.provider, normalized.apiKey);
+  const candidate = parseModelConfiguration({
+    ...configuration,
+    providerProfiles: upsertProviderProfile(configuration.providerProfiles, profile),
+  });
+  const stagingAuth = AuthStorage.inMemory(persistentAuth.getAll());
+  if (credentialDraft) stagingAuth.set(definition.id, credentialVault.resolve(definition.id, credentialDraft.id));
+  const pi = createPiEnvironment(candidate, env, { authStorage: stagingAuth });
   const all = pi.modelRegistry.getAll();
-  const providerModels = all.filter((model) => model.provider === normalized.provider);
-  if (providerModels.length === 0) throw new Error(`Unknown provider: ${normalized.provider}`);
+  const providerModels = all.filter((model) => model.provider === definition.id);
+  if (providerModels.length === 0) throw new Error(`Pi has no models for ${definition.name}`);
   const available = new Set(pi.modelRegistry.getAvailable().map(modelId));
-  const models = providerModels.map((model) => browserModel(model, available.has(modelId(model)), configuration));
+  const models = providerModels.map((model) => browserModel(model, available.has(modelId(model)), candidate));
+  const authStatus = pi.modelRegistry.getProviderAuthStatus(definition.id);
   return {
     provider: {
-      id: normalized.provider,
-      name: pi.modelRegistry.getProviderDisplayName(normalized.provider),
+      id: definition.id,
+      name: definition.name,
       ready: models.some((model) => model.available),
       modelCount: models.length,
       availableModelCount: models.filter((model) => model.available).length,
-      auth: { source: "runtime", label: "API key entered in this setup session" },
+      auth: {
+        source: credentialDraft ? "runtime" : authStatus.source ?? request.authMethod,
+        label: credentialDraft
+          ? request.authMethod === "oauth" ? "Subscription sign-in pending save" : "Credential pending save"
+          : authStatus.label ?? authMethodLabel(request.authMethod),
+      },
       selection: null,
       custom: false,
     },
     models,
+    profile,
+    ...(credentialDraft ? { credentialDraft } : {}),
   };
 }
 
 export async function discoverConfigurationEndpoint(
   cwd: string,
-  request: EndpointDiscoveryRequest,
+  request: Omit<EndpointDiscoveryRequest, "apiKey"> & {
+    provider: string;
+    credentialDraftId?: string | undefined;
+  },
+  credentialVault: CredentialDraftVault,
   env: NodeJS.ProcessEnv = process.env,
-): Promise<EndpointDiscoveryResult> {
+): Promise<EndpointDiscoveryResult & { profile: ProviderProfile }> {
   const state = await loadState(cwd);
   const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
   const catalog = createModelCatalog(configuration, env);
   const all = catalog.all?.() ?? catalog.available();
-  return discoverEndpoint(request, all, {
+  const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
+  const expectedProvider = stableCustomProviderId(root, request.protocol);
+  const existingProvider = configuration.customProviders.find((provider) =>
+    provider.id === request.provider &&
+    provider.wireProtocol === request.protocol &&
+    normalizeProtocolRoot(provider.baseUrl, request.protocol) === root,
+  );
+  if (request.provider !== expectedProvider && !existingProvider) {
+    throw new Error("Custom provider identifier does not match its endpoint policy");
+  }
+  const authMethod = request.authMethod ?? "none";
+  const credential = request.credentialDraftId
+    ? credentialVault.resolve(request.provider, request.credentialDraftId)
+    : AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).get(request.provider);
+  const apiKey = credentialSecret(credential, request.provider, authMethod, request.headerName);
+  if (authMethod !== "none" && !apiKey) throw new Error("Credential draft is missing or expired");
+  const result = await discoverEndpoint({
+    ...request,
+    ...(apiKey ? { apiKey } : {}),
+  }, all, {
     reservedProviderIds: [
       ...all.map((model) => model.provider),
       ...(request.reservedProviderIds ?? []),
     ],
   });
+  if (existingProvider && result.provider.id !== request.provider) {
+    result.provider.id = request.provider;
+    if (result.provider.auth && result.provider.auth.method !== "none") {
+      result.provider.auth.secretRef = providerSecretRef(request.provider);
+    }
+    for (const header of result.provider.headers ?? []) {
+      if (header.secretRef) header.secretRef = providerHeaderSecretRef(request.provider, header.name);
+    }
+  }
+  const now = new Date().toISOString();
+  const profile: ProviderProfile = {
+    id: result.provider.id,
+    provider: result.provider.id,
+    name: result.provider.name,
+    connectionKind: "custom",
+    auth: result.provider.auth ?? { method: authMethod },
+    protocol: request.protocol,
+    runtimeApi: result.provider.api,
+    readiness: "discovered",
+    settings: {},
+    headers: result.provider.headers ?? [],
+    ...(result.provider.modelsEndpoint ? { modelsEndpoint: result.provider.modelsEndpoint } : {}),
+    discoveredAt: now,
+  };
+  return { ...result, profile };
+}
+
+export async function stageCustomProviderCredential(
+  cwd: string,
+  credentialVault: CredentialDraftVault,
+  request: {
+    baseUrl: string;
+    protocol: WireProtocol;
+    authMethod: "api-key" | "none" | "custom-header";
+    secret?: string | undefined;
+    headerName?: "authorization" | "x-api-key" | "api-key" | undefined;
+    existingProvider?: string | undefined;
+  },
+): Promise<{ provider: string; credentialDraft?: CredentialDraftSummary | undefined }> {
+  const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
+  let provider = stableCustomProviderId(root, request.protocol);
+  if (request.existingProvider) {
+    const state = await loadState(cwd);
+    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const existing = configuration.customProviders.find((candidate) =>
+      candidate.id === request.existingProvider &&
+      candidate.wireProtocol === request.protocol &&
+      normalizeProtocolRoot(candidate.baseUrl, request.protocol) === root,
+    );
+    if (!existing) throw new Error("Existing custom provider does not match this endpoint and protocol");
+    provider = existing.id;
+  }
+  if (request.authMethod === "none") return { provider };
+  if (!request.secret) throw new Error("Credential is required");
+  const credentialDraft = request.authMethod === "custom-header"
+    ? credentialVault.stageCustomHeader(provider, requireSecretHeader(request.headerName), request.secret)
+    : credentialVault.stageApiKey(provider, request.secret);
+  return { provider, credentialDraft };
+}
+
+async function assertExistingCustomProvider(
+  cwd: string,
+  providerId: string,
+  root: string,
+  protocol: WireProtocol,
+): Promise<CustomProviderConfiguration> {
+  const state = await loadState(cwd);
+  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const existing = configuration.customProviders.find((candidate) =>
+    candidate.id === providerId &&
+    candidate.wireProtocol === protocol &&
+    normalizeProtocolRoot(candidate.baseUrl, protocol) === root,
+  );
+  if (!existing) throw new Error("Existing custom provider does not match this endpoint and protocol");
+  return existing;
+}
+
+export async function createManualCustomProvider(
+  cwd: string,
+  request: {
+    baseUrl: string;
+    protocol: WireProtocol;
+    modelsEndpoint?: string | undefined;
+    authMethod: "api-key" | "none" | "custom-header";
+    headerName?: "authorization" | "x-api-key" | "api-key" | undefined;
+    name?: string | undefined;
+    modelIds: string[];
+    existingProvider?: string | undefined;
+  },
+): Promise<EndpointDiscoveryResult & { profile: ProviderProfile }> {
+  const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
+  const provider = request.existingProvider
+    ? (await assertExistingCustomProvider(cwd, request.existingProvider, root, request.protocol)).id
+    : stableCustomProviderId(root, request.protocol);
+  const modelsEndpoint = request.modelsEndpoint
+    ? normalizeModelsEndpoint(request.modelsEndpoint, root)
+    : undefined;
+  const modelIds = [...new Set(request.modelIds.map((model) => model.trim()).filter(Boolean))];
+  if (modelIds.length === 0 || modelIds.length > 500) throw new Error("Enter between 1 and 500 model identifiers");
+  if (modelIds.some((model) => model.length > 512 || /[\u0000-\u001f\u007f]/.test(model))) {
+    throw new Error("Manual model identifiers contain unsupported characters");
+  }
+  const auth = {
+    method: request.authMethod,
+    ...(request.authMethod === "none" ? {} : { secretRef: providerSecretRef(provider) }),
+    ...(request.headerName ? { headerName: request.headerName } : {}),
+  } as const;
+  const headers = request.authMethod === "custom-header"
+    ? [{ name: requireSecretHeader(request.headerName), secretRef: providerHeaderSecretRef(provider, requireSecretHeader(request.headerName)) }]
+    : [];
+  const customProvider: CustomProviderConfiguration = {
+    id: provider,
+    name: request.name?.trim() || new URL(root).hostname,
+    baseUrl: root,
+    api: request.protocol === "openai-chat-completions"
+      ? "openai-completions"
+      : request.protocol === "openai-responses"
+        ? "openai-responses"
+        : "anthropic-messages",
+    wireProtocol: request.protocol,
+    authHeader: request.authMethod === "api-key" && request.protocol !== "anthropic-messages",
+    requiresApiKey: request.authMethod !== "none",
+    auth,
+    ...(modelsEndpoint ? { modelsEndpoint } : {}),
+    ...(headers.length ? { headers } : {}),
+    models: modelIds.map((id) => ({ id, name: id, reasoning: false, input: ["text"] })),
+  };
+  const profile: ProviderProfile = {
+    id: provider,
+    provider,
+    name: customProvider.name,
+    connectionKind: "custom",
+    auth,
+    protocol: request.protocol,
+    runtimeApi: customProvider.api,
+    readiness: "configured",
+    settings: {},
+    headers,
+    ...(modelsEndpoint ? { modelsEndpoint } : {}),
+  };
+  return { adapter: request.protocol, provider: customProvider, profile };
+}
+
+export async function verifyProviderConnection(
+  cwd: string,
+  request: {
+    model: string;
+    customProviders: CustomProviderConfiguration[];
+    providerProfiles: ProviderProfile[];
+    credentialDrafts?: Array<{ provider: string; draftId: string }> | undefined;
+  },
+  credentialVault: CredentialDraftVault,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ profile: ProviderProfile; verifiedAt: string; model: string }> {
+  const state = await loadState(cwd);
+  const current = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const candidate = parseModelConfiguration({
+    ...current,
+    customProviders: request.customProviders,
+    providerProfiles: request.providerProfiles,
+  });
+  assertProviderProfilePolicies(candidate);
+  const drafts = normalizeCredentialDrafts(request.credentialDrafts, credentialVault);
+  const persistentAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  const stagingAuth = AuthStorage.inMemory(persistentAuth.getAll());
+  for (const draft of drafts) stagingAuth.set(draft.provider, credentialVault.resolve(draft.provider, draft.draftId));
+  const pi = createPiEnvironment(candidate, env, { authStorage: stagingAuth });
+  const model = pi.modelRegistry.getAll().find((entry) => modelId(entry) === request.model);
+  if (!model) throw new Error(`Unknown model selection: ${request.model}`);
+  if (!pi.modelRegistry.getAvailable().some((entry) => modelId(entry) === request.model)) {
+    throw new Error(`Model is not authenticated: ${request.model}`);
+  }
+  const { session } = await createWorkerSession({
+    cwd,
+    mode: "readonly",
+    model,
+    modelConfiguration: candidate,
+    authStorage: pi.authStorage,
+    modelRegistry: pi.modelRegistry,
+    thinkingLevel: "minimal",
+  });
+  const result = await executeSession({
+    kind: "ask",
+    model: request.model,
+    prompt: "Reply with exactly READY.",
+    session,
+    timeoutMs: 15_000,
+  });
+  if (!result.success) throw new Error(`API verification failed: ${result.error ?? result.output}`);
+  const provider = request.model.slice(0, request.model.indexOf("/"));
+  const profile = candidate.providerProfiles.find((entry) => entry.provider === provider);
+  if (!profile) throw new Error(`Provider profile is missing for ${provider}`);
+  const verifiedAt = new Date().toISOString();
+  return {
+    profile: {
+      ...profile,
+      readiness: "verified",
+      verifiedAt,
+      verifiedModel: request.model,
+    },
+    verifiedAt,
+    model: request.model,
+  };
+}
+
+export async function signOutProvider(
+  cwd: string,
+  provider: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const state = await loadState(cwd);
+  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  if (!getProviderDefinition(provider) && !configuration.customProviders.some((candidate) => candidate.id === provider)) {
+    throw new Error(`Unknown provider: ${provider}`);
+  }
+  AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).logout(provider);
 }
 
 export async function discoverLocalConfigurationEndpoints(
@@ -202,16 +499,31 @@ export async function loadConfigurationView(
     available.has(modelId(model)) || selected.has(modelId(model)) || custom.has(model.provider),
   );
   const providerIds = [...new Set(all.map((model) => model.provider))];
+  const unknownProviders = unknownProviderIds(providerIds.filter((id) => !custom.has(id)));
+  const registryProblems = [
+    catalog.error?.(),
+    unknownProviders.length ? `Pinned Pi exposes providers missing from ProviderCapabilityRegistry: ${unknownProviders.join(", ")}` : undefined,
+  ].filter((entry): entry is string => Boolean(entry));
   return {
     configuration,
     profile: state.config.profile ?? null,
     directoryOptions: await projectDirectoryOptions(cwd, state.config.profile?.dirs ?? []),
     providers: describeProviders(catalog, configuration),
-    providerCatalog: providerIds
-      .map((id) => ({ id, name: catalog.displayName?.(id) ?? id }))
-      .sort((left, right) => left.name.localeCompare(right.name)),
+    providerCatalog: listProviderDefinitions().map((definition) => {
+      const status = definition.id === "custom"
+        ? { configured: false }
+        : catalog.authStatus?.(definition.id) ?? { configured: false };
+      return {
+        ...definition,
+        auth: {
+          configured: status.configured,
+          source: status.source ?? null,
+          label: status.label ?? null,
+        },
+      };
+    }),
     models: relevant.map((model) => browserModel(model, available.has(modelId(model)), configuration)),
-    registryError: catalog.error?.() ?? null,
+    registryError: registryProblems.length ? registryProblems.join("\n") : null,
     sandboxMode: state.config.sandboxMode ?? "strict",
     sandboxAvailability: detectSandboxAvailability(),
     rolePolicies: structuredClone(state.config.rolePolicies ?? {}),
@@ -261,6 +573,7 @@ export async function saveConfigurationSubmission(
   cwd: string,
   submission: ConfigurationSubmission,
   env: NodeJS.ProcessEnv = process.env,
+  options: { credentialVault?: CredentialDraftVault | undefined } = {},
 ): Promise<ConfigurationView> {
   const current = await loadConfigurationView(cwd, env);
   const profile = submission.profile
@@ -274,15 +587,22 @@ export async function saveConfigurationSubmission(
     primary: submission.primary,
     fallbacks: submission.fallbacks,
     customProviders: submission.customProviders,
+    providerProfiles: submission.providerProfiles ?? current.configuration.providerProfiles,
     updatedAt: null,
   });
   assertNoBuiltInProviderOverride(current, candidate);
+  assertProviderProfilePolicies(candidate);
 
-  const pi = createPiEnvironment(candidate, env);
-  const credentials = normalizeCredentials(submission);
-  for (const credential of credentials) {
-    pi.authStorage.setRuntimeApiKey(credential.provider, credential.apiKey);
-  }
+  const persistentAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  const credentialDrafts = normalizeCredentialDrafts(submission.credentialDrafts, options.credentialVault);
+  const credentials = credentialDrafts.map((draft) => ({
+    provider: draft.provider,
+    draftId: draft.draftId,
+    credential: options.credentialVault!.resolve(draft.provider, draft.draftId),
+  }));
+  const stagingAuth = AuthStorage.inMemory(persistentAuth.getAll());
+  for (const credential of credentials) stagingAuth.set(credential.provider, credential.credential);
+  const pi = createPiEnvironment(candidate, env, { authStorage: stagingAuth });
 
   const all = new Map(pi.modelRegistry.getAll().map((model) => [modelId(model), model]));
   const priority = modelPriority(candidate);
@@ -326,7 +646,19 @@ export async function saveConfigurationSubmission(
         timeoutMs: 15_000,
       });
       if (!smoke.success) throw new Error(`Model smoke test failed for ${reference}: ${smoke.error ?? smoke.output}`);
+      const provider = reference.slice(0, reference.indexOf("/"));
+      const profile = candidate.providerProfiles.find((entry) => entry.provider === provider);
+      if (profile) {
+        profile.readiness = "verified";
+        profile.verifiedAt = new Date().toISOString();
+        profile.verifiedModel = reference;
+      }
     }
+  }
+
+  for (const credential of credentials) {
+    const refreshed = stagingAuth.get(credential.provider);
+    if (refreshed) credential.credential = refreshed;
   }
 
   const modelFile = await resolveModelConfigurationFile(cwd);
@@ -334,12 +666,11 @@ export async function saveConfigurationSubmission(
   const fileSnapshots = await Promise.all([snapshotFile(modelFile), snapshotFile(stateFile)]);
   const credentialSnapshots = credentials.map((credential) => ({
     provider: credential.provider,
-    value: pi.authStorage.get(credential.provider),
+    value: persistentAuth.get(credential.provider),
   }));
   try {
     for (const credential of credentials) {
-      pi.authStorage.removeRuntimeApiKey(credential.provider);
-      pi.authStorage.set(credential.provider, { type: "api_key", key: credential.apiKey });
+      persistentAuth.set(credential.provider, credential.credential);
     }
     const saved = await saveModelConfiguration(cwd, candidate);
     await setModelPriority(cwd, modelPriority(saved));
@@ -349,8 +680,8 @@ export async function saveConfigurationSubmission(
     const rollbackErrors: string[] = [];
     for (const snapshot of credentialSnapshots) {
       try {
-        if (snapshot.value) pi.authStorage.set(snapshot.provider, snapshot.value);
-        else pi.authStorage.remove(snapshot.provider);
+        if (snapshot.value) persistentAuth.set(snapshot.provider, snapshot.value);
+        else persistentAuth.remove(snapshot.provider);
       } catch (rollbackError) {
         rollbackErrors.push(`credential:${snapshot.provider}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       }
@@ -368,6 +699,7 @@ export async function saveConfigurationSubmission(
     }
     throw error;
   }
+  for (const credential of credentials) options.credentialVault?.remove(credential.draftId);
   return loadConfigurationView(cwd, env);
 }
 
@@ -515,6 +847,124 @@ function assertExecutionModels(
   }
 }
 
+function normalizeProviderFields(
+  definition: ProviderDefinition,
+  authMethod: ProviderAuthMethod,
+  value: Record<string, string>,
+): { settings: Record<string, string>; secret?: string | undefined } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Provider fields must be an object");
+  }
+  const known = new Set(definition.fields.map((field) => field.id));
+  for (const key of Object.keys(value)) {
+    if (!known.has(key)) throw new Error(`Unknown field for ${definition.name}: ${key}`);
+  }
+  const settings: Record<string, string> = {};
+  let secret: string | undefined;
+  for (const field of definition.fields) {
+    const visible = (!field.visibleWhen || field.visibleWhen.field !== "authMethod" || field.visibleWhen.equals === authMethod) &&
+      (!field.secret || authMethod === "api-key");
+    if (!visible) continue;
+    const raw = value[field.id];
+    if (raw !== undefined && typeof raw !== "string") throw new Error(`${field.label} must be text`);
+    const normalized = raw?.trim() ?? "";
+    if (normalized.length > 16_384) throw new Error(`${field.label} is too long`);
+    if (field.required && !field.secret && !normalized) throw new Error(`${field.label} is required`);
+    if (!normalized) continue;
+    if (field.secret) secret = normalized;
+    else if (field.type === "url") settings[field.id] = normalizeProviderUrl(normalized, field.label, authMethod);
+    else settings[field.id] = normalized;
+  }
+  if (definition.id === "azure-openai-responses" && !settings.baseUrl && !settings.resourceName) {
+    throw new Error("Azure OpenAI requires an endpoint or resource name");
+  }
+  if (settings.deploymentNameMap && !settings.deploymentNameMap.split(",").every((entry) => /^[^=,\s]+=[^=,\s]+$/.test(entry.trim()))) {
+    throw new Error("Azure deployment mapping must use model=deployment entries separated by commas");
+  }
+  return { settings, ...(secret ? { secret } : {}) };
+}
+
+function normalizeProviderUrl(value: string, label: string, authMethod: ProviderAuthMethod): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${label} must be a valid URL`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`${label} must use HTTP or HTTPS`);
+  if (url.username || url.password) throw new Error(`${label} may not contain credentials`);
+  if (authMethod !== "none" && url.protocol === "http:" && !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+    throw new Error(`${label} must use HTTPS when credentials are configured`);
+  }
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+function providerProfile(
+  definition: ProviderDefinition,
+  authMethod: ProviderAuthMethod,
+  settings: Record<string, string>,
+  readiness: ProviderProfile["readiness"],
+): ProviderProfile {
+  const runtimeApi = definition.protocolMode === "managed-per-model"
+    ? "managed-per-model"
+    : definition.runtimeApis[0];
+  if (!runtimeApi) throw new Error(`Provider has no runtime API: ${definition.id}`);
+  return {
+    id: definition.id,
+    provider: definition.id,
+    name: definition.name,
+    connectionKind: "builtin",
+    auth: {
+      method: authMethod,
+      ...(authMethod === "api-key" || authMethod === "oauth" ? { secretRef: providerSecretRef(definition.id) } : {}),
+    },
+    ...(definition.wireProtocol ? { protocol: definition.wireProtocol } : {}),
+    runtimeApi,
+    readiness,
+    settings,
+    headers: [],
+  };
+}
+
+function upsertProviderProfile(
+  profiles: ProviderProfile[],
+  profile: ProviderProfile,
+): ProviderProfile[] {
+  return [...profiles.filter((candidate) => candidate.id !== profile.id), profile];
+}
+
+function authMethodLabel(method: ProviderAuthMethod): string {
+  switch (method) {
+    case "api-key": return "Stored API key";
+    case "oauth": return "Subscription OAuth";
+    case "ambient": return "Ambient cloud identity";
+    case "none": return "No credential";
+    case "custom-header": return "API key plus custom secret header";
+  }
+}
+
+function credentialSecret(
+  credential: AuthCredential | undefined,
+  provider: string,
+  authMethod: EndpointDiscoveryRequest["authMethod"],
+  headerName: EndpointDiscoveryRequest["headerName"],
+): string | undefined {
+  if (!credential || credential.type !== "api_key") return undefined;
+  if (authMethod !== "custom-header") return credential.key;
+  if (!headerName) return undefined;
+  return credential.env?.[customProviderHeaderVariable(provider, headerName)];
+}
+
+function requireSecretHeader(
+  value: EndpointDiscoveryRequest["headerName"],
+): "authorization" | "x-api-key" | "api-key" {
+  if (value !== "authorization" && value !== "x-api-key" && value !== "api-key") {
+    throw new Error("Choose a supported secret header");
+  }
+  return value;
+}
+
 async function projectDirectoryOptions(cwd: string, selected: string[]): Promise<string[]> {
   const root = await resolveWorkspaceRoot(cwd);
   const entries = await fs.readdir(root, { withFileTypes: true });
@@ -593,28 +1043,44 @@ function assertNoBuiltInProviderOverride(
   }
 }
 
-function normalizeCredential(
-  credential: ConfigurationSubmission["credential"],
-): ConfigurationSubmission["credential"] {
-  if (!credential) return undefined;
-  if (typeof credential.provider !== "string" || typeof credential.apiKey !== "string") {
-    throw new Error("Credential must contain a provider and API key string");
+function assertProviderProfilePolicies(configuration: ModelConfiguration): void {
+  for (const profile of configuration.providerProfiles) {
+    if (profile.connectionKind === "builtin") {
+      const definition = getProviderDefinition(profile.provider);
+      if (!definition || definition.id === "custom") throw new Error(`Unknown built-in provider profile: ${profile.provider}`);
+      profile.settings = normalizeProviderFields(definition, profile.auth.method, profile.settings).settings;
+      continue;
+    }
+    const provider = configuration.customProviders.find((candidate) => candidate.id === profile.provider);
+    if (!provider) throw new Error(`Missing custom provider for profile: ${profile.provider}`);
+    if (profile.protocol !== provider.wireProtocol || profile.runtimeApi !== provider.api) {
+      throw new Error(`Custom provider profile does not match runtime adapter: ${profile.provider}`);
+    }
+    if (profile.auth.method !== provider.auth?.method) {
+      throw new Error(`Custom provider profile does not match authentication policy: ${profile.provider}`);
+    }
   }
-  const provider = credential.provider.trim();
-  const apiKey = credential.apiKey.trim();
-  if (!provider || !apiKey) return undefined;
-  if (apiKey.length > 16_384) throw new Error("API key is too long");
-  return { provider, apiKey };
 }
 
-function normalizeCredentials(submission: ConfigurationSubmission): Array<{ provider: string; apiKey: string }> {
-  const raw = [
-    ...(submission.credentials ?? []),
-    ...(submission.credential ? [submission.credential] : []),
-  ];
-  const normalized = raw
-    .map((credential) => normalizeCredential(credential))
-    .filter((credential): credential is { provider: string; apiKey: string } => Boolean(credential));
-  const byProvider = new Map(normalized.map((credential) => [credential.provider, credential]));
+function normalizeCredentialDrafts(
+  value: ConfigurationSubmission["credentialDrafts"],
+  vault: CredentialDraftVault | undefined,
+): Array<{ provider: string; draftId: string }> {
+  if (value === undefined) return [];
+  if (!vault) throw new Error("Credential drafts are unavailable for this configuration session");
+  if (!Array.isArray(value) || value.length > 64) throw new Error("Credential drafts must be an array");
+  const byProvider = new Map<string, { provider: string; draftId: string }>();
+  for (const entry of value) {
+    if (!entry || typeof entry.provider !== "string" || typeof entry.draftId !== "string") {
+      throw new Error("Credential draft references require provider and draftId strings");
+    }
+    const provider = entry.provider.trim();
+    const draftId = entry.draftId.trim();
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(provider) || !/^[0-9a-f-]{36}$/.test(draftId)) {
+      throw new Error("Credential draft reference is invalid");
+    }
+    vault.summary(provider, draftId);
+    byProvider.set(provider, { provider, draftId });
+  }
   return [...byProvider.values()];
 }

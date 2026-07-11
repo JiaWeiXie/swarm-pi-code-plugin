@@ -57,6 +57,7 @@ import {
   JOB_HEARTBEAT_INTERVAL_MS,
   listJobs,
   markJobRunning,
+  modelConfigurationSnapshotHash,
   readJobPrompt,
   readJobRequest,
   updateJobExecutionWorkspace,
@@ -78,6 +79,7 @@ import {
   clearModelConfiguration,
   loadModelConfiguration,
   modelPriority,
+  parseModelConfiguration,
   saveModelPriority,
   type ModelConfiguration,
 } from "../state/model-config.js";
@@ -408,6 +410,7 @@ export async function runCommand(
     ...(target ? { target } : {}),
     ...(scaffoldSpec ? { scaffoldSpec } : {}),
     ...(adoptExisting ? { adoptExisting: true } : {}),
+    modelConfiguration,
   });
   let executionCwd = cwd;
   try {
@@ -599,7 +602,17 @@ async function runBackgroundJob(
     const snapshot = await getJob(cwd, request.id);
     if (snapshot.job.cancelRequestedAt) controller.abort();
     const state = await loadState(cwd);
-    const modelConfiguration = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const modelConfiguration = request.modelConfiguration
+      ? parseModelConfiguration(request.modelConfiguration)
+      : await loadModelConfiguration(cwd, state.config.modelPriority);
+    if (request.requestVersion === 3) {
+      if (!request.modelConfiguration || !request.providerSnapshotHash) {
+        throw new Error("Background job is missing its provider configuration snapshot");
+      }
+      if (modelConfigurationSnapshotHash(modelConfiguration) !== request.providerSnapshotHash) {
+        throw new Error("Background job provider configuration snapshot failed integrity validation");
+      }
+    }
     const activeDependencies = dependencies ?? defaultDependencies(modelConfiguration);
     const candidates = orderModels(activeDependencies.catalog.available(), {
       requested: request.model,

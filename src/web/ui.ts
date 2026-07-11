@@ -229,26 +229,82 @@ export function renderConfigurationPage(
         <button id="close-dialog" class="icon-button" type="button" aria-label="Close" title="Close">x</button>
       </div>
       <div class="mode-tabs" role="tablist" aria-label="Connection type">
-        <button id="cloud-tab" type="button" role="tab">Cloud API key</button>
-        <button id="custom-tab" type="button" role="tab">Custom or local endpoint</button>
+        <button id="cloud-tab" type="button" role="tab">Provider catalog</button>
+        <button id="custom-tab" type="button" role="tab">Custom or local</button>
       </div>
 
       <div id="cloud-panel" class="dialog-panel">
+        <label for="provider-search">Find a service</label>
+        <input id="provider-search" type="search" placeholder="Search providers">
         <label for="cloud-provider">AI service</label>
         <select id="cloud-provider"></select>
-        <label for="cloud-key">API key</label>
-        <input id="cloud-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Enter API key">
-        <p class="field-hint">Existing Pi subscription sign-ins and environment credentials are detected automatically.</p>
+        <div id="provider-protocol" class="protocol-summary"></div>
+        <label for="provider-auth-method">Authentication</label>
+        <select id="provider-auth-method"></select>
+        <div id="provider-fields" class="provider-fields"></div>
+        <div id="oauth-panel" class="oauth-panel" hidden>
+          <label for="oauth-login-method">Sign-in method</label>
+          <select id="oauth-login-method">
+            <option value="browser">Browser</option>
+            <option value="device_code">Device code</option>
+          </select>
+          <button id="start-oauth" class="primary-button wide-button" type="button">Sign in</button>
+          <div id="oauth-status" class="oauth-status" role="status" aria-live="polite"></div>
+          <div id="oauth-challenge" class="oauth-challenge" hidden></div>
+        </div>
         <button id="connect-cloud" class="primary-button wide-button" type="button">Connect</button>
       </div>
 
       <div id="custom-panel" class="dialog-panel" hidden>
+        <label for="endpoint-protocol">API protocol</label>
+        <select id="endpoint-protocol">
+          <option value="openai-chat-completions">OpenAI Chat Completions</option>
+          <option value="openai-responses">OpenAI Responses</option>
+          <option value="anthropic-messages">Anthropic Messages</option>
+        </select>
         <label for="endpoint-url">Server URL</label>
         <input id="endpoint-url" type="url" spellcheck="false" placeholder="http://127.0.0.1:11434">
-        <label for="endpoint-key">API key <span class="optional">optional</span></label>
-        <input id="endpoint-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Leave blank for local servers">
-        <button id="test-endpoint" class="primary-button wide-button" type="button">Test and find models</button>
+        <label for="endpoint-auth-method">Authentication</label>
+        <select id="endpoint-auth-method">
+          <option value="api-key">API key</option>
+          <option value="none">No authentication</option>
+          <option value="custom-header">API key + secret header</option>
+        </select>
+        <div id="endpoint-header-wrap" hidden>
+          <label for="endpoint-header">Secret header</label>
+          <select id="endpoint-header">
+            <option value="authorization">Authorization</option>
+            <option value="x-api-key">X-API-Key</option>
+            <option value="api-key">Api-Key</option>
+          </select>
+        </div>
+        <div id="endpoint-key-wrap">
+          <label for="endpoint-key">Credential</label>
+          <input id="endpoint-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Enter a credential">
+        </div>
+        <details class="advanced">
+          <summary>Advanced endpoint settings</summary>
+          <div class="advanced-body">
+            <label for="models-endpoint">Models endpoint <span class="optional">optional</span></label>
+            <input id="models-endpoint" type="url" spellcheck="false" placeholder="Uses the protocol default">
+            <label for="custom-http-referer">HTTP-Referer <span class="optional">optional</span></label>
+            <input id="custom-http-referer" type="url" spellcheck="false">
+            <label for="custom-app-title">X-Title <span class="optional">optional</span></label>
+            <input id="custom-app-title">
+            <label for="custom-anthropic-beta">Anthropic-Beta <span class="optional">optional</span></label>
+            <input id="custom-anthropic-beta">
+          </div>
+        </details>
+        <button id="test-endpoint" class="primary-button wide-button" type="button">Load models</button>
         <div id="discovery-result" class="discovery-result" hidden></div>
+        <details id="manual-models" class="advanced">
+          <summary>Enter model IDs manually</summary>
+          <div class="advanced-body">
+            <label for="manual-model-ids">Model IDs</label>
+            <textarea id="manual-model-ids" rows="4" placeholder="One model ID per line"></textarea>
+            <button id="use-manual-models" class="secondary-button wide-button" type="button">Use manual models</button>
+          </div>
+        </details>
         <details id="advanced-connection" class="advanced" hidden>
           <summary>Advanced connection and model settings</summary>
           <div class="advanced-body">
@@ -256,7 +312,7 @@ export function renderConfigurationPage(
             <input id="endpoint-name">
             <div class="advanced-grid">
               <div><label for="endpoint-canonical-url">API base URL</label><input id="endpoint-canonical-url" type="url" spellcheck="false"></div>
-              <div><label for="endpoint-api">API protocol</label><select id="endpoint-api"><option value="openai-completions">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic-messages">Anthropic Messages</option><option value="google-generative-ai">Google Generative AI</option></select></div>
+              <div><label for="endpoint-api">Runtime adapter</label><input id="endpoint-api" readonly></div>
             </div>
             <div id="advanced-models" class="advanced-models"></div>
           </div>
@@ -348,7 +404,7 @@ h2 { letter-spacing: 0; }
 .connection-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: 12px; font-weight: 650; }
 .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
-.row-actions { display: flex; gap: 6px; }
+.row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .row-actions button { min-height: 34px; padding: 0 11px; }
 .section-actions { display: flex; align-items: center; gap: 12px; padding-top: 18px; }
 .inline-status { color: var(--muted); font-size: 13px; }
@@ -420,6 +476,18 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 .inline-check input { width: auto; }
 .optional { color: var(--muted); font-weight: 500; }
 .wide-button { width: 100%; margin-top: 18px; }
+.protocol-summary { display: flex; align-items: center; min-height: 38px; margin-top: 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; color: #31504b; background: #f7faf9; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.provider-fields { display: grid; gap: 14px; margin-top: 16px; }
+.provider-field { display: grid; gap: 6px; }
+.provider-field label { margin-top: 0 !important; }
+.oauth-panel { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.oauth-status { margin-top: 12px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.oauth-challenge { display: grid; gap: 9px; margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: #f8faf9; }
+.oauth-challenge a { color: var(--teal-dark); overflow-wrap: anywhere; }
+.readiness-configured { color: #6b551a; background: #fff8e8; }
+.readiness-discovered { color: #31504b; background: #eef6f4; }
+.readiness-verified { color: #215842; background: var(--green-soft); }
+.readiness-blocked { color: #913a31; background: #fff3f1; }
 .discovery-result { margin-top: 16px; padding: 12px; border: 1px solid #a9d2c0; border-radius: 6px; color: #215842; background: var(--green-soft); }
 .discovery-result strong { display: block; }
 .advanced { margin-top: 14px; padding-top: 2px; }
@@ -442,6 +510,7 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
   .screen-heading .primary-button { width: 100%; }
   .connection-row { grid-template-columns: 40px minmax(0, 1fr); }
   .status-pill, .row-actions { grid-column: 2; }
+  .row-actions { justify-content: flex-start; }
   .form-band, .review-section { grid-template-columns: 1fr; gap: 14px; }
   .check-list { grid-template-columns: 1fr; }
   .actionbar { padding: 12px 14px; flex-wrap: wrap; }
@@ -490,12 +559,17 @@ const clientScript = String.raw`
     providerCatalog: boot.providerCatalog,
     models: structuredClone(boot.models),
     customProviders: structuredClone(boot.configuration.customProviders),
-    credentials: {},
+    providerProfiles: structuredClone(boot.configuration.providerProfiles || []),
+    credentialDrafts: {},
+    providerFieldValues: {},
     primary: boot.configuration.primary || "",
     fallbacks: [...boot.configuration.fallbacks],
     customDraft: null,
+    customProfileDraft: null,
     editingCustomIndex: -1,
     dialogMode: "cloud",
+    oauthSession: null,
+    oauthOpenedUrl: "",
     closed: false,
     sandboxMode: ["strict","adaptive","lenient"].includes(boot.sandboxMode) ? boot.sandboxMode : "strict",
     rolePolicies: structuredClone(boot.rolePolicies || {}),
@@ -509,6 +583,9 @@ const clientScript = String.raw`
       customTasks: savedTasks.filter(task => !canonicalTask(task)),
     },
   };
+  state.providerProfiles.forEach(profile => {
+    state.providerFieldValues[profile.provider] = structuredClone(profile.settings || {});
+  });
   const draftKey = "swarm-pi-setup-draft:" + (boot.workspaceId || "default");
   try {
     const draft = JSON.parse(localStorage.getItem(draftKey) || "null");
@@ -540,6 +617,8 @@ const clientScript = String.raw`
   }
   function connection(id) { return state.connections.find(item => item.id === id); }
   function customProvider(id) { return state.customProviders.find(item => item.id === id); }
+  function providerProfile(id) { return state.providerProfiles.find(item => item.provider === id); }
+  function providerDefinition(id) { return state.providerCatalog.find(item => item.id === id); }
   function endpointKey(provider) {
     try { return new URL(provider.baseUrl).toString().replace(/\/$/, "") + "|" + provider.api; }
     catch { return String(provider.baseUrl).replace(/\/$/, "") + "|" + provider.api; }
@@ -552,7 +631,7 @@ const clientScript = String.raw`
   }
   function usableModels() {
     const ready = new Set(state.connections.filter(item => item.ready).map(item => item.id));
-    return state.models.filter(item => item.available || ready.has(item.provider) || state.credentials[item.provider]);
+    return state.models.filter(item => item.available || ready.has(item.provider) || state.credentialDrafts[item.provider]);
   }
   function normalizeSelection() {
     const usable = usableModels();
@@ -573,20 +652,9 @@ const clientScript = String.raw`
       else state.models.push(model);
     }
   }
-  function availableProviderId(base) {
-    const used = new Set([
-      ...state.providerCatalog.map(item => item.id),
-      ...state.connections.map(item => item.id),
-      ...state.customProviders.map(item => item.id),
-    ]);
-    if (!used.has(base)) return base;
-    let number = 2;
-    while (true) {
-      const suffix = "-" + number;
-      const candidate = base.slice(0, 64 - suffix.length) + suffix;
-      if (!used.has(candidate)) return candidate;
-      number++;
-    }
+  function upsertProviderProfile(profile) {
+    state.providerProfiles = state.providerProfiles.filter(item => item.id !== profile.id);
+    state.providerProfiles.push(profile);
   }
   function browserModels(provider) {
     return provider.models.map(item => ({
@@ -624,19 +692,33 @@ const clientScript = String.raw`
     $("connection-actions").hidden = connections.length === 0;
     $("open-connection").hidden = connections.length === 0;
     for (const item of connections) {
+      const profile = providerProfile(item.id);
+      const customAuth = item.custom ? state.customProviders.find(provider => provider.id === item.id)?.auth?.method : undefined;
+      const authMethod = profile?.auth?.method || customAuth;
+      const readiness = profile?.readiness || (item.ready ? "verified" : "blocked");
       const row = document.createElement("div");
       row.className = "connection-row";
       row.innerHTML = '<div class="connection-mark"></div><div><span class="connection-name"></span><span class="connection-meta"></span></div><span class="status-pill"></span><div class="row-actions"></div>';
       row.querySelector(".connection-mark").textContent = initials(item.name);
       row.querySelector(".connection-name").textContent = item.name;
-      row.querySelector(".connection-meta").textContent = item.availableModelCount + " models available" + (item.auth?.label ? " - " + item.auth.label : "");
-      row.querySelector(".status-pill").textContent = item.ready ? "Ready" : "Needs attention";
+      const protocol = profile?.protocol || profile?.runtimeApi || "Pi managed";
+      row.querySelector(".connection-meta").textContent = item.availableModelCount + " models available - " + protocolLabel(protocol) + (item.auth?.label ? " - " + item.auth.label : "");
+      row.querySelector(".status-pill").textContent = readiness === "verified" ? "Verified" : readiness === "discovered" ? "Models loaded" : readiness === "configured" ? "Configured" : "Needs attention";
+      row.querySelector(".status-pill").classList.add("readiness-" + readiness);
       const actions = row.querySelector(".row-actions");
-      if (item.custom) {
-        const edit = document.createElement("button"); edit.type = "button"; edit.className = "secondary-button"; edit.textContent = "Edit"; edit.addEventListener("click", () => openCustomEditor(item.id));
-        const remove = document.createElement("button"); remove.type = "button"; remove.className = "danger-button"; remove.textContent = "Remove"; remove.addEventListener("click", () => removeCustom(item.id));
-        actions.append(edit, remove);
+      const edit = document.createElement("button"); edit.type = "button"; edit.className = "secondary-button"; edit.textContent = "Edit"; edit.addEventListener("click", () => item.custom ? openCustomEditor(item.id) : openBuiltInEditor(item.id));
+      actions.append(edit);
+      if (authMethod === "api-key" || authMethod === "oauth" || authMethod === "custom-header") {
+        const replace = document.createElement("button"); replace.type = "button"; replace.className = "secondary-button"; replace.textContent = "Replace credential"; replace.addEventListener("click", () => replaceConnectionCredential(item.id, item.custom, authMethod)); actions.append(replace);
       }
+      if (state.models.some(model => model.provider === item.id)) {
+        const verify = document.createElement("button"); verify.type = "button"; verify.className = "secondary-button"; verify.textContent = "Verify API"; verify.addEventListener("click", () => verifyConnection(item.id)); actions.append(verify);
+      }
+      if (authMethod === "api-key" || authMethod === "oauth" || authMethod === "custom-header") {
+        const signout = document.createElement("button"); signout.type = "button"; signout.className = "secondary-button"; signout.textContent = "Sign out"; signout.addEventListener("click", () => signOutConnection(item.id)); actions.append(signout);
+      }
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "danger-button"; remove.textContent = "Remove"; remove.addEventListener("click", () => removeConnection(item.id));
+      actions.append(remove);
       list.append(row);
     }
   }
@@ -861,7 +943,7 @@ const clientScript = String.raw`
     if (state.fallbacks.length === 0) fallbacks.textContent = "No fallback models";
     state.fallbacks.forEach((id, index) => { const item = modelById(id), row = document.createElement("div"); row.className = "review-item"; row.textContent = (index + 1) + ". " + (item ? providerName(item.provider) + " / " + modelLabel(item) : id); fallbacks.append(row); });
     const connections = $("review-connections"); connections.replaceChildren();
-    state.connections.filter(item => item.ready).forEach(item => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = item.name + " - " + item.availableModelCount + " models"; connections.append(row); });
+    state.connections.forEach(item => { const profile = providerProfile(item.id), definition = providerDefinition(item.id), row = document.createElement("div"); row.className = "review-item"; row.textContent = item.name + " - " + protocolLabel(profile?.protocol || profile?.runtimeApi) + " - " + authLabel(profile?.auth?.method) + " - " + modelSourceLabel(definition?.modelSource || (item.custom ? "manual" : "pi-catalog")) + " - " + (profile?.readiness || (item.ready ? "verified" : "blocked")); connections.append(row); });
     $("review-title").textContent = setupMode === "project" ? "Review project setup" : "Review setup";
     document.querySelectorAll(".full-only").forEach(element => element.hidden = setupMode === "project");
     const profile = projectProfile(); $("review-goal").textContent = profile.goal;
@@ -894,80 +976,225 @@ const clientScript = String.raw`
   }
   function setPhase(phase) { if (setupMode === "full" && phase > 1 && usableModels().length === 0) return; state.phase = phase; render(); window.scrollTo({top: 0, behavior: "smooth"}); }
 
-  function populateProviderCatalog() {
-    const select = $("cloud-provider"), preferred = ["openai", "anthropic", "google", "openrouter", "deepseek", "mistral", "groq", "xai"];
+  function protocolLabel(value) {
+    return ({
+      "openai-chat-completions":"OpenAI Chat Completions",
+      "openai-completions":"OpenAI Chat Completions",
+      "openai-responses":"OpenAI Responses",
+      "openai-codex-responses":"OpenAI Responses (ChatGPT subscription)",
+      "anthropic-messages":"Anthropic Messages",
+      "google-generative-ai":"Google Generative AI",
+      "azure-openai-responses":"Azure OpenAI Responses",
+      "bedrock-converse-stream":"Amazon Bedrock Converse",
+      "google-vertex":"Google Vertex AI",
+      "mistral-conversations":"Mistral Conversations",
+      "managed-per-model":"Managed per model",
+    })[value] || value || "Pi managed adapter";
+  }
+  function authLabel(value) {
+    return ({"api-key":"API key","oauth":"Subscription OAuth","ambient":"Ambient cloud identity","none":"No authentication","custom-header":"API key plus secret header"})[value] || value || "Pi credential";
+  }
+  function modelSourceLabel(value) {
+    return ({"pi-catalog":"Pi model catalog","openai-models":"OpenAI model discovery","anthropic-models":"Anthropic model discovery","google-models":"Google model discovery","manual":"Manual models"})[value] || value || "Pi model catalog";
+  }
+  function populateProviderCatalog(filter) {
+    const select = $("cloud-provider"), current = select.value, query = String(filter || "").trim().toLowerCase();
+    const categories = [{id:"common",label:"Common"},{id:"subscription",label:"Subscription"},{id:"cloud",label:"Cloud"},{id:"local",label:"Local"}];
     select.replaceChildren();
-    const common = document.createElement("optgroup"); common.label = "Common services";
-    preferred.map(id => state.providerCatalog.find(item => item.id === id)).filter(Boolean).forEach(item => common.append(new Option(item.name, item.id)));
-    const more = document.createElement("optgroup"); more.label = "More services";
-    state.providerCatalog.filter(item => !preferred.includes(item.id)).forEach(item => more.append(new Option(item.name, item.id)));
-    select.append(common, more);
+    categories.forEach(category => {
+      const items = state.providerCatalog.filter(item => item.id !== "custom" && item.category === category.id && (!query || item.name.toLowerCase().includes(query) || item.id.includes(query)));
+      if (!items.length) return;
+      const group = document.createElement("optgroup"); group.label = category.label;
+      items.sort((left,right) => left.name.localeCompare(right.name)).forEach(item => group.append(new Option(item.name, item.id)));
+      select.append(group);
+    });
+    if (select.options.length === 0) {
+      const empty = new Option("No matching services", ""); empty.disabled = true; empty.selected = true; select.add(empty);
+    }
+    if (current && [...select.options].some(option => option.value === current)) select.value = current;
+    renderProviderForm();
   }
   function openDialog(mode) {
-    state.dialogMode = mode; state.customDraft = null; state.editingCustomIndex = -1;
-    $("dialog-title").textContent = "Add a connection"; $("cloud-key").value = ""; $("endpoint-key").value = ""; $("endpoint-url").value = ""; $("dialog-status").textContent = "";
+    state.dialogMode = mode; state.customDraft = null; state.customProfileDraft = null; state.editingCustomIndex = -1; state.customPendingProvider = null; state.oauthSession = null; state.oauthOpenedUrl = "";
+    $("dialog-title").textContent = "Add a connection"; $("provider-search").value = ""; $("endpoint-key").value = ""; $("endpoint-url").value = ""; $("models-endpoint").value = ""; $("custom-http-referer").value = ""; $("custom-app-title").value = ""; $("custom-anthropic-beta").value = ""; $("manual-model-ids").value = ""; $("dialog-status").textContent = "";
     renderDialog(); $("connection-dialog").showModal();
+  }
+  function openBuiltInEditor(id) {
+    state.dialogMode = "cloud"; state.oauthSession = null; state.oauthOpenedUrl = "";
+    $("dialog-title").textContent = "Edit connection"; $("provider-search").value = "";
+    populateProviderCatalog(""); $("cloud-provider").value = id; renderProviderForm();
+    $("dialog-status").textContent = ""; $("connection-dialog").showModal();
   }
   function openCustomEditor(id) {
     const index = state.customProviders.findIndex(item => item.id === id); if (index < 0) return;
-    state.dialogMode = "custom"; state.editingCustomIndex = index; state.customDraft = structuredClone(state.customProviders[index]);
-    $("dialog-title").textContent = "Edit connection"; $("endpoint-url").value = state.customDraft.baseUrl; $("endpoint-key").value = ""; $("dialog-status").textContent = "";
+    state.dialogMode = "custom"; state.editingCustomIndex = index; state.customDraft = structuredClone(state.customProviders[index]); state.customProfileDraft = structuredClone(providerProfile(id)); state.customPendingProvider = id;
+    const auth = state.customDraft.auth || {method:state.customDraft.requiresApiKey?"api-key":"none"};
+    const literalHeaders = Object.fromEntries((state.customDraft.headers || []).filter(header => header.value).map(header => [header.name,header.value]));
+    $("dialog-title").textContent = "Edit connection"; $("endpoint-url").value = state.customDraft.baseUrl; $("endpoint-protocol").value = state.customDraft.wireProtocol || "openai-chat-completions"; $("endpoint-auth-method").value = auth.method; $("endpoint-header").value = auth.headerName || "authorization"; $("endpoint-key").value = ""; $("models-endpoint").value = state.customDraft.modelsEndpoint || ""; $("custom-http-referer").value = literalHeaders["http-referer"] || ""; $("custom-app-title").value = literalHeaders["x-title"] || ""; $("custom-anthropic-beta").value = literalHeaders["anthropic-beta"] || ""; $("dialog-status").textContent = "";
     renderDialog(); $("connection-dialog").showModal();
+  }
+  function replaceConnectionCredential(id, custom, authMethod) {
+    if (custom) openCustomEditor(id); else openBuiltInEditor(id);
+    const target = custom ? $("endpoint-key") : authMethod === "oauth" ? $("start-oauth") : $("provider-field-apiKey");
+    if (target) target.focus();
   }
   function renderDialog() {
     const cloud = state.dialogMode === "cloud";
     $("cloud-panel").hidden = !cloud; $("custom-panel").hidden = cloud; $("cloud-tab").className = cloud ? "active" : ""; $("custom-tab").className = cloud ? "" : "active";
     $("cloud-tab").setAttribute("aria-selected", String(cloud)); $("custom-tab").setAttribute("aria-selected", String(!cloud));
-    renderCustomDraft();
+    if (cloud) renderProviderForm(); else { renderCustomAuth(); renderCustomDraft(); }
+  }
+  function renderProviderForm() {
+    const definition = providerDefinition($("cloud-provider").value);
+    if (!definition) {
+      $("provider-protocol").textContent = "No matching services."; $("provider-auth-method").replaceChildren(); $("provider-fields").replaceChildren(); $("oauth-panel").hidden = true; $("connect-cloud").disabled = true; return;
+    }
+    if ($("cloud-provider").value !== definition.id) $("cloud-provider").value = definition.id;
+    const saved = providerProfile(definition.id), auth = $("provider-auth-method"), previous = auth.value;
+    auth.replaceChildren(); definition.authMethods.forEach(method => auth.add(new Option(({"api-key":"API key","oauth":"Subscription OAuth","ambient":"Ambient cloud identity","none":"No authentication"})[method] || method, method)));
+    auth.value = definition.authMethods.includes(previous) ? previous : saved?.auth?.method || definition.defaultAuthMethod;
+    $("provider-protocol").textContent = "Protocol: " + protocolLabel(definition.wireProtocol || (definition.protocolMode === "managed-per-model" ? "managed-per-model" : definition.runtimeApis[0])) + (definition.auth?.configured ? " - Identity detected" + (definition.auth.label ? ": " + definition.auth.label : "") : "");
+    const target = $("provider-fields"); target.replaceChildren(); (definition.notes || []).forEach(message => { const note = document.createElement("div"); note.className = "notice warning"; note.textContent = message; target.append(note); }); const advanced = document.createElement("details"), advancedSummary = document.createElement("summary"), advancedBody = document.createElement("div"); advanced.className = "advanced"; advancedSummary.textContent = "Advanced provider settings"; advancedBody.className = "advanced-body"; advanced.append(advancedSummary,advancedBody);
+    const values = state.providerFieldValues[definition.id] || saved?.settings || {};
+    definition.fields.forEach(field => {
+      const visible = (!field.visibleWhen || field.visibleWhen.field !== "authMethod" || field.visibleWhen.equals === auth.value) && (!field.secret || auth.value === "api-key");
+      if (!visible) return;
+      const wrap = document.createElement("div"), label = document.createElement("label"), input = field.type === "select" ? document.createElement("select") : document.createElement("input");
+      wrap.className = "provider-field"; input.id = "provider-field-" + field.id; label.htmlFor = input.id; label.textContent = field.label + (field.required ? "" : " (optional)");
+      if (field.type === "select") (field.options || []).forEach(option => input.add(new Option(option.label, option.value)));
+      else { input.type = field.type === "secret" ? "password" : field.type === "url" ? "url" : "text"; input.placeholder = field.secret && (definition.auth?.configured || saved) ? "Leave blank to keep the saved credential" : field.placeholder || ""; if (field.secret) { input.autocomplete = "new-password"; input.spellcheck = false; } }
+      if (!field.secret) input.value = values[field.id] || "";
+      wrap.append(label, input); if (field.help) { const help = document.createElement("span"); help.className = "field-hint"; help.textContent = field.help; wrap.append(help); } (field.advanced ? advancedBody : target).append(wrap);
+    });
+    if (advancedBody.children.length) target.append(advanced);
+    const oauth = auth.value === "oauth"; $("oauth-panel").hidden = !oauth; $("start-oauth").textContent = definition.id === "openai-codex" ? "Sign in with ChatGPT" : "Sign in";
+    renderOAuthSession();
+  }
+  function syncProviderConnectButton() {
+    const definition = providerDefinition($("cloud-provider").value), authMethod = $("provider-auth-method").value, button = $("connect-cloud");
+    if (!definition) { button.disabled = true; return; }
+    const oauth = authMethod === "oauth", credentialReady = Boolean(state.credentialDrafts[definition.id] || definition.auth?.configured);
+    button.textContent = oauth ? "Use signed-in account" : "Connect";
+    button.disabled = oauth && !credentialReady;
+    button.title = oauth && !credentialReady ? "Sign in before using this connection" : "";
+  }
+  function readProviderFields() {
+    const definition = providerDefinition($("cloud-provider").value), values = {};
+    (definition?.fields || []).forEach(field => { const input = $("provider-field-" + field.id); if (input) values[field.id] = input.value; });
+    return values;
+  }
+  async function connectBuiltIn(closeOnSuccess) {
+    const provider = $("cloud-provider").value, authMethod = $("provider-auth-method").value, status = $("dialog-status");
+    const draft = state.credentialDrafts[provider]; status.className = "dialog-status"; status.textContent = "Preparing connection...";
+    const preview = await post("/api/providers/connect", {provider,authMethod,fields:readProviderFields(),credentialDraftId:draft?.id});
+    if (preview.credentialDraft) state.credentialDrafts[provider] = preview.credentialDraft;
+    state.providerFieldValues[provider] = structuredClone(preview.profile.settings || {}); upsertProviderProfile(preview.profile); upsertConnection(preview.provider); upsertModels(preview.models); normalizeSelection();
+    document.querySelectorAll('#provider-fields input[type="password"]').forEach(input => { input.value = ""; });
+    if (closeOnSuccess && $("connection-dialog").open) $("connection-dialog").close();
+    status.textContent = "Connection configured."; render();
+  }
+  async function startOAuth() {
+    const provider = $("cloud-provider").value, preferredMethod = $("oauth-login-method").value, button = $("start-oauth");
+    setBusy(button,true,"Starting sign-in..."); state.oauthWindow = preferredMethod === "browser" ? window.open("about:blank", "swarm-pi-oauth") : null;
+    try { state.oauthSession = await post("/api/oauth/start", {provider,preferredMethod}); renderOAuthSession(); void pollOAuth(); }
+    catch (error) { if (state.oauthWindow) state.oauthWindow.close(); $("oauth-status").textContent = error.message; }
+    finally { setBusy(button,false); button.textContent = provider === "openai-codex" ? "Sign in with ChatGPT" : "Sign in"; }
+  }
+  async function pollOAuth() {
+    while (state.oauthSession && ["running","awaiting-input"].includes(state.oauthSession.status)) {
+      try { state.oauthSession = await post("/api/oauth/status", {sessionId:state.oauthSession.id,afterRevision:state.oauthSession.revision,waitTimeoutMs:20000}); renderOAuthSession(); }
+      catch (error) { $("oauth-status").textContent = error.message; return; }
+    }
+  }
+  function renderOAuthSession() {
+    const session = state.oauthSession, status = $("oauth-status"), challenge = $("oauth-challenge"); challenge.replaceChildren(); challenge.hidden = true;
+    if (!session) { status.textContent = ""; syncProviderConnectButton(); return; }
+    if (session.notice?.type === "auth-url") {
+      status.textContent = session.notice.instructions || "Complete sign-in in the browser.";
+      const link = document.createElement("a"); link.href = session.notice.url; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = "Open sign-in page"; challenge.append(link); challenge.hidden = false;
+      if (state.oauthWindow && state.oauthOpenedUrl !== session.notice.url) { state.oauthWindow.location.href = session.notice.url; state.oauthOpenedUrl = session.notice.url; }
+    } else if (session.notice?.type === "device-code") {
+      status.textContent = "Enter code " + session.notice.userCode;
+      const code = document.createElement("strong"); code.textContent = session.notice.userCode; const link = document.createElement("a"); link.href = session.notice.verificationUri; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = "Open verification page"; challenge.append(code,link); challenge.hidden = false;
+    } else if (session.notice?.type === "progress") status.textContent = session.notice.message;
+    else status.textContent = session.status === "completed" ? "Sign-in complete." : session.status === "failed" ? session.error || "Sign-in failed." : session.status === "cancelled" ? "Sign-in cancelled." : "Waiting for the provider...";
+    if (session.challenge) {
+      challenge.hidden = false; const message = document.createElement("span"); message.textContent = session.challenge.message; let input;
+      if (session.challenge.type === "select") { input = document.createElement("select"); session.challenge.options.forEach(option => input.add(new Option(option.label,option.id))); }
+      else { input = document.createElement("input"); input.type = "text"; input.placeholder = session.challenge.placeholder || ""; }
+      const submit = document.createElement("button"); submit.type = "button"; submit.className = "primary-button"; submit.textContent = "Continue"; submit.addEventListener("click", async () => { try { state.oauthSession = await post("/api/oauth/respond", {sessionId:session.id,challengeId:session.challenge.id,value:input.value}); renderOAuthSession(); void pollOAuth(); } catch (error) { status.textContent = error.message; } }); challenge.append(message,input,submit);
+    }
+    if (session.credentialDraft) state.credentialDrafts[session.provider] = session.credentialDraft;
+    syncProviderConnectButton();
+  }
+  function renderCustomAuth() {
+    const method = $("endpoint-auth-method").value; $("endpoint-header-wrap").hidden = method !== "custom-header"; $("endpoint-key-wrap").hidden = method === "none";
+    $("endpoint-key").placeholder = state.editingCustomIndex >= 0 ? "Leave blank to keep the saved credential" : "Enter a credential";
+  }
+  async function prepareCustomCredential() {
+    const baseUrl = $("endpoint-url").value, protocol = $("endpoint-protocol").value, authMethod = $("endpoint-auth-method").value, secret = $("endpoint-key").value, existingProvider = state.editingCustomIndex >= 0 ? state.customProviders[state.editingCustomIndex].id : undefined;
+    if (authMethod !== "none" && !secret) {
+      if (state.customPendingProvider) return {provider:state.customPendingProvider,credentialDraft:state.credentialDrafts[state.customPendingProvider]};
+      if (existingProvider) return {provider:existingProvider,credentialDraft:state.credentialDrafts[existingProvider]};
+      throw new Error("Enter the credential before loading models.");
+    }
+    const staged = await post("/api/providers/custom/credential", {baseUrl,protocol,authMethod,secret,headerName:$("endpoint-header").value,existingProvider});
+    state.customPendingProvider = staged.provider; if (staged.credentialDraft) state.credentialDrafts[staged.provider] = staged.credentialDraft; $("endpoint-key").value = ""; return staged;
+  }
+  async function loadCustomModels(manual) {
+    const status = $("dialog-status"), protocol = $("endpoint-protocol").value, authMethod = $("endpoint-auth-method").value; status.className = "dialog-status"; status.textContent = manual ? "Preparing manual models..." : "Loading models...";
+    const staged = await prepareCustomCredential();
+    const common = {baseUrl:$("endpoint-url").value,protocol,modelsEndpoint:$("models-endpoint").value,authMethod,headerName:$("endpoint-header").value,existingProvider:state.editingCustomIndex >= 0 ? state.customProviders[state.editingCustomIndex].id : undefined};
+    const result = manual
+      ? await post("/api/providers/custom/manual", {...common,name:$("endpoint-name").value,modelIds:$("manual-model-ids").value.split(/\r?\n|,/).map(value => value.trim()).filter(Boolean)})
+      : await post("/api/providers/discover", {...common,provider:staged.provider,credentialDraftId:staged.credentialDraft?.id,reservedProviderIds:state.customProviders.filter((_,index) => index !== state.editingCustomIndex).map(item => item.id)});
+    const literals = customLiteralHeaders(), secretHeaders = (result.provider.headers || []).filter(header => header.secretRef);
+    result.provider.headers = [...secretHeaders,...literals]; result.profile.headers = structuredClone(result.provider.headers);
+    state.customDraft = result.provider; state.customProfileDraft = result.profile; status.textContent = manual ? "Manual models are ready." : "Models loaded. Verify API separately when ready."; renderCustomDraft();
+  }
+  function customLiteralHeaders() {
+    return [
+      {name:"http-referer",value:$("custom-http-referer").value.trim()},
+      {name:"x-title",value:$("custom-app-title").value.trim()},
+      {name:"anthropic-beta",value:$("custom-anthropic-beta").value.trim()},
+    ].filter(header => header.value);
   }
   function renderCustomDraft() {
     const draft = state.customDraft, result = $("discovery-result"), advanced = $("advanced-connection"), accept = $("accept-endpoint");
     result.hidden = !draft; advanced.hidden = !draft; accept.hidden = !draft;
     if (!draft) return;
-    result.replaceChildren(); const title = document.createElement("strong"); title.textContent = "Connected to " + draft.name; const detail = document.createElement("span"); detail.textContent = draft.models.length + " models found"; result.append(title, detail);
+    result.replaceChildren(); const title = document.createElement("strong"); title.textContent = draft.name; const detail = document.createElement("span"); detail.textContent = draft.models.length + " models - " + (state.customProfileDraft?.readiness || "configured"); result.append(title, detail);
     $("endpoint-name").value = draft.name; $("endpoint-canonical-url").value = draft.baseUrl; $("endpoint-api").value = draft.api;
     accept.textContent = state.editingCustomIndex >= 0 ? "Save connection" : "Add connection";
     const models = $("advanced-models"); models.replaceChildren();
     draft.models.forEach((item, index) => {
-      const details = document.createElement("details"); details.className = "model-editor";
-      const summary = document.createElement("summary"); summary.textContent = item.name || item.id;
-      const body = document.createElement("div"); body.className = "model-editor-body";
-      const id = document.createElement("div"); id.className = "model-id"; id.textContent = item.id;
-      body.append(id, draftLimitInput(item, index, "contextWindow", "Context window"), draftLimitInput(item, index, "maxTokens", "Max output")); details.append(summary, body); models.append(details);
+      const details = document.createElement("details"); details.className = "model-editor"; const summary = document.createElement("summary"); summary.textContent = item.name || item.id; const body = document.createElement("div"); body.className = "model-editor-body"; const id = document.createElement("div"); id.className = "model-id"; id.textContent = item.id;
+      body.append(id, draftLimitInput(item,index,"contextWindow","Context window"), draftLimitInput(item,index,"maxTokens","Max output")); details.append(summary,body); models.append(details);
     });
   }
   function draftLimitInput(item, index, field, label) {
-    const wrap = document.createElement("div"), lab = document.createElement("label"), input = document.createElement("input"), note = document.createElement("span");
-    input.id = "draft-limit-" + index + "-" + field; lab.htmlFor = input.id; lab.textContent = label; input.type = "number"; input.placeholder = "Automatic"; input.value = item[field] || ""; note.className = "source-note"; note.textContent = "Source: " + sourceLabel(item.metadata?.[field]);
-    input.addEventListener("change", () => { const current = state.customDraft.models[index], value = input.value ? Number(input.value) : null; current.metadata = current.metadata || {}; if (value && Number.isInteger(value) && value > 0) { current[field] = value; current.metadata[field] = "user"; } else { delete current[field]; delete current.metadata[field]; } renderCustomDraft(); });
-    wrap.append(lab, input, note); return wrap;
+    const wrap = document.createElement("div"), lab = document.createElement("label"), input = document.createElement("input"), note = document.createElement("span"); input.id = "draft-limit-" + index + "-" + field; lab.htmlFor = input.id; lab.textContent = label; input.type = "number"; input.placeholder = "Automatic"; input.value = item[field] || ""; note.className = "source-note"; note.textContent = "Source: " + sourceLabel(item.metadata?.[field]);
+    input.addEventListener("change", () => { const current = state.customDraft.models[index], value = input.value ? Number(input.value) : null; current.metadata = current.metadata || {}; if (value && Number.isInteger(value) && value > 0) { current[field] = value; current.metadata[field] = "user"; } else { delete current[field]; delete current.metadata[field]; } renderCustomDraft(); }); wrap.append(lab,input,note); return wrap;
   }
-  function syncDraftFields() {
-    if (!state.customDraft) return;
-    state.customDraft.name = $("endpoint-name").value.trim() || state.customDraft.name;
-    state.customDraft.baseUrl = $("endpoint-canonical-url").value.trim();
-    state.customDraft.api = $("endpoint-api").value;
+  function syncDraftFields() { if (!state.customDraft) return; state.customDraft.name = $("endpoint-name").value.trim() || state.customDraft.name; state.customDraft.baseUrl = $("endpoint-canonical-url").value.trim(); if (state.customProfileDraft) state.customProfileDraft.name = state.customDraft.name; }
+  function acceptCustom(provider, profile) {
+    const matchingIndex = state.editingCustomIndex >= 0 ? state.editingCustomIndex : state.customProviders.findIndex(item => endpointKey(item) === endpointKey(provider)); const oldId = matchingIndex >= 0 ? state.customProviders[matchingIndex].id : null;
+    if (matchingIndex >= 0) state.customProviders[matchingIndex] = provider; else state.customProviders.push(provider); if (oldId && oldId !== provider.id) { state.models = state.models.filter(item => item.provider !== oldId); state.providerProfiles = state.providerProfiles.filter(item => item.provider !== oldId); delete state.credentialDrafts[oldId]; }
+    upsertProviderProfile(profile); upsertModels(browserModels(provider)); upsertConnection({id:provider.id,name:provider.name,ready:true,modelCount:provider.models.length,availableModelCount:provider.models.length,auth:{source:state.credentialDrafts[provider.id]?"runtime":provider.requiresApiKey?"stored":"local",label:state.credentialDrafts[provider.id]?"Credential pending save":provider.requiresApiKey?"Pi credential store":"No credential"},selection:null,custom:true}); normalizeSelection(); if ($("connection-dialog").open) $("connection-dialog").close(); render();
   }
-  function acceptCustom(provider, apiKey) {
-    const matchingIndex = state.editingCustomIndex >= 0
-      ? state.editingCustomIndex
-      : state.customProviders.findIndex(item => endpointKey(item) === endpointKey(provider));
-    const oldId = matchingIndex >= 0 ? state.customProviders[matchingIndex].id : null;
-    provider.id = oldId || availableProviderId(provider.id);
-    if (matchingIndex >= 0) state.customProviders[matchingIndex] = provider; else state.customProviders.push(provider);
-    if (oldId) state.models = state.models.filter(item => item.provider !== oldId);
-    upsertModels(browserModels(provider));
-    if (apiKey) state.credentials[provider.id] = apiKey;
-    upsertConnection({id:provider.id,name:provider.name,ready:true,modelCount:provider.models.length,availableModelCount:provider.models.length,auth:{source:apiKey?"runtime":provider.requiresApiKey?"stored":"local",label:apiKey?"API key entered in this setup session":provider.requiresApiKey?"Pi credential store":"No API key required"},selection:null,custom:true});
-    normalizeSelection();
-    if ($("connection-dialog").open) $("connection-dialog").close();
-    render();
-    if (matchingIndex >= 0 && state.editingCustomIndex < 0) $("connection-status").textContent = "Existing connection refreshed.";
+  function removeConnection(id) {
+    const item = connection(id); if (!item || !confirm("Remove " + item.name + " from this project?")) return; state.customProviders = state.customProviders.filter(provider => provider.id !== id); state.providerProfiles = state.providerProfiles.filter(profile => profile.provider !== id); state.connections = state.connections.filter(connection => connection.id !== id); state.models = state.models.filter(model => model.provider !== id); delete state.credentialDrafts[id]; if (state.primary.startsWith(id + "/")) state.primary = ""; state.fallbacks = state.fallbacks.filter(model => !model.startsWith(id + "/")); render();
   }
-  function removeCustom(id) {
-    const provider = customProvider(id); if (!provider || !confirm("Remove " + provider.name + " from this project?")) return;
-    state.customProviders = state.customProviders.filter(item => item.id !== id); state.connections = state.connections.filter(item => item.id !== id); state.models = state.models.filter(item => item.provider !== id); delete state.credentials[id];
-    if (state.primary.startsWith(id + "/")) state.primary = ""; state.fallbacks = state.fallbacks.filter(item => !item.startsWith(id + "/")); render();
+  async function verifyConnection(id) {
+    const status = $("connection-status"), model = state.models.find(item => item.provider === id && (item.available || state.credentialDrafts[id])) || state.models.find(item => item.provider === id); if (!model) { status.textContent = "No model is available to verify."; return; }
+    status.textContent = "Verifying " + model.id + " with a minimal request...";
+    try { const result = await post("/api/providers/verify", {model:model.id,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id}))}); upsertProviderProfile(result.profile); const item = connection(id); if (item) item.ready = true; status.textContent = "API verified for " + model.id + "."; render(); }
+    catch (error) { status.className = "inline-status error"; status.textContent = error.message; }
+  }
+  async function signOutConnection(id) {
+    const item = connection(id); if (!item || !confirm("Sign out of " + item.name + "?")) return;
+    try { await post("/api/providers/sign-out", {provider:id}); delete state.credentialDrafts[id]; const profile = providerProfile(id); if (profile) profile.readiness = "blocked"; item.ready = false; state.models.filter(model => model.provider === id).forEach(model => { model.available = false; }); $("connection-status").textContent = "Signed out of " + item.name + "."; render(); }
+    catch (error) { $("connection-status").className = "inline-status error"; $("connection-status").textContent = error.message; }
   }
 
   async function post(path, body) {
@@ -978,9 +1205,9 @@ const clientScript = String.raw`
   async function findLocal() {
     const status = $("connection-status"); status.className = "inline-status"; status.textContent = "Looking for local AI apps...";
     try {
-      const payload = await post("/api/discover-local", {});
+      const payload = await post("/api/providers/local", {});
       if (!payload.connections.length) { status.textContent = "No supported local AI app is currently running."; return; }
-      payload.connections.forEach(result => acceptCustom(result.provider, ""));
+      payload.connections.forEach(result => acceptCustom(result.provider, {id:result.provider.id,provider:result.provider.id,name:result.provider.name,connectionKind:"custom",auth:result.provider.auth || {method:"none"},protocol:result.provider.wireProtocol,runtimeApi:result.provider.api,readiness:"discovered",settings:{},headers:result.provider.headers || [],discoveredAt:new Date().toISOString()}));
       status.textContent = payload.connections.length + " local connection" + (payload.connections.length === 1 ? "" : "s") + " added.";
     } catch (error) { status.className = "inline-status error"; status.textContent = error.message; }
   }
@@ -990,27 +1217,29 @@ const clientScript = String.raw`
   $("find-local").addEventListener("click", findLocal); $("empty-local").addEventListener("click", findLocal);
   $("cloud-tab").addEventListener("click", () => { state.dialogMode = "cloud"; renderDialog(); });
   $("custom-tab").addEventListener("click", () => { state.dialogMode = "custom"; renderDialog(); });
-  $("close-dialog").addEventListener("click", () => $("connection-dialog").close());
+  $("close-dialog").addEventListener("click", () => { if (state.oauthSession && ["running","awaiting-input"].includes(state.oauthSession.status)) void post("/api/oauth/cancel", {sessionId:state.oauthSession.id}).catch(() => {}); $("connection-dialog").close(); });
+  $("provider-search").addEventListener("input", () => populateProviderCatalog($("provider-search").value));
+  $("cloud-provider").addEventListener("change", () => { state.oauthSession = null; renderProviderForm(); });
+  $("provider-auth-method").addEventListener("change", renderProviderForm);
+  $("start-oauth").addEventListener("click", startOAuth);
   $("connect-cloud").dataset.defaultLabel = "Connect";
   $("connect-cloud").addEventListener("click", async () => {
-    const button = $("connect-cloud"), provider = $("cloud-provider").value, apiKey = $("cloud-key").value, status = $("dialog-status"); status.className = "dialog-status"; status.textContent = "Checking connection..."; setBusy(button,true,"Connecting...");
-    try { const preview = await post("/api/connect-provider", {provider,apiKey}); state.credentials[provider] = apiKey; upsertConnection(preview.provider); upsertModels(preview.models); normalizeSelection(); $("connection-dialog").close(); render(); }
+    const button = $("connect-cloud"), status = $("dialog-status"); status.className = "dialog-status"; setBusy(button,true,"Connecting...");
+    try { await connectBuiltIn(true); }
     catch (error) { status.className = "dialog-status error"; status.textContent = error.message; }
-    finally { setBusy(button,false); button.textContent = "Connect"; }
+    finally { setBusy(button,false); syncProviderConnectButton(); }
   });
-  $("test-endpoint").dataset.defaultLabel = "Test and find models";
+  $("endpoint-auth-method").addEventListener("change", renderCustomAuth);
+  $("endpoint-protocol").addEventListener("change", () => { state.customDraft = null; state.customProfileDraft = null; state.customPendingProvider = null; renderCustomDraft(); });
+  $("test-endpoint").dataset.defaultLabel = "Load models";
   $("test-endpoint").addEventListener("click", async () => {
-    const button = $("test-endpoint"), status = $("dialog-status"); status.className = "dialog-status"; status.textContent = "Testing connection and loading models..."; setBusy(button,true,"Testing...");
-    try {
-      const reservedProviderIds = state.customProviders.filter((_, index) => index !== state.editingCustomIndex).map(item => item.id);
-      const result = await post("/api/discover", {baseUrl:$("endpoint-url").value,apiKey:$("endpoint-key").value,reservedProviderIds});
-      if (state.editingCustomIndex >= 0) result.provider.id = state.customProviders[state.editingCustomIndex].id;
-      state.customDraft = result.provider; status.textContent = "Connection test passed."; renderCustomDraft();
-    } catch (error) { status.className = "dialog-status error"; status.textContent = error.message; }
-    finally { setBusy(button,false); button.textContent = "Test and find models"; }
+    const button = $("test-endpoint"), status = $("dialog-status"); setBusy(button,true,"Loading...");
+    try { await loadCustomModels(false); } catch (error) { status.className = "dialog-status error"; status.textContent = error.message + (error.code === "unsupported" ? " Enter model IDs manually." : ""); }
+    finally { setBusy(button,false); button.textContent = "Load models"; }
   });
-  $("accept-endpoint").addEventListener("click", () => { syncDraftFields(); if (state.customDraft) acceptCustom(structuredClone(state.customDraft), $("endpoint-key").value); });
-  ["endpoint-name","endpoint-canonical-url","endpoint-api"].forEach(id => $(id).addEventListener("change", syncDraftFields));
+  $("use-manual-models").addEventListener("click", async () => { const status = $("dialog-status"); try { await loadCustomModels(true); } catch (error) { status.className = "dialog-status error"; status.textContent = error.message; } });
+  $("accept-endpoint").addEventListener("click", () => { syncDraftFields(); if (state.customDraft && state.customProfileDraft) acceptCustom(structuredClone(state.customDraft), structuredClone(state.customProfileDraft)); });
+  ["endpoint-name","endpoint-canonical-url"].forEach(id => $(id).addEventListener("change", syncDraftFields));
   $("primary-model").addEventListener("change", () => { state.primary = $("primary-model").value; renderModelDetails(); renderFallbacks(); });
   $("add-fallback").addEventListener("click", () => { const next = usableModels().find(item => item.id !== state.primary && !state.fallbacks.includes(item.id)); if (next) { state.fallbacks.push(next.id); renderFallbacks(); } });
   $("project-goal").addEventListener("input", () => { state.profile.goal = $("project-goal").value; clearProfileError(); });
@@ -1050,7 +1279,7 @@ const clientScript = String.raw`
       const profile = projectProfile();
       const execution = {rolePolicies:state.rolePolicies,adaptivePolicy:state.adaptivePolicy,backgroundRolePolicy:state.backgroundRolePolicy};
       if (setupMode === "project") await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution});
-      else await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,credentials:Object.entries(state.credentials).map(([provider,apiKey])=>({provider,apiKey})),profile,sandboxMode:state.sandboxMode,...execution});
+      else await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id})),profile,sandboxMode:state.sandboxMode,...execution});
       showCompletion(setupMode === "project" ? "Project setup saved" : "Configuration saved", "Swarm Pi will use these project settings for delegated work. You can close this tab.", true);
     } catch (error) { status.className = "save-status error"; status.textContent = error.message; button.disabled = false; }
   });

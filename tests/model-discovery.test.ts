@@ -4,6 +4,7 @@ import test from "node:test";
 import type { PiModel } from "../src/pi/models.js";
 import {
   discoverEndpoint,
+  discoverLocalEndpoints,
   EndpointDiscoveryError,
 } from "../src/web/model-discovery.js";
 
@@ -38,15 +39,20 @@ test("OpenAI-compatible discovery finds models and enriches missing limits from 
     return json({ error: "not found" }, 404);
   });
   const result = await discoverEndpoint(
-    { baseUrl: "https://models.example.test", apiKey: "secret" },
+    {
+      baseUrl: "https://models.example.test",
+      protocol: "openai-chat-completions",
+      apiKey: "secret",
+    },
     [catalogModel],
     { fetchImpl },
   );
 
-  assert.equal(result.adapter, "openai-compatible");
-  assert.equal(result.provider.id, "models.example.test");
+  assert.equal(result.adapter, "openai-chat-completions");
+  assert.match(result.provider.id, /^custom-models\.example\.test-/);
   assert.equal(result.provider.authHeader, true);
   assert.equal(result.provider.requiresApiKey, true);
+  assert.equal(result.provider.wireProtocol, "openai-chat-completions");
   assert.deepEqual(result.provider.models[0], {
     id: "gpt-test",
     name: "GPT Test",
@@ -58,18 +64,19 @@ test("OpenAI-compatible discovery finds models and enriches missing limits from 
   });
 });
 
-test("endpoint discovery allocates a unique provider identifier for an unsaved connection", async () => {
+test("endpoint discovery derives a stable protocol-specific provider identifier", async () => {
   const fetchImpl = mockedFetch((url) => {
     if (url.pathname.endsWith("/v1/models")) return json({ data: [{ id: "local-model" }] });
     return json({ error: "not found" }, 404);
   });
   const result = await discoverEndpoint(
-    { baseUrl: "http://127.0.0.1:1234" },
+    { baseUrl: "http://127.0.0.1:1234", protocol: "openai-responses" },
     [],
-    { fetchImpl, reservedProviderIds: ["127.0.0.1-1234"] },
+    { fetchImpl, reservedProviderIds: ["custom-ignored"] },
   );
 
-  assert.equal(result.provider.id, "127.0.0.1-1234-2");
+  assert.match(result.provider.id, /^custom-127\.0\.0\.1-1234-/);
+  assert.equal(result.provider.api, "openai-responses");
 });
 
 test("Anthropic discovery keeps endpoint-reported capabilities and limits", async () => {
@@ -92,13 +99,18 @@ test("Anthropic discovery keeps endpoint-reported capabilities and limits", asyn
     return json({}, 404);
   });
   const result = await discoverEndpoint(
-    { baseUrl: "https://api.anthropic.com", apiKey: "anthropic-key" },
+    {
+      baseUrl: "https://api.anthropic.com/v1",
+      protocol: "anthropic-messages",
+      apiKey: "anthropic-key",
+    },
     [],
     { fetchImpl },
   );
 
-  assert.equal(result.adapter, "anthropic");
+  assert.equal(result.adapter, "anthropic-messages");
   assert.equal(result.provider.api, "anthropic-messages");
+  assert.equal(result.provider.baseUrl, "https://api.anthropic.com");
   assert.deepEqual(result.provider.models[0]?.metadata, {
     contextWindow: "endpoint",
     maxTokens: "endpoint",
@@ -120,11 +132,8 @@ test("Ollama discovery uses native model details without requiring an API key", 
     }
     return json({}, 404);
   });
-  const result = await discoverEndpoint(
-    { baseUrl: "http://127.0.0.1:11434" },
-    [],
-    { fetchImpl },
-  );
+  const results = await discoverLocalEndpoints([], { fetchImpl });
+  const result = results.find((entry) => entry.adapter === "ollama")!;
 
   assert.equal(result.adapter, "ollama");
   assert.equal(result.provider.baseUrl, "http://127.0.0.1:11434/v1");
@@ -135,14 +144,21 @@ test("Ollama discovery uses native model details without requiring an API key", 
 
 test("endpoint discovery reports actionable security and connection failures", async () => {
   await assert.rejects(
-    () => discoverEndpoint({ baseUrl: "http://169.254.169.254/latest" }),
+    () => discoverEndpoint({
+      baseUrl: "http://169.254.169.254/latest",
+      protocol: "openai-chat-completions",
+    }),
     (error: unknown) => error instanceof EndpointDiscoveryError && error.code === "invalid-url",
   );
 
   const unauthorized = mockedFetch(() => json({ error: "invalid key" }, 401));
   await assert.rejects(
     () => discoverEndpoint(
-      { baseUrl: "https://models.example.test", apiKey: "wrong" },
+      {
+        baseUrl: "https://models.example.test",
+        protocol: "openai-chat-completions",
+        apiKey: "wrong",
+      },
       [],
       { fetchImpl: unauthorized },
     ),
@@ -152,7 +168,7 @@ test("endpoint discovery reports actionable security and connection failures", a
   const malformed = mockedFetch(() => new Response("not-json", { status: 200 }));
   await assert.rejects(
     () => discoverEndpoint(
-      { baseUrl: "https://models.example.test" },
+      { baseUrl: "https://models.example.test", protocol: "openai-responses" },
       [],
       { fetchImpl: malformed },
     ),

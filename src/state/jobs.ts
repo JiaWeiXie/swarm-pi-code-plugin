@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -24,6 +24,7 @@ import type {
   ScaffoldSpec,
 } from "../core/contracts.js";
 import { loadState, resolveStateDir, updateState, type JobRecord } from "./state.js";
+import type { ModelConfiguration } from "./model-config.js";
 
 export const JOB_HEARTBEAT_INTERVAL_MS = 15_000;
 export const JOB_STALE_AFTER_MS = 60_000;
@@ -46,10 +47,11 @@ export interface JobStart {
   target?: string;
   scaffoldSpec?: ScaffoldSpec;
   adoptExisting?: boolean;
+  modelConfiguration?: ModelConfiguration;
 }
 
 export interface JobRequest {
-  requestVersion?: 1 | 2;
+  requestVersion?: 1 | 2 | 3;
   id: string;
   host: Host;
   kind: TaskKind;
@@ -67,6 +69,8 @@ export interface JobRequest {
   target?: string;
   scaffoldSpec?: ScaffoldSpec;
   adoptExisting?: boolean;
+  modelConfiguration?: ModelConfiguration;
+  providerSnapshotHash?: string;
   workerToken: string;
   createdAt: string;
 }
@@ -101,8 +105,11 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
   const createdAt = new Date().toISOString();
   const sandboxMode = input.sandboxMode ?? "strict";
   const directory = await jobDirectory(cwd, id);
+  const providerSnapshotHash = input.modelConfiguration
+    ? modelConfigurationSnapshotHash(input.modelConfiguration)
+    : undefined;
   const request: JobRequest = {
-    requestVersion: 2,
+    requestVersion: input.modelConfiguration ? 3 : 2,
     id,
     host: input.host,
     kind: input.kind,
@@ -120,6 +127,8 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
     ...(input.target ? { target: input.target } : {}),
     ...(input.scaffoldSpec ? { scaffoldSpec: input.scaffoldSpec } : {}),
     ...(input.adoptExisting ? { adoptExisting: true } : {}),
+    ...(input.modelConfiguration ? { modelConfiguration: structuredClone(input.modelConfiguration) } : {}),
+    ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
     workerToken,
     createdAt,
   };
@@ -138,6 +147,7 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       timeoutMs: input.timeoutMs,
       ...(input.model ? { model: input.model } : {}),
       ...(input.role ? { role: input.role } : {}),
+      ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
       generation: 1,
       approvals: [],
       leases: [],
@@ -152,6 +162,21 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
     });
   });
   return { id, workerToken };
+}
+
+export function modelConfigurationSnapshotHash(configuration: ModelConfiguration): string {
+  return createHash("sha256").update(canonicalJson(configuration)).digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 export async function attachJobProcess(

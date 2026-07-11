@@ -33,6 +33,8 @@ When external facts are required, gather a cited EvidencePack once through the H
 
 For long-running work, distinguish Pi `executionMode` from the Host relay process. Poll `jobs wait --wait-timeout-ms 15000` and `jobs status` instead of leaving one opaque shell wait. Surface the current `phase`, elapsed time, last progress time, and cancel command at least once per minute.
 
+New jobs durably snapshot the submitted non-secret provider/model configuration. Do not recreate or edit a job request to apply later settings changes; submit a new job instead. Credentials remain live AuthStorage references, so a queued job may fail after sign-out or rotation and must never retry without authentication.
+
 ## Finish Reliably
 
 Validate Pi claims against the repository. For mutation workflows, inspect the actual diff and run host-owned verification. Delete temporary prompt/spec files after the runner has durably copied them. Report the model/fallback, verification evidence, changed files or artifact, and unresolved risk.

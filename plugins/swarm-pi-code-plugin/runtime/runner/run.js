@@ -13,8 +13,8 @@ import { createSandboxRunner } from "../sandbox/runner.js";
 import { PiPolicyClassifier } from "../policy/classifier.js";
 import { PolicyEngine, actionFingerprint } from "../policy/engine.js";
 import { loadRepositoryDenyRules } from "../policy/project-policy.js";
-import { acknowledgeJob, attachJobProcess, cancelJob, finishJob, getJob, heartbeatJob, JOB_HEARTBEAT_INTERVAL_MS, listJobs, markJobRunning, readJobPrompt, readJobRequest, updateJobExecutionWorkspace, updateJobProgress, requestJobApproval, startJob, waitForApprovalResolution, createJobLeaseProvider, appendPolicyEvent, waitForJob, approveJob, denyJobApproval, listJobApprovals, isTerminalJobStatus, } from "../state/jobs.js";
-import { clearModelConfiguration, loadModelConfiguration, modelPriority, saveModelPriority, } from "../state/model-config.js";
+import { acknowledgeJob, attachJobProcess, cancelJob, finishJob, getJob, heartbeatJob, JOB_HEARTBEAT_INTERVAL_MS, listJobs, markJobRunning, modelConfigurationSnapshotHash, readJobPrompt, readJobRequest, updateJobExecutionWorkspace, updateJobProgress, requestJobApproval, startJob, waitForApprovalResolution, createJobLeaseProvider, appendPolicyEvent, waitForJob, approveJob, denyJobApproval, listJobApprovals, isTerminalJobStatus, } from "../state/jobs.js";
+import { clearModelConfiguration, loadModelConfiguration, modelPriority, parseModelConfiguration, saveModelPriority, } from "../state/model-config.js";
 import { clearConfiguration, defaultState, resolveStateDir, loadState, saveProfile, setAvailableModels, setModelPriority, updateState, } from "../state/state.js";
 import { StateMigrationConflictError } from "../state/state.js";
 import { createContinuation, consumeContinuation, readContinuation } from "../onboarding/continuations.js";
@@ -230,6 +230,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         ...(target ? { target } : {}),
         ...(scaffoldSpec ? { scaffoldSpec } : {}),
         ...(adoptExisting ? { adoptExisting: true } : {}),
+        modelConfiguration,
     });
     let executionCwd = cwd;
     try {
@@ -417,7 +418,17 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal) {
         if (snapshot.job.cancelRequestedAt)
             controller.abort();
         const state = await loadState(cwd);
-        const modelConfiguration = await loadModelConfiguration(cwd, state.config.modelPriority);
+        const modelConfiguration = request.modelConfiguration
+            ? parseModelConfiguration(request.modelConfiguration)
+            : await loadModelConfiguration(cwd, state.config.modelPriority);
+        if (request.requestVersion === 3) {
+            if (!request.modelConfiguration || !request.providerSnapshotHash) {
+                throw new Error("Background job is missing its provider configuration snapshot");
+            }
+            if (modelConfigurationSnapshotHash(modelConfiguration) !== request.providerSnapshotHash) {
+                throw new Error("Background job provider configuration snapshot failed integrity validation");
+            }
+        }
         const activeDependencies = dependencies ?? defaultDependencies(modelConfiguration);
         const candidates = orderModels(activeDependencies.catalog.available(), {
             requested: request.model,

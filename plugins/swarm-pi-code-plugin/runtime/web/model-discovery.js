@@ -1,3 +1,5 @@
+import { normalizeModelsEndpoint, normalizeProtocolRoot, protocolModelsUrl, runtimeApiForWireProtocol, stableCustomProviderId, } from "../providers/endpoints.js";
+import { providerHeaderSecretRef, providerSecretRef } from "../state/model-config.js";
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_DISCOVERED_MODELS = 500;
@@ -10,31 +12,111 @@ export class EndpointDiscoveryError extends Error {
     }
 }
 export async function discoverEndpoint(request, catalogModels = [], options = {}) {
-    const base = safeEndpointUrl(request.baseUrl);
+    let normalizedRoot;
+    try {
+        normalizedRoot = normalizeProtocolRoot(request.baseUrl, request.protocol);
+    }
+    catch (error) {
+        throw new EndpointDiscoveryError("invalid-url", error instanceof Error ? error.message : "Enter a valid API root");
+    }
+    const base = safeEndpointUrl(normalizedRoot);
+    const authMethod = request.authMethod ?? (request.apiKey?.trim() ? "api-key" : "none");
+    if (authMethod === "custom-header" && !request.headerName) {
+        throw new EndpointDiscoveryError("authentication", "Choose the custom authentication header");
+    }
+    if (authMethod !== "none" && !request.apiKey?.trim()) {
+        throw new EndpointDiscoveryError("authentication", "Enter the credential before loading models");
+    }
+    if (authMethod !== "none" && base.protocol === "http:" && !isLoopback(base.hostname)) {
+        throw new EndpointDiscoveryError("invalid-url", "Credentials may only be sent over HTTPS or to a loopback endpoint");
+    }
+    let modelsUrl;
+    try {
+        modelsUrl = request.modelsEndpoint
+            ? new URL(normalizeModelsEndpoint(request.modelsEndpoint, normalizedRoot))
+            : protocolModelsUrl(normalizedRoot, request.protocol);
+    }
+    catch (error) {
+        throw new EndpointDiscoveryError("invalid-url", error instanceof Error ? error.message : "Enter a valid models endpoint");
+    }
     const context = {
         base,
+        modelsUrl,
         ...(request.apiKey?.trim() ? { apiKey: request.apiKey.trim() } : {}),
+        authMethod,
+        ...(request.headerName ? { headerName: request.headerName } : {}),
         fetchImpl: options.fetchImpl ?? fetch,
         timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxResponseBytes: options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
     };
-    const probes = isLoopback(base.hostname)
-        ? [probeLmStudio, probeOllama, probeAnthropic, probeGemini, probeOpenAi]
-        : [probeAnthropic, probeGemini, probeOpenAi, probeLmStudio, probeOllama];
+    const result = await (request.protocol === "anthropic-messages" ? probeAnthropic(context) : probeOpenAi(context));
+    const id = stableCustomProviderId(normalizedRoot, request.protocol);
+    const secretHeader = authMethod === "custom-header" && request.headerName
+        ? [{ name: request.headerName, secretRef: providerHeaderSecretRef(id, request.headerName) }]
+        : [];
+    return {
+        adapter: request.protocol,
+        provider: {
+            id,
+            name: result.name,
+            baseUrl: normalizedRoot,
+            api: runtimeApiForWireProtocol(request.protocol),
+            wireProtocol: request.protocol,
+            authHeader: authMethod === "api-key" && request.protocol !== "anthropic-messages",
+            requiresApiKey: authMethod !== "none",
+            auth: {
+                method: authMethod,
+                ...(authMethod === "none" ? {} : { secretRef: providerSecretRef(id) }),
+                ...(request.headerName ? { headerName: request.headerName } : {}),
+            },
+            ...(request.modelsEndpoint ? { modelsEndpoint: modelsUrl.toString() } : {}),
+            ...(secretHeader.length ? { headers: secretHeader } : {}),
+            models: enrichModels(result.models, catalogModels, result.preferredProvider),
+        },
+    };
+}
+export async function discoverLocalEndpoints(catalogModels = [], options = {}) {
+    const candidates = [
+        "http://127.0.0.1:11434",
+        "http://127.0.0.1:1234",
+        "http://127.0.0.1:1337",
+    ];
+    const results = await Promise.allSettled(candidates.map((baseUrl) => discoverLocalEndpoint(baseUrl, catalogModels, {
+        ...options,
+        timeoutMs: Math.min(options.timeoutMs ?? 1_200, 1_200),
+    })));
+    return results
+        .filter((result) => result.status === "fulfilled")
+        .map((result) => result.value);
+}
+async function discoverLocalEndpoint(baseUrl, catalogModels, options) {
+    const base = safeEndpointUrl(baseUrl);
+    const context = {
+        base,
+        authMethod: "none",
+        fetchImpl: options.fetchImpl ?? fetch,
+        timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        maxResponseBytes: options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
+    };
     const errors = [];
-    for (const probe of probes) {
+    for (const probe of [probeLmStudio, probeOllama, probeOpenAi]) {
         try {
             const result = await probe(context);
-            const id = uniqueProviderId(result.id, options.reservedProviderIds ?? []);
+            const root = normalizeProtocolRoot(result.baseUrl, "openai-chat-completions");
+            const id = stableCustomProviderId(root, "openai-chat-completions");
             return {
-                adapter: result.adapter,
+                adapter: result.adapter === "lm-studio" || result.adapter === "ollama"
+                    ? result.adapter
+                    : "openai-chat-completions",
                 provider: {
                     id,
                     name: result.name,
-                    baseUrl: result.baseUrl,
-                    api: result.api,
-                    authHeader: result.authHeader,
-                    requiresApiKey: Boolean(context.apiKey),
+                    baseUrl: root,
+                    api: "openai-completions",
+                    wireProtocol: "openai-chat-completions",
+                    authHeader: false,
+                    requiresApiKey: false,
+                    auth: { method: "none" },
                     models: enrichModels(result.models, catalogModels, result.preferredProvider),
                 },
             };
@@ -44,17 +126,6 @@ export async function discoverEndpoint(request, catalogModels = [], options = {}
         }
     }
     throw bestDiscoveryError(errors);
-}
-export async function discoverLocalEndpoints(catalogModels = [], options = {}) {
-    const candidates = [
-        "http://127.0.0.1:11434",
-        "http://127.0.0.1:1234",
-        "http://127.0.0.1:1337",
-    ];
-    const results = await Promise.allSettled(candidates.map((baseUrl) => discoverEndpoint({ baseUrl }, catalogModels, { ...options, timeoutMs: Math.min(options.timeoutMs ?? 1_200, 1_200) })));
-    return results
-        .filter((result) => result.status === "fulfilled")
-        .map((result) => result.value);
 }
 async function probeLmStudio(context) {
     const url = new URL("/api/v1/models", context.base.origin);
@@ -125,10 +196,16 @@ async function probeOllama(context) {
     };
 }
 async function probeAnthropic(context) {
-    const url = versionedEndpoint(context.base, "v1", "models");
+    const url = context.modelsUrl ?? versionedEndpoint(context.base, "v1", "models");
     const headers = { "anthropic-version": "2023-06-01" };
-    if (context.apiKey)
-        headers["x-api-key"] = context.apiKey;
+    if (context.apiKey) {
+        if (context.authMethod === "custom-header" && context.headerName) {
+            headers[context.headerName] = context.apiKey;
+        }
+        else {
+            headers["x-api-key"] = context.apiKey;
+        }
+    }
     const payload = await requestJson(context, url, headers);
     const entries = arrayField(payload, "data");
     if (!entries.some((entry) => stringField(entry, "display_name") || positiveIntegerField(entry, "max_input_tokens"))) {
@@ -195,8 +272,11 @@ async function probeGemini(context) {
     };
 }
 async function probeOpenAi(context) {
-    const url = versionedEndpoint(context.base, "v1", "models");
-    const payload = await requestJson(context, url, bearerHeaders(context.apiKey));
+    const url = context.modelsUrl ?? versionedEndpoint(context.base, "v1", "models");
+    const headers = context.apiKey && context.authMethod === "custom-header" && context.headerName
+        ? { [context.headerName]: context.apiKey }
+        : bearerHeaders(context.apiKey);
+    const payload = await requestJson(context, url, headers);
     const entries = arrayField(payload, "data");
     if (!entries.some((entry) => stringField(entry, "id")))
         throw unsupported();

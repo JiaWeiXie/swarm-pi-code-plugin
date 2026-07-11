@@ -6,12 +6,19 @@ import test from "node:test";
 import http from "node:http";
 import { once } from "node:events";
 
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
+
+import { getProviderDefinition } from "../src/providers/capabilities.js";
+import { CredentialDraftVault } from "../src/providers/credentials.js";
 import { loadState, resolveStateFile } from "../src/state/state.js";
-import { defaultModelConfiguration, resolveModelConfigurationFile } from "../src/state/model-config.js";
+import { defaultModelConfiguration, resolveModelConfigurationFile, saveModelConfiguration } from "../src/state/model-config.js";
 import {
+  configureBuiltInProvider,
   loadConfigurationView,
   saveConfigurationSubmission,
   saveProjectProfileSubmission,
+  signOutProvider,
+  verifyProviderConnection,
 } from "../src/web/configuration-service.js";
 import { startConfigurationServer } from "../src/web/configuration-server.js";
 import { renderConfigurationPage } from "../src/web/ui.js";
@@ -54,7 +61,10 @@ test("configuration page starts from connections and uses the original Swarm Pi 
     profile: null,
     directoryOptions: [],
     providers: [],
-    providerCatalog: [{ id: "openai", name: "OpenAI" }],
+    providerCatalog: ["openai", "openai-codex"].map((id) => ({
+      ...getProviderDefinition(id)!,
+      auth: { configured: false, source: null, label: null },
+    })),
     models: [],
     registryError: null,
     sandboxMode: "strict",
@@ -79,6 +89,19 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   assert.doesNotMatch(html, /Show all \d+ providers/);
   assert.doesNotMatch(html, /Raspberry|raspberry/i);
   assert.doesNotMatch(html, /Provider ID/);
+  assert.match(html, /ChatGPT Plus\/Pro/);
+  assert.match(html, /Provider catalog/);
+  assert.match(html, /Use signed-in account/);
+  assert.match(html, /Replace credential/);
+  assert.doesNotMatch(html, /Cloud API key/);
+  assert.match(html, /OpenAI Chat Completions/);
+  assert.match(html, /OpenAI Responses/);
+  assert.match(html, /Anthropic Messages/);
+  assert.match(html, /id="provider-fields"/);
+  assert.doesNotMatch(html, /id="cloud-key"/);
+
+  const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
+  assert.doesNotThrow(() => new Function(scripts.at(-1)?.[1] ?? ""));
 });
 
 test("project-only page starts from the guided project setup", () => {
@@ -138,17 +161,44 @@ test("project profile save validates scope and does not create model configurati
   );
 });
 
+test("built-in provider forms stage credentials and return protocol-specific profiles", async () => {
+  const { workspace, env } = fixture();
+  const vault = new CredentialDraftVault();
+  const secret = "openai-draft-secret";
+  const preview = await configureBuiltInProvider(workspace, {
+    provider: "openai",
+    authMethod: "api-key",
+    fields: {
+      apiKey: secret,
+      organization: "org_example",
+      project: "proj_example",
+    },
+  }, vault, env);
+
+  assert.equal(preview.profile.protocol, "openai-responses");
+  assert.equal(preview.profile.runtimeApi, "openai-responses");
+  assert.deepEqual(preview.profile.settings, {
+    organization: "org_example",
+    project: "proj_example",
+  });
+  assert.equal(preview.credentialDraft?.masked, true);
+  assert.equal(preview.models.every((model) => model.provider === "openai"), true);
+  assert.doesNotMatch(JSON.stringify(preview), new RegExp(secret));
+});
+
 test("configuration service stores credentials outside model and state files", async () => {
   const { workspace, privateDir, env, customProviders } = fixture();
   fs.mkdirSync(path.join(workspace, "src"));
   const secret = "test-secret-that-must-not-leak";
+  const credentialVault = new CredentialDraftVault();
+  const credentialDraft = credentialVault.stageApiKey("local-test", secret);
   const view = await saveConfigurationSubmission(
     workspace,
     {
       primary: "local-test/test-model",
       fallbacks: [],
       customProviders,
-      credential: { provider: "local-test", apiKey: secret },
+      credentialDrafts: [{ provider: "local-test", draftId: credentialDraft.id }],
       profile: {
         goal: "Maintain a guided setup experience",
         dirs: ["src"],
@@ -156,6 +206,7 @@ test("configuration service stores credentials outside model and state files", a
       },
     },
     env,
+    { credentialVault },
   );
   const modelFile = await resolveModelConfigurationFile(workspace);
   const stateFile = await resolveStateFile(workspace);
@@ -171,6 +222,27 @@ test("configuration service stores credentials outside model and state files", a
   assert.deepEqual((await loadState(workspace)).config.modelPriority, ["local-test/test-model"]);
   assert.equal((await loadState(workspace)).config.profile?.goal, "Maintain a guided setup experience");
   assert.deepEqual(view.directoryOptions, ["src"]);
+});
+
+test("sign out removes credentials for built-in and configured custom providers only", async () => {
+  const { workspace, env, customProviders } = fixture();
+  await saveModelConfiguration(workspace, {
+    primary: "local-test/test-model",
+    fallbacks: [],
+    customProviders,
+    providerProfiles: [],
+  });
+  const auth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  auth.set("local-test", { type: "api_key", key: "custom-secret" });
+  auth.set("openai", { type: "api_key", key: "openai-secret" });
+
+  await signOutProvider(workspace, "local-test", env);
+  await signOutProvider(workspace, "openai", env);
+
+  const reloadedAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  assert.equal(reloadedAuth.hasAuth("local-test"), false);
+  assert.equal(reloadedAuth.hasAuth("openai"), false);
+  await assert.rejects(() => signOutProvider(workspace, "unknown-provider", env), /Unknown provider/);
 });
 
 test("configuration save smoke-tests the selected model before persistence", async () => {
@@ -198,6 +270,56 @@ test("configuration save smoke-tests the selected model before persistence", asy
       }],
     }, smokeEnv);
     assert.equal(view.configuration.primary, "ready/ready-model");
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});
+
+test("explicit API verification promotes only the selected connection", async () => {
+  const { workspace, env } = fixture();
+  const server = http.createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    const common = { id: "chatcmpl-verify", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: "verify-model" };
+    response.write(`data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: { role: "assistant", content: "READY" }, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+    response.end("data: [DONE]\n\n");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const provider = "verify-local";
+  const customProvider = {
+    id: provider,
+    name: "Verify Local",
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    api: "openai-completions" as const,
+    wireProtocol: "openai-chat-completions" as const,
+    authHeader: false,
+    requiresApiKey: false,
+    auth: { method: "none" as const },
+    models: [{ id: "verify-model", name: "Verify", reasoning: false, input: ["text" as const] }],
+  };
+  try {
+    const result = await verifyProviderConnection(workspace, {
+      model: `${provider}/verify-model`,
+      customProviders: [customProvider],
+      providerProfiles: [{
+        id: provider,
+        provider,
+        name: "Verify Local",
+        connectionKind: "custom",
+        auth: { method: "none" },
+        protocol: "openai-chat-completions",
+        runtimeApi: "openai-completions",
+        readiness: "configured",
+        settings: {},
+        headers: [],
+      }],
+    }, new CredentialDraftVault(), env);
+    assert.equal(result.profile.readiness, "verified");
+    assert.equal(result.profile.verifiedModel, `${provider}/verify-model`);
   } finally {
     server.close();
     await once(server, "close");
@@ -241,6 +363,8 @@ test("custom models keep unknown limits automatic in the browser view", async ()
 
 test("configuration service validates every fallback and credential payload", async () => {
   const { workspace, env, customProviders } = fixture();
+  const credentialVault = new CredentialDraftVault();
+  const credentialDraft = credentialVault.stageApiKey("local-test", "valid-test-key");
   const lockedProvider = {
     ...customProviders[0]!,
     id: "locked-test",
@@ -255,9 +379,10 @@ test("configuration service validates every fallback and credential payload", as
         primary: "local-test/test-model",
         fallbacks: ["locked-test/locked-model"],
         customProviders: [...customProviders, lockedProvider],
-        credential: { provider: "local-test", apiKey: "valid-test-key" },
+        credentialDrafts: [{ provider: "local-test", draftId: credentialDraft.id }],
       },
       env,
+      { credentialVault },
     ),
     /Selected models are not authenticated/,
   );
@@ -268,11 +393,12 @@ test("configuration service validates every fallback and credential payload", as
         primary: "local-test/test-model",
         fallbacks: [],
         customProviders,
-        credential: { provider: 42, apiKey: [] } as never,
+        credentialDrafts: [{ provider: 42, draftId: [] }] as never,
       },
       env,
+      { credentialVault },
     ),
-    /Credential must contain a provider and API key string/,
+    /Credential draft references require provider and draftId strings/,
   );
 });
 
@@ -301,6 +427,56 @@ test("local configuration server requires its token and closes after save", asyn
   });
   assert.equal(forbidden.status, 403);
 
+  const legacyEndpoint = await fetch(`${setupUrl.origin}/api/connect-provider`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-swarm-token": token,
+      origin: setupUrl.origin,
+    },
+    body: JSON.stringify({ provider: "openai", apiKey: secret }),
+  });
+  assert.equal(legacyEndpoint.status, 404);
+  assert.doesNotMatch(await legacyEndpoint.text(), new RegExp(secret));
+
+  const rawCredential = await fetch(`${setupUrl.origin}/api/save`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-swarm-token": token,
+      origin: setupUrl.origin,
+    },
+    body: JSON.stringify({ primary: null, fallbacks: [], customProviders: [], credential: { provider: "openai", apiKey: secret } }),
+  });
+  assert.equal(rawCredential.status, 400);
+  assert.doesNotMatch(await rawCredential.text(), new RegExp(secret));
+
+  const credentialResponse = await fetch(`${setupUrl.origin}/api/providers/custom/credential`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-swarm-token": token,
+      origin: setupUrl.origin,
+      "sec-fetch-site": "same-origin",
+    },
+    body: JSON.stringify({
+      baseUrl: customProviders[0]!.baseUrl,
+      protocol: "openai-chat-completions",
+      authMethod: "api-key",
+      secret,
+    }),
+  });
+  const credentialBody = await credentialResponse.json() as {
+    provider: string;
+    credentialDraft: { id: string };
+  };
+  assert.equal(credentialResponse.status, 200);
+  assert.doesNotMatch(JSON.stringify(credentialBody), new RegExp(secret));
+  const stagedProvider = {
+    ...customProviders[0]!,
+    id: credentialBody.provider,
+    wireProtocol: "openai-chat-completions" as const,
+  };
   const response = await fetch(`${setupUrl.origin}/api/save`, {
     method: "POST",
     headers: {
@@ -310,10 +486,10 @@ test("local configuration server requires its token and closes after save", asyn
       "sec-fetch-site": "same-origin",
     },
     body: JSON.stringify({
-      primary: "local-test/test-model",
+      primary: `${credentialBody.provider}/test-model`,
       fallbacks: [],
-      customProviders,
-      credential: { provider: "local-test", apiKey: secret },
+      customProviders: [stagedProvider],
+      credentialDrafts: [{ provider: credentialBody.provider, draftId: credentialBody.credentialDraft.id }],
     }),
   });
   const body = await response.text();
@@ -327,7 +503,7 @@ test("local configuration server requires its token and closes after save", asyn
   await assert.rejects(() => fetch(server.url));
 
   const reconfigured = await loadConfigurationView(workspace, env);
-  assert.equal(reconfigured.configuration.primary, "local-test/test-model");
+  assert.equal(reconfigured.configuration.primary, `${credentialBody.provider}/test-model`);
   assert.equal(reconfigured.configuration.customProviders[0]?.baseUrl, "http://127.0.0.1:11434/v1");
 });
 

@@ -29,7 +29,9 @@ flowchart TB
     B --> A[Adaptive policy and approvals]
     B --> L[Lenient OS-sandboxed Bash]
     R --> D[Git common dir or user-state namespace]
-    D --> M[model.json]
+    R --> C[Provider capability registry]
+    C --> PR[Pi model registry and AuthStorage]
+    D --> MF[model.json]
     D --> S[state.json and jobs]
     H --> V[Host-owned verification and delivery]
     W --> V
@@ -137,7 +139,7 @@ worktrees normally observe the same setup:
 ├── model.json                  # provider, custom endpoint, primary, fallbacks
 ├── state.json                  # project profile, migration data, job index
 └── jobs/<job-id>/
-    ├── request.json            # durable execution request and worker token
+    ├── request.json            # durable request, provider snapshot/hash, worker token
     ├── prompt.md               # copied prompt, safe after host temp cleanup
     ├── heartbeat.json          # PID lease updated while running
     ├── approvals/              # generation-bound approval requests
@@ -153,7 +155,9 @@ unknowns, and version constraints are copied into the durable job prompt so the
 next implementation brief can reference the source job instead of rebuilding
 research from chat history.
 
-`model.json` is the canonical provider and model file. `state.json` stores the
+`model.json` is the canonical provider and model file. Provider profiles hold
+only non-secret adapter, endpoint, readiness, and controlled-header metadata.
+`state.json` stores the
 project goal, directory scope, delegated task types, sandbox mode, migration
 metadata, and job index. State updates use an inter-process lock, a
 same-directory temporary file, and an atomic rename.
@@ -171,10 +175,22 @@ the pending result once.
 
 ## Credentials
 
-Pi `AuthStorage` owns provider credentials in the user scope. The browser may
-accept an API key for a connection test and write it to Pi's credential store,
-but the key is never stored in `model.json`, `state.json`, job artifacts,
-stdout, logs, URLs, or browser responses.
+Pi `AuthStorage` owns provider credentials in the user scope. Browser input
+first enters a token-bound in-memory `CredentialDraftVault`; discovery,
+verification, and save refer to an opaque draft ID. Candidate verification uses
+an in-memory AuthStorage clone, and the real store changes only in the final
+transaction. The key is never stored in `model.json`, `state.json`, job
+artifacts, localStorage, stdout, logs, URLs, or browser responses.
+
+ChatGPT Plus/Pro uses Pi's `openai-codex` browser or device-code OAuth and the
+`openai-codex-responses` adapter. It is a separate connection from OpenAI API
+keys. OAuth prompts are carried through bounded long polling; cancellation,
+timeout, and server shutdown abort the flow.
+
+Provider profiles are converted to provider-scoped environment overlays and
+controlled request headers. They never mutate `process.env`. Literal header
+values are escaped before Pi configuration resolution, while secret headers
+resolve only through AuthStorage references.
 
 The plugin does not scan `.env` files or copy private credentials from Claude
 Code, Codex, or another application's credential store. Provider discovery is
@@ -192,6 +208,11 @@ Full setup saves model configuration, role policy, execution safety, and project
 profile together. Project-only setup starts at **Roles**, pre-populates the
 existing settings, and writes only shared state. Neither flow deletes jobs or
 global Pi credentials.
+
+New job requests use schema version 3 and embed the submitted non-secret model
+and provider configuration plus an integrity hash. Background workers use that
+snapshot but resolve credentials at execution time, so later settings changes
+affect only new jobs and credential revocation remains effective.
 
 ## Migration
 

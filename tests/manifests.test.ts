@@ -10,13 +10,16 @@ function readJson(relativePath: string): Record<string, unknown> {
 }
 
 test("Claude and Codex manifests use the swarm-pi-code-plugin identity", () => {
+  const packageManifest = readJson("package.json");
   const claude = readJson("plugins/swarm-pi-code-plugin/.claude-plugin/plugin.json");
   const codex = readJson("plugins/swarm-pi-code-plugin/.codex-plugin/plugin.json");
+  const version = packageManifest.version as string;
+  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   assert.equal(claude.name, "swarm-pi-code-plugin");
   assert.equal(codex.name, "swarm-pi-code-plugin");
-  assert.equal(claude.version, "0.1.3");
-  assert.match(codex.version as string, /^0\.1\.3\+codex\.\d{14}$/);
+  assert.equal(claude.version, version);
+  assert.match(codex.version as string, new RegExp(`^${escapedVersion}\\+codex\\.\\d{14}$`));
   assert.equal(codex.skills, "./skills/");
 });
 

@@ -22,6 +22,7 @@ export function describeProviders(catalog, configuration) {
             ...availableModels.map((model) => model.provider),
             ...custom,
             ...selectedProviders,
+            ...configuration.providerProfiles.map((profile) => profile.provider),
         ])].sort((left, right) => (catalog.displayName?.(left) ?? left).localeCompare(catalog.displayName?.(right) ?? right));
     return providerIds.map((id) => {
         const models = all.filter((model) => model.provider === id);

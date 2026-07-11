@@ -973,6 +973,11 @@ test("background submission returns an accepted job without creating a Pi sessio
   assert.equal(snapshot.job.pid, 424_242);
   assert.equal(snapshot.job.timeoutMs, 30 * 60_000);
   assert.equal(snapshot.job.sandboxMode, "lenient");
+  const request = await readJobRequest(workspace, "jobId" in result ? result.jobId : "");
+  assert.equal(request.requestVersion, 3);
+  assert.equal(request.modelConfiguration?.version, 1);
+  assert.match(request.providerSnapshotHash ?? "", /^[a-f0-9]{64}$/);
+  assert.doesNotMatch(JSON.stringify(request.modelConfiguration), /apiKey|access-token|refresh-token/);
 });
 
 test("background mechanical implementation uses an isolated job worktree", async () => {
@@ -1113,6 +1118,41 @@ test("private background worker reconstructs and completes a durable job", async
   assert.equal("status" in result && result.status, "succeeded");
   assert.equal("output" in result && result.output, "background done");
   assert.equal((await getJob(workspace, handle.id)).job.notification, "pending");
+});
+
+test("background worker rejects a tampered provider configuration snapshot", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-background-snapshot-"));
+  const handle = await startJob(workspace, {
+    host: "codex",
+    kind: "ask",
+    prompt: "Snapshot integrity",
+    cwd: workspace,
+    executionMode: "background",
+    timeoutMs: 30_000,
+    modelConfiguration: defaultModelConfiguration(["test-provider/test-model"]),
+  });
+  const stateDir = await resolveStateDir(workspace);
+  const requestFile = path.join(stateDir, "jobs", handle.id, "request.json");
+  const request = JSON.parse(fs.readFileSync(requestFile, "utf8"));
+  request.providerSnapshotHash = "0".repeat(64);
+  fs.writeFileSync(requestFile, JSON.stringify(request));
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "unused",
+    createSession: async () => { throw new Error("tampered snapshot must not start a session"); },
+  };
+
+  const result = await runCommand({
+    command: "__worker",
+    jobId: handle.id,
+    workerToken: handle.workerToken,
+    reconfigure: false,
+    reset: false,
+    json: true,
+  }, workspace, dependencies);
+
+  assert.equal("status" in result && result.status, "failed");
+  assert.match("output" in result ? result.output : "", /integrity validation/);
 });
 
 test("jobs commands expose list, status, wait timeout, and acknowledge", async () => {

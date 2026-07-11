@@ -2,9 +2,11 @@ import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import http, {} from "node:http";
 import { once } from "node:events";
-import { resolveModelConfigurationFile } from "../state/model-config.js";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { CredentialDraftVault, OAuthSessionManager } from "../providers/credentials.js";
+import { resolveModelConfigurationFile, } from "../state/model-config.js";
 import { loadState } from "../state/state.js";
-import { discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, previewProviderConnection, saveConfigurationSubmission, saveProjectProfileSubmission, } from "./configuration-service.js";
+import { configureBuiltInProvider, createManualCustomProvider, discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, saveConfigurationSubmission, saveProjectProfileSubmission, signOutProvider, stageCustomProviderCredential, verifyProviderConnection, } from "./configuration-service.js";
 import { EndpointDiscoveryError } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
 const LOOPBACK_HOST = "127.0.0.1";
@@ -14,6 +16,8 @@ export async function startConfigurationServer(cwd, options = {}) {
     const token = randomBytes(32).toString("base64url");
     const env = options.env ?? process.env;
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const credentialVault = new CredentialDraftVault();
+    const oauthSessions = new OAuthSessionManager(credentialVault, AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE), { timeoutMs: Math.min(timeoutMs, 10 * 60 * 1000) });
     let origin = "";
     let settled = false;
     let idleTimer;
@@ -40,8 +44,10 @@ export async function startConfigurationServer(cwd, options = {}) {
             }
             if (request.method === "POST" && url.pathname === "/api/save") {
                 assertJsonRequest(request, origin);
-                const submission = (await readJsonBody(request));
-                const view = await saveConfigurationSubmission(cwd, submission, env);
+                const body = await readJsonBody(request);
+                assertNoRawCredentials(body);
+                const submission = body;
+                const view = await saveConfigurationSubmission(cwd, submission, env, { credentialVault });
                 response.setHeader("Connection", "close");
                 response.once("finish", () => void finish("saved"));
                 json(response, 200, { saved: true, configuration: view.configuration });
@@ -58,13 +64,25 @@ export async function startConfigurationServer(cwd, options = {}) {
                 json(response, 200, { saved: true, profile, sandboxMode });
                 return;
             }
-            if (request.method === "POST" && url.pathname === "/api/discover") {
+            if (request.method === "POST" && url.pathname === "/api/providers/connect") {
                 assertJsonRequest(request, origin);
-                const discovery = normalizeDiscoveryRequest(await readJsonBody(request));
-                json(response, 200, await discoverConfigurationEndpoint(cwd, discovery, env));
+                const connection = normalizeBuiltInConnectionRequest(await readJsonBody(request));
+                json(response, 200, await configureBuiltInProvider(cwd, connection, credentialVault, env));
                 return;
             }
-            if (request.method === "POST" && url.pathname === "/api/discover-local") {
+            if (request.method === "POST" && url.pathname === "/api/providers/custom/credential") {
+                assertJsonRequest(request, origin);
+                const credential = normalizeCustomCredentialRequest(await readJsonBody(request));
+                json(response, 200, await stageCustomProviderCredential(cwd, credentialVault, credential));
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/providers/discover") {
+                assertJsonRequest(request, origin);
+                const discovery = normalizeDiscoveryRequest(await readJsonBody(request));
+                json(response, 200, await discoverConfigurationEndpoint(cwd, discovery, credentialVault, env));
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/providers/local") {
                 assertJsonRequest(request, origin);
                 await readJsonBody(request);
                 json(response, 200, {
@@ -72,10 +90,46 @@ export async function startConfigurationServer(cwd, options = {}) {
                 });
                 return;
             }
-            if (request.method === "POST" && url.pathname === "/api/connect-provider") {
+            if (request.method === "POST" && url.pathname === "/api/providers/custom/manual") {
                 assertJsonRequest(request, origin);
-                const credential = normalizeProviderCredential(await readJsonBody(request));
-                json(response, 200, await previewProviderConnection(cwd, credential, env));
+                json(response, 200, await createManualCustomProvider(cwd, normalizeManualProviderRequest(await readJsonBody(request))));
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/providers/verify") {
+                assertJsonRequest(request, origin);
+                const verification = normalizeVerificationRequest(await readJsonBody(request));
+                json(response, 200, await verifyProviderConnection(cwd, verification, credentialVault, env));
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/providers/sign-out") {
+                assertJsonRequest(request, origin);
+                const provider = normalizeProviderId(await readJsonBody(request));
+                await signOutProvider(cwd, provider, env);
+                json(response, 200, { signedOut: true, provider });
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/oauth/start") {
+                assertJsonRequest(request, origin);
+                const oauth = normalizeOAuthStart(await readJsonBody(request));
+                json(response, 202, oauthSessions.start(oauth.provider, oauth.preferredMethod));
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/oauth/status") {
+                assertJsonRequest(request, origin);
+                const poll = normalizeOAuthPoll(await readJsonBody(request));
+                json(response, 200, await oauthSessions.waitForStatus(poll.sessionId, poll.afterRevision, poll.waitTimeoutMs));
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/oauth/respond") {
+                assertJsonRequest(request, origin);
+                const answer = normalizeOAuthResponse(await readJsonBody(request));
+                json(response, 200, oauthSessions.respond(answer.sessionId, answer.challengeId, answer.value));
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/oauth/cancel") {
+                assertJsonRequest(request, origin);
+                const sessionId = normalizeSessionId(await readJsonBody(request));
+                json(response, 200, oauthSessions.cancel(sessionId));
                 return;
             }
             if (request.method === "POST" && url.pathname === "/api/cancel") {
@@ -125,6 +179,8 @@ export async function startConfigurationServer(cwd, options = {}) {
         settled = true;
         if (idleTimer)
             clearTimeout(idleTimer);
+        oauthSessions.dispose();
+        credentialVault.clear();
         await closeServer(server);
         resolveCompletion({
             status,
@@ -146,7 +202,7 @@ export async function startConfigurationServer(cwd, options = {}) {
     };
 }
 function setupProblem(error) {
-    const message = error instanceof Error ? error.message : "Configuration failed";
+    const message = redactSetupMessage(error instanceof Error ? error.message : "Configuration failed");
     const code = error instanceof EndpointDiscoveryError
         ? error.code
         : message.includes("smoke test")
@@ -167,6 +223,13 @@ function setupProblem(error) {
         preserved: ["form input", "previous saved configuration"],
         nextActions: code === "sandbox-backend-unavailable" ? ["use-strict", "doctor"] : ["review-current-step", "doctor"],
     };
+}
+function redactSetupMessage(value) {
+    return value
+        .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [redacted]")
+        .replace(/\bsk-[A-Za-z0-9_-]+/gi, "[redacted]")
+        .replace(/\b(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+        .slice(0, 2_000);
 }
 function normalizeProjectSubmission(value) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -194,23 +257,26 @@ function normalizeProjectSubmission(value) {
     };
 }
 function normalizeDiscoveryRequest(value) {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw new HttpError(400, "Discovery request must be a JSON object");
-    }
-    const record = value;
+    const record = objectRequest(value, "Discovery request");
     if (typeof record.baseUrl !== "string")
         throw new HttpError(400, "Server URL is required");
-    if (record.apiKey !== undefined && typeof record.apiKey !== "string") {
-        throw new HttpError(400, "API key must be a string");
+    if (record.protocol !== "openai-chat-completions" && record.protocol !== "openai-responses" && record.protocol !== "anthropic-messages") {
+        throw new HttpError(400, "A supported API protocol is required");
     }
-    if (record.apiKey && record.apiKey.length > 16_384)
-        throw new HttpError(400, "API key is too long");
+    if ("apiKey" in record || "secret" in record)
+        throw new HttpError(400, "Use a credential draft for discovery");
+    const provider = providerId(record.provider);
     const reservedProviderIds = record.reservedProviderIds === undefined
         ? []
         : normalizeReservedProviderIds(record.reservedProviderIds);
     return {
         baseUrl: record.baseUrl,
-        ...(record.apiKey ? { apiKey: record.apiKey } : {}),
+        provider,
+        protocol: record.protocol,
+        ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint ? { modelsEndpoint: record.modelsEndpoint } : {}),
+        ...(record.authMethod === "api-key" || record.authMethod === "none" || record.authMethod === "custom-header" ? { authMethod: record.authMethod } : {}),
+        ...(record.headerName === "authorization" || record.headerName === "x-api-key" || record.headerName === "api-key" ? { headerName: record.headerName } : {}),
+        ...(typeof record.credentialDraftId === "string" ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") } : {}),
         ...(reservedProviderIds.length > 0 ? { reservedProviderIds } : {}),
     };
 }
@@ -226,20 +292,173 @@ function normalizeReservedProviderIds(value) {
     });
     return [...new Set(identifiers)];
 }
-function normalizeProviderCredential(value) {
+function normalizeBuiltInConnectionRequest(value) {
+    const record = objectRequest(value, "Connection request");
+    const provider = providerId(record.provider);
+    const authMethod = record.authMethod;
+    if (authMethod !== "api-key" && authMethod !== "oauth" && authMethod !== "ambient" && authMethod !== "none" && authMethod !== "custom-header") {
+        throw new HttpError(400, "A supported authentication method is required");
+    }
+    const fields = stringFields(record.fields, "Provider fields");
+    return {
+        provider,
+        authMethod,
+        fields,
+        ...(typeof record.credentialDraftId === "string" ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") } : {}),
+    };
+}
+function normalizeCustomCredentialRequest(value) {
+    const record = objectRequest(value, "Custom credential request");
+    const protocol = wireProtocol(record.protocol);
+    const authMethod = record.authMethod;
+    if (authMethod !== "api-key" && authMethod !== "none" && authMethod !== "custom-header") {
+        throw new HttpError(400, "A supported custom authentication method is required");
+    }
+    return {
+        baseUrl: requiredText(record.baseUrl, "Server URL"),
+        protocol,
+        authMethod,
+        ...(typeof record.secret === "string" ? { secret: boundedTextField(record.secret, "Credential", 16_384) } : {}),
+        ...(record.headerName === "authorization" || record.headerName === "x-api-key" || record.headerName === "api-key" ? { headerName: record.headerName } : {}),
+        ...(typeof record.existingProvider === "string" ? { existingProvider: providerId(record.existingProvider) } : {}),
+    };
+}
+function normalizeManualProviderRequest(value) {
+    const record = objectRequest(value, "Manual provider request");
+    const authMethod = record.authMethod;
+    if (authMethod !== "api-key" && authMethod !== "none" && authMethod !== "custom-header") {
+        throw new HttpError(400, "A supported custom authentication method is required");
+    }
+    if (!Array.isArray(record.modelIds) || !record.modelIds.every((entry) => typeof entry === "string")) {
+        throw new HttpError(400, "Manual model identifiers must be a string array");
+    }
+    return {
+        baseUrl: requiredText(record.baseUrl, "Server URL"),
+        protocol: wireProtocol(record.protocol),
+        authMethod,
+        modelIds: record.modelIds,
+        ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint ? { modelsEndpoint: record.modelsEndpoint } : {}),
+        ...(typeof record.name === "string" && record.name ? { name: record.name } : {}),
+        ...(record.headerName === "authorization" || record.headerName === "x-api-key" || record.headerName === "api-key" ? { headerName: record.headerName } : {}),
+        ...(typeof record.existingProvider === "string" ? { existingProvider: providerId(record.existingProvider) } : {}),
+    };
+}
+function normalizeVerificationRequest(value) {
+    const record = objectRequest(value, "Verification request");
+    assertNoRawCredentials(record);
+    if (!Array.isArray(record.customProviders) || !Array.isArray(record.providerProfiles)) {
+        throw new HttpError(400, "Verification requires provider configuration and profiles");
+    }
+    const drafts = record.credentialDrafts;
+    if (drafts !== undefined && !Array.isArray(drafts))
+        throw new HttpError(400, "Credential drafts must be an array");
+    return {
+        model: requiredText(record.model, "Model"),
+        customProviders: record.customProviders,
+        providerProfiles: record.providerProfiles,
+        ...(drafts ? { credentialDrafts: drafts } : {}),
+    };
+}
+function normalizeOAuthStart(value) {
+    const record = objectRequest(value, "OAuth start request");
+    return {
+        provider: providerId(record.provider),
+        ...(typeof record.preferredMethod === "string" && record.preferredMethod ? { preferredMethod: boundedTextField(record.preferredMethod, "OAuth method", 128) } : {}),
+    };
+}
+function normalizeOAuthPoll(value) {
+    const record = objectRequest(value, "OAuth status request");
+    return {
+        sessionId: uuid(record.sessionId, "OAuth session"),
+        afterRevision: boundedInteger(record.afterRevision, "OAuth revision", 0, Number.MAX_SAFE_INTEGER),
+        waitTimeoutMs: boundedInteger(record.waitTimeoutMs ?? 20_000, "OAuth wait timeout", 0, 25_000),
+    };
+}
+function normalizeOAuthResponse(value) {
+    const record = objectRequest(value, "OAuth response");
+    return {
+        sessionId: uuid(record.sessionId, "OAuth session"),
+        challengeId: uuid(record.challengeId, "OAuth challenge"),
+        ...(typeof record.value === "string" ? { value: boundedTextField(record.value, "OAuth response", 16_384, true) } : {}),
+    };
+}
+function normalizeSessionId(value) {
+    return uuid(objectRequest(value, "OAuth cancel request").sessionId, "OAuth session");
+}
+function normalizeProviderId(value) {
+    return providerId(objectRequest(value, "Provider request").provider);
+}
+function objectRequest(value, label) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw new HttpError(400, "Connection request must be a JSON object");
+        throw new HttpError(400, `${label} must be a JSON object`);
     }
-    const record = value;
-    if (typeof record.provider !== "string" || !record.provider.trim()) {
-        throw new HttpError(400, "Provider is required");
+    return value;
+}
+function stringFields(value, label) {
+    const record = objectRequest(value, label);
+    if (Object.keys(record).length > 64)
+        throw new HttpError(400, `${label} contains too many entries`);
+    const fields = {};
+    for (const [key, raw] of Object.entries(record)) {
+        if (typeof raw !== "string")
+            throw new HttpError(400, `${label}.${key} must be text`);
+        fields[key] = boundedTextField(raw, `${label}.${key}`, 16_384, true);
     }
-    if (typeof record.apiKey !== "string" || !record.apiKey.trim()) {
-        throw new HttpError(400, "API key is required");
+    return fields;
+}
+function providerId(value) {
+    if (typeof value !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(value)) {
+        throw new HttpError(400, "Provider identifier is invalid");
     }
-    if (record.apiKey.length > 16_384)
-        throw new HttpError(400, "API key is too long");
-    return { provider: record.provider.trim(), apiKey: record.apiKey.trim() };
+    return value;
+}
+function uuid(value, label) {
+    if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+        throw new HttpError(400, `${label} identifier is invalid`);
+    }
+    return value;
+}
+function wireProtocol(value) {
+    if (value !== "openai-chat-completions" && value !== "openai-responses" && value !== "anthropic-messages") {
+        throw new HttpError(400, "A supported API protocol is required");
+    }
+    return value;
+}
+function requiredText(value, label) {
+    if (typeof value !== "string")
+        throw new HttpError(400, `${label} is required`);
+    return boundedTextField(value, label, 16_384);
+}
+function boundedTextField(value, label, maximum, allowEmpty = false) {
+    const normalized = value.trim();
+    if (!allowEmpty && !normalized)
+        throw new HttpError(400, `${label} is required`);
+    if (value.length > maximum)
+        throw new HttpError(400, `${label} is too long`);
+    return normalized;
+}
+function boundedInteger(value, label, minimum, maximum) {
+    if (!Number.isInteger(value) || Number(value) < minimum || Number(value) > maximum) {
+        throw new HttpError(400, `${label} must be an integer between ${minimum} and ${maximum}`);
+    }
+    return Number(value);
+}
+function assertNoRawCredentials(value) {
+    const forbidden = new Set(["apikey", "credential", "credentials", "secret", "token"]);
+    const visit = (current) => {
+        if (Array.isArray(current)) {
+            current.forEach(visit);
+            return;
+        }
+        if (typeof current !== "object" || current === null)
+            return;
+        for (const [key, nested] of Object.entries(current)) {
+            if (forbidden.has(key.toLowerCase()))
+                throw new HttpError(400, "Raw credentials are only accepted by the credential draft endpoint");
+            visit(nested);
+        }
+    };
+    visit(value);
 }
 function isLoopbackRequest(request, origin) {
     const remote = request.socket.remoteAddress;

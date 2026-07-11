@@ -37,7 +37,8 @@ sandbox. Git delivery remains host-owned.
 Runtime configuration and jobs stay outside the checked-out worktree. Git
 repositories use `.git/swarm-pi-code-plugin/` through the common Git directory;
 non-Git folders use an OS user-state namespace. Credentials stay in Pi's user
-credential store and never enter project artifacts or browser drafts.
+credential store. Browser input becomes an opaque, session-local draft and
+never enters project artifacts or localStorage.
 
 See the [architecture reference](docs/architecture.md) and
 [configuration reference](docs/configuration.md) for implementation details.
@@ -116,7 +117,8 @@ decisions for approvals, adoption, artifact materialization, and delivery.
 
 Run the host-specific setup entry point. The browser walks through six steps:
 
-1. Connect usable cloud or local AI services.
+1. Connect cloud, subscription, ambient-identity, or local AI services with
+   provider-specific fields.
 2. Choose a project primary model and ordered fallbacks.
 3. Assign model chains and thinking levels to worker roles.
 4. Choose sandbox, classifier, approval, and background policies.
@@ -134,16 +136,40 @@ initial commit reports `git-unborn`; implementation fails before model startup
 and returns scaffold or adoption actions plus a resumable continuation.
 
 The connection list is intentionally empty when no usable service is detected.
-Custom endpoints can be tested before the provider ID, API protocol, model
-limits, or model IDs are shown.
+Custom endpoints select their API protocol before model discovery. Provider
+IDs remain internal, and model limits stay automatic when the endpoint and Pi
+catalog do not establish them.
 
-### Setup preview
+![Six-step setup with no usable connection](docs/assets/setup/01-empty-connections.png)
 
-![Empty AI connections state](docs/assets/setup/01-empty-connections.png)
+### Provider connections
 
-![Guided project setup](docs/assets/setup/03-project-setup.png)
+The setup form is driven by the pinned Pi provider catalog. OpenAI uses the
+Responses adapter, Anthropic uses Messages, and mixed providers retain Pi's
+per-model adapter. Cloud providers show only their required project, region,
+resource, account, or deployment fields.
 
-![Review before saving](docs/assets/setup/04-review.png)
+ChatGPT Plus/Pro is a separate **ChatGPT subscription** connection backed by
+Pi's `openai-codex` browser or device-code OAuth. It is not loaded through an
+OpenAI API-key field. GitHub Copilot and Anthropic subscription sign-in use the
+same bounded OAuth flow.
+
+![ChatGPT Plus or Pro subscription OAuth](docs/assets/setup/02-chatgpt-subscription.png)
+
+Custom endpoints choose one protocol: OpenAI Chat Completions, OpenAI
+Responses, or Anthropic Messages. Model discovery and **Verify API** are
+separate actions; loading `/models` does not prove that generation, tools, or
+reasoning work. If a server has no model-list endpoint, model IDs can be entered
+manually without being marked verified.
+
+![Custom endpoint protocol and authentication](docs/assets/setup/02-endpoint-discovery.png)
+
+After a connection is staged, configuration, credential replacement, API
+verification, sign-out, and project removal remain separate actions. Leaving a
+secret field blank keeps the saved credential; no existing secret is returned
+to the browser.
+
+![Provider readiness and credential actions](docs/assets/setup/03-provider-actions.png)
 
 ### Reconfigure
 
@@ -159,6 +185,8 @@ The project flow reads current role, safety, and profile settings, then updates
 only `state.json`. It does not
 rewrite model configuration, credentials, or job history.
 
+![Project-only role and safety configuration](docs/assets/setup/06-project-only.png)
+
 ### Execution safety and roles
 
 Projects default to **Strict**, which keeps scoped Pi tools and exposes no
@@ -171,6 +199,32 @@ Adaptive classifier prompts expose only the proposed action and limited policy
 context to the configured provider. Lenient source visible to the worker can be
 sent to external services. Unsupported platforms and missing dependencies fail
 closed and never fall back to an unsandboxed shell.
+
+Role routing keeps each responsibility's primary model, Thinking level, retry
+limit, and supported execution modes visible. Adaptive mode separately selects
+the classifier chain and approval fallback inside the sandbox capability
+ceiling.
+
+![Per-role model and Thinking configuration](docs/assets/setup/04-role-routing.png)
+
+![Adaptive sandbox and classifier configuration](docs/assets/setup/05-execution-safety.png)
+
+### Workspace and review
+
+Workspace setup records the product goal, allowed folder scope, and delegated
+task kinds after reporting Git readiness. Review then shows the effective
+provider protocol, authentication source, model source, verification state,
+role routing, and safety policy before the transaction is committed.
+
+![Workspace goal, scope, and delegated task kinds](docs/assets/setup/03-project-setup.png)
+
+![Provider, model, project, and safety review](docs/assets/setup/04-review.png)
+
+Successful save replaces credentials and configuration transactionally, clears
+the in-memory drafts, and closes the temporary local server. These screenshots
+use an isolated demo workspace and contain no real credentials.
+
+![Configuration saved](docs/assets/setup/05-saved.png)
 
 ### Non-interactive runner
 
@@ -216,6 +270,10 @@ Background mode is supported by scout, planner, reviewer, and analyst roles.
 Mechanical implementation may run in background only when explicitly enabled;
 the control plane creates a job-owned branch and worktree. Executor and
 security-executor implementation remain supervised.
+
+Each new durable job stores a non-secret provider/model snapshot and integrity
+hash. Settings changed later affect only new jobs; credentials are resolved at
+execution time, so sign-out or rotation still takes effect for queued work.
 
 Worker commands use a 30-minute default timeout for `ask`, `plan`, and `review`,
 and a 60-minute default for `orchestrate` and `implement`. Override the job
@@ -281,8 +339,9 @@ or copy private Claude Code or Codex credentials.
 
 ### Endpoint discovery fails
 
-Confirm the URL is an HTTP(S) model server endpoint, not a browser dashboard
-URL. Check the optional API key, then use **Test and find models** again. The
+Confirm the URL is an HTTP(S) API root, not a browser dashboard or full
+generation URL. Confirm the selected protocol and credential, then use
+**Load models** again. The
 server reports whether the failure is authentication, timeout, unreachable
 server, malformed response, redirect, or unsupported endpoint.
 
@@ -408,6 +467,9 @@ open-source projects and documentation:
 - [r4vi/pi-auto-mode](https://github.com/r4vi/pi-auto-mode) and
   [czottmann/pi-automode](https://github.com/czottmann/pi-automode) informed
   the adaptive permission classifier, policy decisions, and approval flow.
+- [farion1231/cc-switch](https://github.com/farion1231/cc-switch) informed the
+  provider-form and protocol-selection research. This plugin uses Pi's native
+  adapters rather than CC-Switch's protocol translation proxy.
 
 These projects are design references. The plugin implements its own trusted,
 non-interactive policy and enforcement runtime and does not load their complete

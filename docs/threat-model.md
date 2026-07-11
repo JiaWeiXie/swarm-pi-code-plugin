@@ -39,6 +39,12 @@ repository instructions, or a supervisor approval.
 | Parallel Bash changes global policy | worker-local serialization, immutable job policy snapshot |
 | Worker dies while waiting | heartbeat reconciliation, orphan terminal result, stale approval rejection |
 | Network destination changes after approval | destination checks at connect time, hostname and resolved-address policy |
+| Provider protocol is guessed incorrectly | explicit wire protocol, canonical roots, one protocol per connection |
+| Browser or job artifact leaks a credential | opaque draft IDs, AuthStorage-only secrets, response and journal redaction |
+| OAuth flow outlives setup | bounded polling, AbortSignal, timeout, cancel and server-dispose cleanup |
+| Literal header triggers Pi config syntax | controlled allowlist, control-character rejection, literal escaping |
+| Settings change during a background job | immutable version-3 provider snapshot and integrity hash |
+| Credential is revoked after submission | resolve current AuthStorage at execution and fail explicitly |
 | Background mutation conflicts with host | job-owned worktree and branch, no automatic integration |
 | Logs expose source or secrets | redacted summaries by default, mode 0600 artifacts, bounded diagnostics |
 
@@ -48,6 +54,9 @@ Lenient mode intentionally permits outbound traffic and therefore permits
 source exfiltration visible to the worker. Adaptive classification can make a
 wrong bounded decision. The sandbox backend may have platform defects. Model
 providers receive the limited classifier context configured by the user.
+Custom `API key + secret header` connections send the same credential through
+the protocol-standard auth mechanism and the selected additional header to the
+configured origin. Use this only when that upstream explicitly requires both.
 
 These risks are surfaced in setup, recorded in job policy snapshots, and
 contained by the immutable ceiling. Whole-process container isolation remains

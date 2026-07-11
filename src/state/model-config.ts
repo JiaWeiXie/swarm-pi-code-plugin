@@ -2,6 +2,19 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import {
+  getProviderDefinition,
+  type ConnectionReadiness,
+  type ProviderAuthMethod,
+  type ProviderRuntimeApi,
+  type WireProtocol,
+} from "../providers/capabilities.js";
+import {
+  normalizeModelsEndpoint,
+  normalizeProtocolRoot,
+  runtimeApiForWireProtocol,
+  wireProtocolForRuntimeApi,
+} from "../providers/endpoints.js";
 import { resolveStateDir } from "./state.js";
 
 export const SUPPORTED_PROVIDER_APIS = [
@@ -12,6 +25,24 @@ export const SUPPORTED_PROVIDER_APIS = [
 ] as const;
 
 export type SupportedProviderApi = (typeof SUPPORTED_PROVIDER_APIS)[number];
+
+export const CONTROLLED_LITERAL_HEADER_NAMES = [
+  "anthropic-beta",
+  "http-referer",
+  "openai-organization",
+  "openai-project",
+  "x-title",
+] as const;
+
+export const CONTROLLED_SECRET_HEADER_NAMES = [
+  "api-key",
+  "authorization",
+  "x-api-key",
+] as const;
+
+export type ControlledLiteralHeaderName = (typeof CONTROLLED_LITERAL_HEADER_NAMES)[number];
+export type ControlledSecretHeaderName = (typeof CONTROLLED_SECRET_HEADER_NAMES)[number];
+export type ControlledHeaderName = ControlledLiteralHeaderName | ControlledSecretHeaderName;
 
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_MODEL_MAX_TOKENS = 16_384;
@@ -41,6 +72,35 @@ export interface CustomModelConfiguration {
   metadata?: CustomModelMetadata | undefined;
 }
 
+export interface ProviderAuthConfiguration {
+  method: ProviderAuthMethod;
+  secretRef?: string | undefined;
+  headerName?: ControlledSecretHeaderName | undefined;
+}
+
+export interface ControlledProviderHeader {
+  name: ControlledHeaderName;
+  value?: string | undefined;
+  secretRef?: string | undefined;
+}
+
+export interface ProviderProfile {
+  id: string;
+  provider: string;
+  name: string;
+  connectionKind: "builtin" | "custom";
+  auth: ProviderAuthConfiguration;
+  protocol?: WireProtocol | undefined;
+  runtimeApi: ProviderRuntimeApi | "managed-per-model";
+  readiness: ConnectionReadiness;
+  settings: Record<string, string>;
+  headers: ControlledProviderHeader[];
+  modelsEndpoint?: string | undefined;
+  discoveredAt?: string | undefined;
+  verifiedAt?: string | undefined;
+  verifiedModel?: string | undefined;
+}
+
 export interface CustomProviderConfiguration {
   id: string;
   name: string;
@@ -48,6 +108,10 @@ export interface CustomProviderConfiguration {
   api: SupportedProviderApi;
   authHeader: boolean;
   requiresApiKey: boolean;
+  auth?: ProviderAuthConfiguration | undefined;
+  wireProtocol?: WireProtocol | undefined;
+  modelsEndpoint?: string | undefined;
+  headers?: ControlledProviderHeader[] | undefined;
   models: CustomModelConfiguration[];
 }
 
@@ -56,6 +120,7 @@ export interface ModelConfiguration {
   primary: string | null;
   fallbacks: string[];
   customProviders: CustomProviderConfiguration[];
+  providerProfiles: ProviderProfile[];
   updatedAt: string | null;
 }
 
@@ -65,6 +130,7 @@ export function defaultModelConfiguration(priority: string[] = []): ModelConfigu
     primary: priority[0] ?? null,
     fallbacks: unique(priority.slice(1)),
     customProviders: [],
+    providerProfiles: [],
     updatedAt: null,
   };
 }
@@ -90,8 +156,8 @@ export async function loadModelConfiguration(
 
 export async function saveModelConfiguration(
   cwd: string,
-  value: Omit<ModelConfiguration, "version" | "updatedAt"> &
-    Partial<Pick<ModelConfiguration, "version" | "updatedAt">>,
+  value: Omit<ModelConfiguration, "version" | "updatedAt" | "providerProfiles"> &
+    Partial<Pick<ModelConfiguration, "version" | "updatedAt" | "providerProfiles">>,
 ): Promise<ModelConfiguration> {
   const normalized = parseModelConfiguration({
     ...value,
@@ -120,6 +186,7 @@ export async function saveModelPriority(
     primary: normalizedPriority[0] ?? null,
     fallbacks: normalizedPriority.slice(1),
     customProviders: current.customProviders,
+    providerProfiles: current.providerProfiles,
   });
 }
 
@@ -146,18 +213,36 @@ export function parseModelConfiguration(value: unknown): ModelConfiguration {
   if (new Set(providerIds).size !== providerIds.length) {
     throw new Error("custom provider identifiers must be unique");
   }
+  const providerProfiles = optionalArrayValue(record.providerProfiles, "providerProfiles").map(
+    parseProviderProfile,
+  );
+  const profileIds = providerProfiles.map((profile) => profile.id);
+  if (new Set(profileIds).size !== profileIds.length) {
+    throw new Error("provider profile identifiers must be unique");
+  }
+  const profiledProviders = providerProfiles.map((profile) => profile.provider);
+  if (new Set(profiledProviders).size !== profiledProviders.length) {
+    throw new Error("each provider may have only one provider profile");
+  }
+  const customIds = new Set(providerIds);
+  for (const profile of providerProfiles) {
+    if (profile.connectionKind === "custom" && !customIds.has(profile.provider)) {
+      throw new Error(`provider profile references an unknown custom provider: ${profile.provider}`);
+    }
+  }
   return {
     version: 1,
     primary,
     fallbacks: filteredFallbacks,
     customProviders,
+    providerProfiles,
     updatedAt: record.updatedAt === null ? null : optionalString(record.updatedAt, "updatedAt") ?? null,
   };
 }
 
 function parseCustomProvider(value: unknown): CustomProviderConfiguration {
   const record = asRecord(value, "custom provider");
-  for (const forbidden of ["apiKey", "headers", "oauth", "env", "command"]) {
+  for (const forbidden of ["apiKey", "oauth", "env", "command"]) {
     if (forbidden in record) {
       throw new Error(`custom provider configuration may not contain ${forbidden}`);
     }
@@ -177,6 +262,26 @@ function parseCustomProvider(value: unknown): CustomProviderConfiguration {
   if (!SUPPORTED_PROVIDER_APIS.includes(api as SupportedProviderApi)) {
     throw new Error(`unsupported API type for ${id}: ${api}`);
   }
+  const wireProtocol = record.wireProtocol === undefined
+    ? wireProtocolForRuntimeApi(api as SupportedProviderApi)
+    : parseWireProtocol(record.wireProtocol, `wireProtocol for ${id}`);
+  if (wireProtocol && runtimeApiForWireProtocol(wireProtocol) !== api) {
+    throw new Error(`wireProtocol for ${id} does not match API type ${api}`);
+  }
+  const baseUrl = wireProtocol
+    ? normalizeProtocolRoot(parsedUrl.toString(), wireProtocol)
+    : parsedUrl.toString().replace(/\/$/, "");
+  const modelsEndpoint = optionalString(record.modelsEndpoint, `modelsEndpoint for ${id}`);
+  const legacyRequiresApiKey = optionalBoolean(record.requiresApiKey, `requiresApiKey for ${id}`) ?? true;
+  const auth = parseProviderAuth(record.auth, id, legacyRequiresApiKey
+    ? { method: "api-key", secretRef: providerSecretRef(id) }
+    : { method: "none" });
+  if (auth.method === "oauth" || auth.method === "ambient") {
+    throw new Error(`custom provider ${id} cannot use ${auth.method} authentication`);
+  }
+  const headers = optionalArrayValue(record.headers, `headers for ${id}`).map((header) =>
+    parseControlledHeader(header, id),
+  );
   const models = arrayValue(record.models, `models for ${id}`).map((model) =>
     parseCustomModel(model, id),
   );
@@ -187,11 +292,141 @@ function parseCustomProvider(value: unknown): CustomProviderConfiguration {
   return {
     id,
     name: optionalString(record.name, `name for ${id}`) ?? id,
-    baseUrl: parsedUrl.toString().replace(/\/$/, ""),
+    baseUrl,
     api: api as SupportedProviderApi,
     authHeader: optionalBoolean(record.authHeader, `authHeader for ${id}`) ?? false,
-    requiresApiKey: optionalBoolean(record.requiresApiKey, `requiresApiKey for ${id}`) ?? true,
+    requiresApiKey: auth.method !== "none",
+    auth,
+    ...(wireProtocol ? { wireProtocol } : {}),
+    ...(modelsEndpoint ? { modelsEndpoint: normalizeModelsEndpoint(modelsEndpoint, baseUrl) } : {}),
+    ...(headers.length ? { headers } : {}),
     models,
+  };
+}
+
+function parseProviderProfile(value: unknown): ProviderProfile {
+  const record = asRecord(value, "provider profile");
+  const id = providerIdentifier(record.id, "provider profile id");
+  const provider = providerIdentifier(record.provider, `provider for ${id}`);
+  const connectionKind = record.connectionKind;
+  if (connectionKind !== "builtin" && connectionKind !== "custom") {
+    throw new Error(`connectionKind for ${id} must be builtin or custom`);
+  }
+  const definition = getProviderDefinition(provider);
+  if (connectionKind === "builtin" && !definition) {
+    throw new Error(`unknown built-in provider profile: ${provider}`);
+  }
+  const auth = parseProviderAuth(record.auth, provider, {
+    method: definition?.defaultAuthMethod ?? "api-key",
+    secretRef: providerSecretRef(provider),
+  });
+  if (definition && !definition.authMethods.includes(auth.method)) {
+    throw new Error(`provider ${provider} does not support ${auth.method} authentication`);
+  }
+  const protocol = record.protocol === undefined
+    ? definition?.wireProtocol
+    : parseWireProtocol(record.protocol, `protocol for ${id}`);
+  const runtimeApi = requiredString(record.runtimeApi, `runtimeApi for ${id}`);
+  if (runtimeApi !== "managed-per-model" && !isProviderRuntimeApi(runtimeApi)) {
+    throw new Error(`unsupported runtime API for ${id}: ${runtimeApi}`);
+  }
+  if (definition && !definition.runtimeApis.includes(runtimeApi as ProviderRuntimeApi) && runtimeApi !== "managed-per-model") {
+    throw new Error(`runtime API for ${id} is not supported by ${provider}`);
+  }
+  const readiness = record.readiness;
+  if (readiness !== "configured" && readiness !== "discovered" && readiness !== "verified" && readiness !== "blocked") {
+    throw new Error(`invalid readiness for ${id}`);
+  }
+  const settings = stringRecord(record.settings, `settings for ${id}`);
+  for (const key of Object.keys(settings)) {
+    if (/(?:api.?key|secret|token|password|credential)/i.test(key)) {
+      throw new Error(`provider profile settings may not contain secrets: ${key}`);
+    }
+    if (definition) {
+      const field = definition.fields.find((candidate) => candidate.id === key);
+      if (!field || field.secret) throw new Error(`unsupported setting for ${provider}: ${key}`);
+      if (field.type === "url") settings[key] = safeProfileUrl(settings[key]!, provider, auth.method);
+    }
+  }
+  const headers = optionalArrayValue(record.headers, `headers for ${id}`).map((header) =>
+    parseControlledHeader(header, provider),
+  );
+  const modelsEndpoint = optionalString(record.modelsEndpoint, `modelsEndpoint for ${id}`);
+  const discoveredAt = optionalIsoDate(record.discoveredAt, `discoveredAt for ${id}`);
+  const verifiedAt = optionalIsoDate(record.verifiedAt, `verifiedAt for ${id}`);
+  const verifiedModel = optionalString(record.verifiedModel, `verifiedModel for ${id}`);
+  return {
+    id,
+    provider,
+    name: optionalString(record.name, `name for ${id}`) ?? definition?.name ?? provider,
+    connectionKind,
+    auth,
+    ...(protocol ? { protocol } : {}),
+    runtimeApi: runtimeApi as ProviderRuntimeApi | "managed-per-model",
+    readiness,
+    settings,
+    headers,
+    ...(modelsEndpoint ? { modelsEndpoint } : {}),
+    ...(discoveredAt ? { discoveredAt } : {}),
+    ...(verifiedAt ? { verifiedAt } : {}),
+    ...(verifiedModel ? { verifiedModel } : {}),
+  };
+}
+
+function parseProviderAuth(
+  value: unknown,
+  provider: string,
+  fallback: ProviderAuthConfiguration,
+): ProviderAuthConfiguration {
+  if (value === undefined) return { ...fallback };
+  const record = asRecord(value, `auth for ${provider}`);
+  const method = requiredString(record.method, `auth method for ${provider}`) as ProviderAuthMethod;
+  if (!["api-key", "oauth", "ambient", "none", "custom-header"].includes(method)) {
+    throw new Error(`unsupported auth method for ${provider}: ${method}`);
+  }
+  const secretRef = optionalString(record.secretRef, `secretRef for ${provider}`);
+  if (secretRef && !/^auth:[a-z0-9][a-z0-9._-]{0,63}(?::header:[a-z0-9-]+)?$/.test(secretRef)) {
+    throw new Error(`invalid secretRef for ${provider}`);
+  }
+  const rawHeaderName = optionalString(record.headerName, `headerName for ${provider}`)?.toLowerCase();
+  if (rawHeaderName && !CONTROLLED_SECRET_HEADER_NAMES.includes(rawHeaderName as ControlledSecretHeaderName)) {
+    throw new Error(`unsupported secret header for ${provider}: ${rawHeaderName}`);
+  }
+  if (method === "custom-header" && !rawHeaderName) {
+    throw new Error(`custom-header authentication for ${provider} requires headerName`);
+  }
+  return {
+    method,
+    ...(secretRef ? { secretRef } : {}),
+    ...(rawHeaderName ? { headerName: rawHeaderName as ControlledSecretHeaderName } : {}),
+  };
+}
+
+function parseControlledHeader(value: unknown, provider: string): ControlledProviderHeader {
+  const record = asRecord(value, `controlled header for ${provider}`);
+  const name = requiredString(record.name, `header name for ${provider}`).toLowerCase();
+  if (![...CONTROLLED_LITERAL_HEADER_NAMES, ...CONTROLLED_SECRET_HEADER_NAMES].includes(name as ControlledHeaderName)) {
+    throw new Error(`unsupported controlled header for ${provider}: ${name}`);
+  }
+  const literal = optionalString(record.value, `header value for ${provider}`);
+  const secretRef = optionalString(record.secretRef, `header secretRef for ${provider}`);
+  if (Boolean(literal) === Boolean(secretRef)) {
+    throw new Error(`controlled header for ${provider} requires exactly one value or secretRef`);
+  }
+  if (literal && /[\u0000-\u001f\u007f]/.test(literal)) {
+    throw new Error(`controlled header for ${provider} contains control characters`);
+  }
+  if (literal && name === "http-referer") safeProfileUrl(literal, provider, "none");
+  const secret = CONTROLLED_SECRET_HEADER_NAMES.includes(name as ControlledSecretHeaderName);
+  if (secret && literal) throw new Error(`secret header ${name} for ${provider} must use secretRef`);
+  if (!secret && secretRef) throw new Error(`literal header ${name} for ${provider} may not use secretRef`);
+  if (secretRef && !/^auth:[a-z0-9][a-z0-9._-]{0,63}:header:[a-z0-9-]+$/.test(secretRef)) {
+    throw new Error(`invalid header secretRef for ${provider}`);
+  }
+  return {
+    name: name as ControlledHeaderName,
+    ...(literal ? { value: literal } : {}),
+    ...(secretRef ? { secretRef } : {}),
   };
 }
 
@@ -280,6 +515,10 @@ function arrayValue(value: unknown, label: string): unknown[] {
   return value;
 }
 
+function optionalArrayValue(value: unknown, label: string): unknown[] {
+  return value === undefined ? [] : arrayValue(value, label);
+}
+
 function stringArray(value: unknown, label: string): string[] {
   const array = arrayValue(value, label);
   if (!array.every((entry) => typeof entry === "string")) {
@@ -294,9 +533,74 @@ function requiredString(value: unknown, label: string): string {
   return value.trim();
 }
 
+function providerIdentifier(value: unknown, label: string): string {
+  const id = requiredString(value, label);
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) throw new Error(`invalid ${label}: ${id}`);
+  return id;
+}
+
 function optionalString(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
   return requiredString(value, label);
+}
+
+function optionalIsoDate(value: unknown, label: string): string | undefined {
+  const result = optionalString(value, label);
+  if (result === undefined) return undefined;
+  if (!Number.isFinite(Date.parse(result))) throw new Error(`${label} must be an ISO date`);
+  return result;
+}
+
+function stringRecord(value: unknown, label: string): Record<string, string> {
+  if (value === undefined) return {};
+  const record = asRecord(value, label);
+  const result: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(record)) {
+    if (!/^[A-Za-z][A-Za-z0-9._-]{0,63}$/.test(key)) throw new Error(`invalid key in ${label}: ${key}`);
+    result[key] = requiredString(raw, `${label}.${key}`);
+  }
+  return result;
+}
+
+function parseWireProtocol(value: unknown, label: string): WireProtocol {
+  const protocol = requiredString(value, label);
+  if (protocol !== "openai-chat-completions" && protocol !== "openai-responses" && protocol !== "anthropic-messages") {
+    throw new Error(`${label} must be a supported wire protocol`);
+  }
+  return protocol;
+}
+
+function isProviderRuntimeApi(value: string): value is ProviderRuntimeApi {
+  return [
+    "openai-completions",
+    "openai-responses",
+    "anthropic-messages",
+    "google-generative-ai",
+    "azure-openai-responses",
+    "bedrock-converse-stream",
+    "google-vertex",
+    "mistral-conversations",
+    "openai-codex-responses",
+  ].includes(value);
+}
+
+function safeProfileUrl(value: string, provider: string, authMethod: ProviderAuthMethod): string {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`URL setting for ${provider} must use HTTP or HTTPS`);
+  if (url.username || url.password) throw new Error(`URL setting for ${provider} may not contain credentials`);
+  if (authMethod !== "none" && url.protocol === "http:" && !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+    throw new Error(`URL setting for ${provider} must use HTTPS with credentials`);
+  }
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+export function providerSecretRef(provider: string): string {
+  return `auth:${provider}`;
+}
+
+export function providerHeaderSecretRef(provider: string, header: string): string {
+  return `auth:${provider}:header:${header.toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
 }
 
 function optionalBoolean(value: unknown, label: string): boolean | undefined {
