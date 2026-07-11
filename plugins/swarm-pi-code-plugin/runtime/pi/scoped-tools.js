@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createEditToolDefinition, createWriteToolDefinition, } from "@earendil-works/pi-coding-agent";
+import { isProtectedWorkspacePath } from "../git/worktree.js";
 export async function assertMutationPath(cwd, candidate) {
     const lexicalRoot = path.resolve(cwd);
     const root = await fs.realpath(cwd);
@@ -15,9 +16,7 @@ export async function assertMutationPath(cwd, candidate) {
 }
 function assertUnprotected(root, candidate) {
     const relative = path.relative(root, candidate);
-    const first = relative.split(path.sep)[0] ?? "";
-    if ([".git", ".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].includes(first) ||
-        [".env", ".env.local", ".swarm-pi-policy.json"].includes(relative)) {
+    if (isProtectedWorkspacePath(relative)) {
         throw new Error(`Mutation path is protected by the delegated worker boundary: ${candidate}`);
     }
 }

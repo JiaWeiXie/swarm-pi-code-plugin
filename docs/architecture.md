@@ -77,7 +77,9 @@ node scripts/pi-runner.mjs jobs <list|status|wait|cancel|acknowledge|approvals|a
 ```
 
 Every worker result includes the task kind, status, success flag, selected
-model, output, changed files, diff summary, and verification status.
+model, output, changed files, diff summary, verification status, and any
+explicit next action. Status reports separate read-only, mutation, and delivery
+readiness so an unborn repository cannot be described as implementation-ready.
 
 Task commands accept role, thinking, execution, approval, timeout, and optional
 delegation-spec arguments. Background readonly work returns an accepted job ID
@@ -95,12 +97,15 @@ Each job moves through `queued`, `running`, optional `awaiting-approval`, and on
 `succeeded`, `failed`, `cancelled`, `timed-out`, or `orphaned`. Workers maintain
 a heartbeat and process lease. Queries reconcile result artifacts, stale
 leases, and cancellation requests before returning state.
+While running, the job also records a durable phase and progress timestamp for
+bounded host polling.
 
 ## Safety and Mutation Policy
 
 - `ask`, `review`, `plan`, and orchestration perspectives are read-only.
 - `implement` requires explicit user mutation intent.
-- `implement` requires a clean assigned worktree before a Pi session starts.
+- `implement` requires a committed HEAD and a clean assigned worktree before a
+  Pi session starts. Unborn repositories fail before model startup.
 - `implement` holds an exclusive lease for the assigned worktree until
   postflight capture completes.
 - Scoped write and edit operations reject traversal and symlinks that resolve
@@ -110,9 +115,13 @@ leases, and cancellation requests before returning state.
 - Once an implementation session writes files, the runner does not start a
   second fallback model in the same job.
 - The host captures tracked, untracked, and newly created ignored side effects
-  after the session, then validates HEAD and changed path types.
-- Lenient Bash writes directly to the assigned worktree under the same user ID;
-  there is no staging copy or automatic patch application.
+  after the session, then validates HEAD, preserved safe-dirty digests,
+  protected paths, and changed path types.
+- Clean supervised work may use the assigned worktree directly. Safe-dirty work
+  automatically uses an isolated HEAD worktree and returns a verified artifact.
+- Explicit `jobs materialize` applies a verified implementation patch through
+  the trusted control plane without committing it; failed validation reverses
+  the patch.
 - Git metadata and shared plugin state are denied paths. The host remains the
   only owner of commits, pushes, branch changes, verification, and delivery.
 - Cancellation and failure preserve partial worktree changes for host review;
@@ -138,6 +147,11 @@ worktrees normally observe the same setup:
     ├── changes.patch           # optional implementation diff
     └── worker.*.log            # detached worker stdout and stderr
 ```
+
+Orchestration prompts may include a Host-created EvidencePack. Its cited facts,
+unknowns, and version constraints are copied into the durable job prompt so the
+next implementation brief can reference the source job instead of rebuilding
+research from chat history.
 
 `model.json` is the canonical provider and model file. `state.json` stores the
 project goal, directory scope, delegated task types, sandbox mode, migration

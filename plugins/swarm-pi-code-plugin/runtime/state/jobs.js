@@ -54,6 +54,9 @@ export async function startJob(cwd, input) {
             notifications: [],
             workerToken,
             status: "queued",
+            phase: "queued",
+            progressMessage: "Request persisted; waiting for a worker.",
+            lastProgressAt: createdAt,
             createdAt,
             updatedAt: createdAt,
         });
@@ -80,12 +83,28 @@ export async function markJobRunning(cwd, jobId, workerToken, pid) {
         if (isTerminalJobStatus(job.status))
             return;
         job.status = "running";
+        job.phase = "preflight";
+        job.progressMessage = "Validating the assigned workspace and policy snapshot.";
+        job.lastProgressAt = startedAt;
         job.pid = pid;
         job.startedAt = job.startedAt ?? startedAt;
         job.updatedAt = startedAt;
     });
     await heartbeatJob(cwd, jobId, workerToken, pid);
     return requireJob(state.jobs, jobId);
+}
+export async function updateJobProgress(cwd, jobId, workerToken, phase, message) {
+    const updatedAt = new Date().toISOString();
+    await updateState(cwd, (state) => {
+        const job = requireJob(state.jobs, jobId);
+        requireWorkerToken(job, workerToken);
+        if (isTerminalJobStatus(job.status))
+            return;
+        job.phase = phase;
+        job.progressMessage = message.slice(0, 500);
+        job.lastProgressAt = updatedAt;
+        job.updatedAt = updatedAt;
+    });
 }
 export async function heartbeatJob(cwd, jobId, workerToken, pid) {
     await writeJson(path.join(await jobDirectory(cwd, jobId), "heartbeat.json"), {

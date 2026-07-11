@@ -455,6 +455,9 @@ test("implement requires a clean worktree and captures Pi changes", async () => 
 test("implement returns actionable isolation strategies for a dirty worktree", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-dirty-"));
   execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  fs.writeFileSync(path.join(workspace, "tracked.txt"), "base\n");
+  execFileSync("git", ["-C", workspace, "add", "tracked.txt"]);
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "base"], { stdio: "ignore" });
   fs.writeFileSync(path.join(workspace, "dirty.txt"), "user change\n");
   const dependencies: RunnerDependencies = {
     catalog: { available: () => [fakeModel] },
@@ -478,6 +481,110 @@ test("implement returns actionable isolation strategies for a dirty worktree", a
   );
   assert.equal("event" in result && result.event, "workspace-action-required");
   assert.deepEqual("strategies" in result ? result.strategies : [], ["isolated-head", "isolated-snapshot"]);
+});
+
+test("unborn implementation fails before model use and resumes after workspace repair", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-unborn-implement-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
+  execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
+  fs.writeFileSync(path.join(workspace, ".DS_Store"), "preserved");
+  let sessions = 0;
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Create src/example.ts",
+    createSession: async (options) => {
+      sessions += 1;
+      return {
+        subscribe(listener) {
+          if (options.mode === "readonly") {
+            listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED" } });
+          }
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+          return () => {};
+        },
+        async prompt() {
+          if (options.mode === "implement") {
+            fs.mkdirSync(path.join(options.cwd, "src"), { recursive: true });
+            fs.writeFileSync(path.join(options.cwd, "src", "example.ts"), "export const value = 1;\n");
+          }
+        },
+        dispose() {},
+      };
+    },
+  };
+  const blocked = await runCommand({
+    command: "implement", host: "codex", promptFile: "prompt.md",
+    reconfigure: false, reset: false, json: true,
+  }, workspace, dependencies);
+  assert.equal("event" in blocked && blocked.event, "workspace-action-required");
+  assert.equal("errorCode" in blocked && blocked.errorCode, "workspace-unborn-head");
+  assert.equal(sessions, 0);
+  const continuationId = "continuationId" in blocked ? blocked.continuationId : "";
+
+  fs.writeFileSync(path.join(workspace, "README.md"), "# Fixture\n");
+  execFileSync("git", ["-C", workspace, "add", "README.md"]);
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "initial"], { stdio: "ignore" });
+  const resumed = await runCommand({
+    command: "resume", continuationId, reconfigure: false, reset: false, json: true,
+  }, workspace, dependencies);
+  assert.equal("success" in resumed && resumed.success, true);
+  assert.equal("artifact" in resumed && resumed.artifact?.deliverable, true);
+  assert.equal(fs.readFileSync(path.join(workspace, ".DS_Store"), "utf8"), "preserved");
+  assert.equal(fs.existsSync(path.join(workspace, "src", "example.ts")), false);
+});
+
+test("safe-dirty implementation is isolated and materializes without changing preserved files", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-safe-dirty-materialize-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  fs.writeFileSync(path.join(workspace, "tracked.txt"), "before\n");
+  execFileSync("git", ["-C", workspace, "add", "tracked.txt"]);
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "base"], { stdio: "ignore" });
+  fs.mkdirSync(path.join(workspace, "__pycache__"));
+  const cache = path.join(workspace, "__pycache__", "app.pyc");
+  fs.writeFileSync(cache, "preserved");
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Update tracked.txt",
+    createSession: async (options) => ({
+      subscribe(listener) {
+        if (options.mode === "readonly") {
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED" } });
+        }
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        return () => {};
+      },
+      async prompt() {
+        if (options.mode === "implement") fs.writeFileSync(path.join(options.cwd, "tracked.txt"), "after\n");
+      },
+      dispose() {},
+    }),
+  };
+  const result = await runCommand({
+    command: "implement", host: "codex", promptFile: "prompt.md",
+    reconfigure: false, reset: false, json: true,
+  }, workspace, dependencies);
+  assert.equal("success" in result && result.success, true);
+  assert.equal("artifact" in result && result.artifact?.deliverable, true);
+  assert.equal(fs.readFileSync(path.join(workspace, "tracked.txt"), "utf8"), "before\n");
+  assert.equal(fs.readFileSync(cache, "utf8"), "preserved");
+
+  const jobId = "jobId" in result ? result.jobId! : "";
+  const materialized = await runCommand({
+    command: "jobs", jobsAction: "materialize", jobId,
+    reconfigure: false, reset: false, json: true,
+  }, workspace, dependencies);
+  assert.equal("materialized" in materialized && materialized.materialized, true);
+  assert.deepEqual("changedFiles" in materialized && materialized.changedFiles, ["tracked.txt"]);
+  assert.equal(fs.readFileSync(path.join(workspace, "tracked.txt"), "utf8"), "after\n");
+  assert.equal(fs.readFileSync(cache, "utf8"), "preserved");
+
+  const cleaned = await runCommand({
+    command: "jobs", jobsAction: "cleanup", jobId,
+    reconfigure: false, reset: false, json: true,
+  }, workspace, dependencies);
+  assert.equal("cleaned" in cleaned && cleaned.cleaned, true);
+  assert.equal("artifact" in result && result.artifact?.worktree ? fs.existsSync(result.artifact.worktree) : true, false);
 });
 
 test("mechanical executor escalates only after a side-effect-free failure", async () => {

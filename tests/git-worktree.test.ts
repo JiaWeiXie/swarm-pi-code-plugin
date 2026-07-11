@@ -75,6 +75,32 @@ test("implementation leases serialize writers and preserve the HEAD baseline", a
   await replacement.release();
 });
 
+test("worktree baseline rejects changes to preserved safe-dirty files", async () => {
+  const repository = repositoryFixture();
+  fs.mkdirSync(path.join(repository, "__pycache__"));
+  const cache = path.join(repository, "__pycache__", "app.pyc");
+  fs.writeFileSync(cache, "preserve me");
+  const lease = await acquireWorktreeLease(repository, "preserved-path-job");
+  try {
+    fs.rmSync(cache);
+    await assert.rejects(
+      () => assertWorktreeBaseline(repository, lease.baseline),
+      /preserved workspace paths changed/i,
+    );
+  } finally {
+    await lease.release();
+  }
+});
+
+test("change capture does not assume HEAD exists", async () => {
+  const repository = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-unborn-diff-"));
+  execFileSync("git", ["init", repository], { stdio: "ignore" });
+  fs.writeFileSync(path.join(repository, "new.txt"), "new\n");
+  const changes = await captureWorktreeChanges(repository);
+  assert.deepEqual(changes.changedFiles, ["new.txt"]);
+  assert.match(changes.diff, /new\.txt/);
+});
+
 test("a failed worktree baseline does not leave a stale lease", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-non-git-"));
   await assert.rejects(() => acquireWorktreeLease(workspace, "failed-job"));

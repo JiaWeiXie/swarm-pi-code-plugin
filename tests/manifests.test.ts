@@ -15,8 +15,8 @@ test("Claude and Codex manifests use the swarm-pi-code-plugin identity", () => {
 
   assert.equal(claude.name, "swarm-pi-code-plugin");
   assert.equal(codex.name, "swarm-pi-code-plugin");
-  assert.equal(claude.version, "0.1.2");
-  assert.match(codex.version as string, /^0\.1\.2\+codex\.\d{14}$/);
+  assert.equal(claude.version, "0.1.3");
+  assert.match(codex.version as string, /^0\.1\.3\+codex\.\d{14}$/);
   assert.equal(codex.skills, "./skills/");
 });
 
@@ -67,6 +67,15 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(implementation, /background only.*mechanical-executor/i);
   assert.match(implementation, /mechanical-executor/);
   assert.match(implementation, /deliverable: false/);
+  assert.match(implementation, /workspace-unborn-head/);
+  assert.match(implementation, /jobs materialize/);
+
+  const orchestration = fs.readFileSync(
+    path.join(pluginRoot, "skills/swarm-pi-code-plugin-orchestrate/SKILL.md"),
+    "utf8",
+  );
+  assert.match(orchestration, /EvidencePack/);
+  assert.match(orchestration, /source job ID/i);
 
   for (const skill of ["ask", "review", "plan", "implement", "orchestrate"]) {
     const source = fs.readFileSync(
@@ -86,7 +95,12 @@ test("plugin package contains both host adapters and a self-contained runner", (
     assert.equal(fs.existsSync(commandPath), true, `missing Claude command: ${command}`);
     assert.match(fs.readFileSync(commandPath, "utf8"), /swarm-pi-code-plugin-/);
   }
-  assert.equal(fs.existsSync(path.join(pluginRoot, "skills/references/host-protocol.md")), true);
+  const protocolPath = path.join(pluginRoot, "skills/references/host-protocol.md");
+  assert.equal(fs.existsSync(protocolPath), true);
+  const protocol = fs.readFileSync(protocolPath, "utf8");
+  assert.match(protocol, /capabilities\.mutation/);
+  assert.match(protocol, /EvidencePack/);
+  assert.match(protocol, /wait-timeout-ms 15000/);
 
   const workerAgent = fs.readFileSync(path.join(pluginRoot, "agents/pi-worker.md"), "utf8");
   assert.match(workerAgent, /swarm-pi-code-plugin-orchestrate/);

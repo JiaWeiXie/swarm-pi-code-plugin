@@ -13,6 +13,7 @@ import type {
   ExecutionMode,
   Host,
   JobNotification,
+  JobPhase,
   JobStatus,
   NotificationStatus,
   SandboxMode,
@@ -70,6 +71,9 @@ export interface JobRecord {
   finishedAt?: string;
   cancelRequestedAt?: string;
   notification?: NotificationStatus;
+  phase?: JobPhase;
+  progressMessage?: string;
+  lastProgressAt?: string;
   [key: string]: unknown;
 }
 

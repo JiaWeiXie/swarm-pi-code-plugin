@@ -13,6 +13,15 @@ export class WorktreeDirtyError extends Error {
         this.inspection = inspection;
     }
 }
+export class WorktreeBaselineError extends Error {
+    changedPaths;
+    code = "baseline-side-effect";
+    constructor(changedPaths) {
+        super(`Preserved workspace paths changed during delegated execution: ${changedPaths.join(", ")}`);
+        this.changedPaths = changedPaths;
+        this.name = "WorktreeBaselineError";
+    }
+}
 export async function inspectWorktree(cwd) {
     const assessment = await assessWorkspace(cwd);
     if (!assessment.git) {
@@ -32,23 +41,29 @@ export async function assessWorkspace(cwd) {
     catch {
         const inventory = await inventoryDirectory(root);
         const visible = inventory.entries.filter((entry) => entry.category === "user" || entry.category === "unsafe");
-        const disposition = visible.length === 0 ? "non-git-empty" : "non-git-existing";
-        return { root, git: false, disposition, entries: inventory.entries, fingerprint: fingerprint(inventory.fingerprints) };
+        const disposition = inventory.entries.some((entry) => entry.category === "unsafe")
+            ? "unsafe"
+            : visible.length === 0 ? "non-git-empty" : "non-git-existing";
+        return { root, git: false, head: null, disposition, entries: inventory.entries, fingerprint: fingerprint(inventory.fingerprints) };
     }
     const raw = parsePorcelain(output);
     const assessments = [];
     for (const entry of raw)
         assessments.push(await assessEntry(root, entry));
+    const head = await headRevision(root);
     const disposition = assessments.some((entry) => entry.category === "unsafe")
         ? "unsafe"
-        : assessments.some((entry) => entry.category === "user")
-            ? "user-dirty"
-            : assessments.length > 0
-                ? "safe-dirty"
-                : "clean";
+        : head === null
+            ? "git-unborn"
+            : assessments.some((entry) => entry.category === "user")
+                ? "user-dirty"
+                : assessments.length > 0
+                    ? "safe-dirty"
+                    : "clean";
     return {
         root,
         git: true,
+        head,
         disposition,
         entries: assessments,
         fingerprint: await gitWorkspaceFingerprint(root, assessments),
@@ -207,6 +222,14 @@ export async function assertWorktreeBaseline(cwd, baseline) {
     if (head !== baseline.head) {
         throw new Error("The worktree HEAD changed while the delegated implementation was running");
     }
+    const changedPaths = [];
+    for (const entry of baseline.preservedEntries) {
+        const digest = fingerprint(await digestWorkspacePath(path.join(cwd, entry.path)));
+        if (digest !== entry.digest)
+            changedPaths.push(entry.path);
+    }
+    if (changedPaths.length > 0)
+        throw new WorktreeBaselineError(changedPaths);
 }
 export async function captureIgnoredPaths(cwd) {
     const output = await gitOutput(cwd, [
@@ -225,6 +248,8 @@ export async function captureIgnoredPaths(cwd) {
 export async function validateChangedPaths(cwd, changedFiles) {
     const root = await fs.realpath(await resolveWorkspaceRoot(cwd));
     for (const file of changedFiles) {
+        if (isProtectedWorkspacePath(file))
+            throw new Error(`Changed path is protected by the delegated worker boundary: ${file}`);
         const absolute = path.resolve(root, file);
         if (!isInside(root, absolute))
             throw new Error(`Changed path escaped the worktree: ${file}`);
@@ -257,20 +282,29 @@ export async function validateChangedPaths(cwd, changedFiles) {
         }
     }
 }
+export function isProtectedWorkspacePath(value) {
+    const normalized = value.split(path.sep).join("/").replace(/^\.\//, "");
+    const first = normalized.split("/")[0] ?? "";
+    return [".git", ".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].includes(first) ||
+        [".env", ".env.local", ".swarm-pi-policy.json"].includes(normalized);
+}
 export async function captureWorktreeChanges(cwd) {
     const inspection = await inspectWorktree(cwd);
-    const [{ stdout: diff }, { stdout: trackedStat }] = await Promise.all([
-        execFileAsync("git", ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], {
-            cwd,
-            encoding: "utf8",
-            maxBuffer: 16 * 1024 * 1024,
-        }),
-        execFileAsync("git", ["diff", "--stat", "HEAD", "--"], {
-            cwd,
-            encoding: "utf8",
-            maxBuffer: 4 * 1024 * 1024,
-        }),
-    ]);
+    const head = await headRevision(cwd);
+    const [{ stdout: diff }, { stdout: trackedStat }] = head === null
+        ? [{ stdout: "" }, { stdout: "" }]
+        : await Promise.all([
+            execFileAsync("git", ["diff", "--binary", "--no-ext-diff", head, "--"], {
+                cwd,
+                encoding: "utf8",
+                maxBuffer: 16 * 1024 * 1024,
+            }),
+            execFileAsync("git", ["diff", "--stat", head, "--"], {
+                cwd,
+                encoding: "utf8",
+                maxBuffer: 4 * 1024 * 1024,
+            }),
+        ]);
     const untracked = inspection.entries
         .filter((entry) => entry.status === "??")
         .map((entry) => entry.path);
@@ -290,10 +324,17 @@ export async function captureWorktreeChanges(cwd) {
 }
 async function captureWorktreeBaseline(cwd) {
     const assessment = await assessWorkspace(cwd);
+    const safePaths = assessment.entries
+        .filter((entry) => entry.category === "runtime" || entry.category === "ephemeral")
+        .map((entry) => entry.path);
     return {
-        head: await headRevision(cwd),
+        head: assessment.head,
         ignoredPaths: await captureIgnoredPaths(cwd),
-        safePaths: assessment.entries.filter((entry) => entry.category === "runtime" || entry.category === "ephemeral").map((entry) => entry.path),
+        safePaths,
+        preservedEntries: await Promise.all(safePaths.map(async (entryPath) => ({
+            path: entryPath,
+            digest: fingerprint(await digestWorkspacePath(path.join(cwd, entryPath))),
+        }))),
         workspaceFingerprint: assessment.fingerprint,
     };
 }

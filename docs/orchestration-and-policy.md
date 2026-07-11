@@ -114,6 +114,8 @@ orphaned and its approval cannot be applied to another worker generation.
 `jobs wait` returns an approval-required event when intervention is needed. A
 host with a relay or watcher submits jobs with approval mode `wait`; a host
 without a usable notification channel uses `deny` so execution cannot deadlock.
+Hosts use bounded waits and inspect the durable job phase; a detached Host relay
+is not reported as Pi background execution.
 
 ## Delivery
 
@@ -123,3 +125,7 @@ worktree and branch. The trusted control plane may create a checkpoint artifact
 after path validation; the Pi session cannot write Git metadata. Verification
 must pass before the artifact is considered deliverable. Refuted, failed, or
 orphaned work is preserved for inspection and never merged automatically.
+Safe-dirty implementation uses this isolated path automatically. After explicit
+delivery approval, `jobs materialize` applies the verified patch to the original
+HEAD while preserving pre-existing ephemeral files and leaves commit ownership
+with the Host.

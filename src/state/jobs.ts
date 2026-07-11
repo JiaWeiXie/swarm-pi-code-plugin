@@ -10,6 +10,7 @@ import type {
   ExecutionMode,
   Host,
   JobNotification,
+  JobPhase,
   JobStatus,
   PolicyDecision,
   PolicySnapshot,
@@ -143,6 +144,9 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       notifications: [],
       workerToken,
       status: "queued",
+      phase: "queued",
+      progressMessage: "Request persisted; waiting for a worker.",
+      lastProgressAt: createdAt,
       createdAt,
       updatedAt: createdAt,
     });
@@ -179,12 +183,34 @@ export async function markJobRunning(
     requireWorkerToken(job, workerToken);
     if (isTerminalJobStatus(job.status)) return;
     job.status = "running";
+    job.phase = "preflight";
+    job.progressMessage = "Validating the assigned workspace and policy snapshot.";
+    job.lastProgressAt = startedAt;
     job.pid = pid;
     job.startedAt = job.startedAt ?? startedAt;
     job.updatedAt = startedAt;
   });
   await heartbeatJob(cwd, jobId, workerToken, pid);
   return requireJob(state.jobs, jobId);
+}
+
+export async function updateJobProgress(
+  cwd: string,
+  jobId: string,
+  workerToken: string,
+  phase: JobPhase,
+  message: string,
+): Promise<void> {
+  const updatedAt = new Date().toISOString();
+  await updateState(cwd, (state) => {
+    const job = requireJob(state.jobs, jobId);
+    requireWorkerToken(job, workerToken);
+    if (isTerminalJobStatus(job.status)) return;
+    job.phase = phase;
+    job.progressMessage = message.slice(0, 500);
+    job.lastProgressAt = updatedAt;
+    job.updatedAt = updatedAt;
+  });
 }
 
 export async function heartbeatJob(

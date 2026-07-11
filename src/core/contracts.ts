@@ -54,7 +54,14 @@ export type NotificationStatus = "pending" | "acknowledged";
 
 export type ReadinessStatus = "ready" | "degraded" | "blocked";
 
-export type WorkspaceDisposition = "clean" | "safe-dirty" | "user-dirty" | "unsafe" | "non-git-empty" | "non-git-existing";
+export type WorkspaceDisposition =
+  | "clean"
+  | "safe-dirty"
+  | "user-dirty"
+  | "unsafe"
+  | "git-unborn"
+  | "non-git-empty"
+  | "non-git-existing";
 
 export type WorkspaceStrategy = "auto" | "isolated-head" | "isolated-snapshot";
 
@@ -78,6 +85,7 @@ export interface WorkspaceEntryAssessment {
 export interface WorkspaceAssessment {
   root: string;
   git: boolean;
+  head: string | null;
   disposition: WorkspaceDisposition;
   entries: WorkspaceEntryAssessment[];
   fingerprint: string;
@@ -89,7 +97,21 @@ export interface ReadinessReport {
   activeModel: string | null;
   sandboxMode: SandboxMode;
   workspace: WorkspaceAssessment;
+  capabilities: {
+    readonly: ReadinessStatus;
+    mutation: ReadinessStatus;
+    delivery: ReadinessStatus;
+  };
   issues: SetupIssue[];
+}
+
+export type JobPhase = "queued" | "preflight" | "delegating" | "postflight" | "verifying" | "checkpointing";
+
+export interface WorkerNextAction {
+  action: string;
+  label: string;
+  requiresConfirmation: boolean;
+  jobId?: string;
 }
 
 export interface ScaffoldSpec {
@@ -239,6 +261,7 @@ export interface WorkerResult {
   changedFiles: string[];
   diffStat: string;
   runtimeSideEffects?: string[];
+  nextActions?: WorkerNextAction[];
   verification: {
     status: "not-run" | "passed" | "failed";
     commands: string[];

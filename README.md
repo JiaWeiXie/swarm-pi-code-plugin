@@ -128,6 +128,11 @@ resumes it after configuration. Cancellation or idle timeout does not require
 the user to restate the task. Unsaved browser drafts retain only non-sensitive
 role, safety, and workspace fields.
 
+Readiness is task-specific. A workspace may be ready for research while
+mutation or delivery is blocked. In particular, a Git repository without an
+initial commit reports `git-unborn`; implementation fails before model startup
+and returns scaffold or adoption actions plus a resumable continuation.
+
 The connection list is intentionally empty when no usable service is detected.
 Custom endpoints can be tested before the provider ID, API protocol, model
 limits, or model IDs are shown.
@@ -203,6 +208,10 @@ node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/question.md \
 node scripts/pi-runner.mjs jobs wait --job <job-id> --json
 ```
 
+The host relay uses bounded waits and reports the durable job phase, elapsed
+time, and cancel action. A detached host shell is not the same as Pi background
+execution.
+
 Background mode is supported by scout, planner, reviewer, and analyst roles.
 Mechanical implementation may run in background only when explicitly enabled;
 the control plane creates a job-owned branch and worktree. Executor and
@@ -227,6 +236,10 @@ node scripts/pi-runner.mjs jobs deny --job <job-id> --approval <approval-id> --j
 node scripts/pi-runner.mjs jobs cleanup --job <job-id> [--discard] --json
 node scripts/pi-runner.mjs jobs materialize --job <job-id> --target /path/to/new-project --json
 ```
+
+For a verified isolated implementation artifact, omit `--target` to apply its
+patch to the original workspace. Materialization validates the original HEAD
+and preserved paths, does not create a commit, and rolls back a failed apply.
 
 `jobs wait` does not change the worker deadline. Wait timeout exits with 3;
 `awaiting-approval` exits with 4 and leaves the live worker waiting. Approval
@@ -288,10 +301,18 @@ available for 24 hours. Credentials are never stored in the browser draft.
 ### Implementation is rejected because the worktree is dirty
 
 Runtime state, untracked `.DS_Store`, `__pycache__`, `.pyc`, and `.pyo` artifacts
-are preserved as safe-dirty and do not block implementation. Tracked, staged,
+are preserved as safe-dirty and do not block implementation. Mutation runs in
+an isolated HEAD worktree so those files are not exposed to the worker; a
+verified artifact requires explicit materialization. Tracked, staged,
 conflicted, secret-like, or unknown files require an explicit isolated HEAD or
 isolated snapshot strategy. Swarm Pi never deletes, stashes, hides, or commits
 the user's existing changes.
+
+### Git is initialized but has no commit
+
+Research remains available, but implementation and delivery are blocked before
+a model starts. Use scaffold for an empty project or inspect/adopt for existing
+content, then run `resume --continuation <id>` to continue the preserved task.
 
 ### A delegated job stopped without a notification
 

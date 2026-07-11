@@ -4,12 +4,13 @@ import path from "node:path";
 import { assessWorkspace } from "../git/worktree.js";
 import { resolveStateDir } from "../state/state.js";
 const CONTINUATION_TTL_MS = 24 * 60 * 60_000;
-export async function createContinuation(cwd, request) {
+export async function createContinuation(cwd, request, options = {}) {
     const now = Date.now();
     const record = {
         id: randomUUID(),
         request: structuredClone(request),
         workspaceFingerprint: (await assessWorkspace(cwd)).fingerprint,
+        workspaceFence: options.workspaceFence ?? "strict",
         createdAt: new Date(now).toISOString(),
         expiresAt: new Date(now + CONTINUATION_TTL_MS).toISOString(),
     };
@@ -24,8 +25,9 @@ export async function readContinuation(cwd, id) {
     if (Date.parse(record.expiresAt) <= Date.now())
         throw new Error(`Continuation expired: ${id}`);
     const current = await assessWorkspace(record.request.cwd);
-    if (current.fingerprint !== record.workspaceFingerprint)
+    if (record.workspaceFence !== "repair" && current.fingerprint !== record.workspaceFingerprint) {
         throw new Error(`Continuation workspace changed: ${id}`);
+    }
     return record;
 }
 export async function consumeContinuation(cwd, id) {

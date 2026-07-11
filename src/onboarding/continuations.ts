@@ -12,17 +12,23 @@ export interface ContinuationRecord {
   id: string;
   request: WorkerRequest;
   workspaceFingerprint: string;
+  workspaceFence?: "strict" | "repair";
   createdAt: string;
   expiresAt: string;
   consumedAt?: string;
 }
 
-export async function createContinuation(cwd: string, request: WorkerRequest): Promise<ContinuationRecord> {
+export async function createContinuation(
+  cwd: string,
+  request: WorkerRequest,
+  options: { workspaceFence?: "strict" | "repair" } = {},
+): Promise<ContinuationRecord> {
   const now = Date.now();
   const record: ContinuationRecord = {
     id: randomUUID(),
     request: structuredClone(request),
     workspaceFingerprint: (await assessWorkspace(cwd)).fingerprint,
+    workspaceFence: options.workspaceFence ?? "strict",
     createdAt: new Date(now).toISOString(),
     expiresAt: new Date(now + CONTINUATION_TTL_MS).toISOString(),
   };
@@ -36,7 +42,9 @@ export async function readContinuation(cwd: string, id: string): Promise<Continu
   if (record.id !== id || record.consumedAt) throw new Error(`Continuation is unavailable: ${id}`);
   if (Date.parse(record.expiresAt) <= Date.now()) throw new Error(`Continuation expired: ${id}`);
   const current = await assessWorkspace(record.request.cwd);
-  if (current.fingerprint !== record.workspaceFingerprint) throw new Error(`Continuation workspace changed: ${id}`);
+  if (record.workspaceFence !== "repair" && current.fingerprint !== record.workspaceFingerprint) {
+    throw new Error(`Continuation workspace changed: ${id}`);
+  }
   return record;
 }
 

@@ -24,6 +24,11 @@ export async function inspectReadiness(options: {
       { action: "doctor", label: "Run connection diagnostics" },
     ]));
   }
+  if (activeModel && options.modelPriority.filter((model) => options.availableModels.includes(model)).length < 2) {
+    issues.push(issue("no-fallback-model", "models", "warning", "The active model has no available fallback; delegated work cannot recover from a provider outage.", [
+      { action: "configure", label: "Add a fallback model" },
+    ]));
+  }
   if (sandboxMode !== "strict") {
     const sandbox = detectSandboxAvailability();
     if (!sandbox.available) {
@@ -39,6 +44,15 @@ export async function inspectReadiness(options: {
         ? "This folder is not a Git repository; project creation is available."
         : "This existing folder is not a Git repository and requires inspection before adoption.",
       [{ action: workspace.disposition === "non-git-empty" ? "scaffold" : "inspect-adoption", label: workspace.disposition === "non-git-empty" ? "Design a new project" : "Inspect this folder" }],
+    ));
+  }
+  if (workspace.disposition === "git-unborn") {
+    const hasUserContent = workspace.entries.some((entry) => entry.category === "user");
+    issues.push(issue("workspace-unborn-head", "workspace", "warning",
+      "This Git repository has no initial commit. Read-only work is available, but implementation and delivery require scaffold or adoption first.",
+      hasUserContent
+        ? [{ action: "inspect-adoption", label: "Inspect and adopt existing files" }]
+        : [{ action: "scaffold", label: "Design the initial project" }],
     ));
   }
   if (workspace.disposition === "user-dirty") {
@@ -57,7 +71,23 @@ export async function inspectReadiness(options: {
     : issues.length > 0
       ? "degraded"
       : "ready";
-  return { status, configured: Boolean(activeModel), activeModel, sandboxMode, workspace, issues };
+  const commonBlocked = issues.some((entry) => entry.severity === "blocking" && entry.stage !== "workspace");
+  const readonlyBlocked = commonBlocked || workspace.disposition === "unsafe";
+  const mutationBlocked = readonlyBlocked || workspace.disposition === "git-unborn" || !workspace.git;
+  const deliveryBlocked = mutationBlocked || workspace.head === null;
+  return {
+    status,
+    configured: Boolean(activeModel),
+    activeModel,
+    sandboxMode,
+    workspace,
+    capabilities: {
+      readonly: readonlyBlocked ? "blocked" : "ready",
+      mutation: mutationBlocked ? "blocked" : workspace.disposition === "user-dirty" ? "degraded" : "ready",
+      delivery: deliveryBlocked ? "blocked" : workspace.disposition === "user-dirty" ? "degraded" : "ready",
+    },
+    issues,
+  };
 }
 
 function issue(

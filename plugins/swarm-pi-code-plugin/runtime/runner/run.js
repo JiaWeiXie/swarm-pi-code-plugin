@@ -3,9 +3,9 @@ import path from "node:path";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { buildReviewRequest } from "../git/review.js";
-import { checkpointJobWorktree, cleanupJobWorktree, prepareJobWorktree } from "../git/job-worktree.js";
+import { checkpointJobWorktree, cleanupJobWorktree, materializeJobWorktree, prepareJobWorktree } from "../git/job-worktree.js";
 import { checkpointScaffold, materializeScaffold, parseScaffoldSpec, prepareScaffoldWorkspace } from "../git/scaffold.js";
-import { acquireWorktreeLease, assertWorktreeBaseline, captureIgnoredPaths, captureWorktreeChanges, inspectWorktree, assessWorkspace, requireCleanWorktree, validateChangedPaths, } from "../git/worktree.js";
+import { acquireWorktreeLease, assertWorktreeBaseline, captureIgnoredPaths, captureWorktreeChanges, inspectWorktree, assessWorkspace, requireCleanWorktree, validateChangedPaths, WorktreeBaselineError, } from "../git/worktree.js";
 import { executeSession } from "../pi/execute.js";
 import { createModelCatalog, describeModels, describeProviders, modelId, orderModels, } from "../pi/models.js";
 import { createWorkerSession } from "../pi/runtime.js";
@@ -13,7 +13,7 @@ import { createSandboxRunner } from "../sandbox/runner.js";
 import { PiPolicyClassifier } from "../policy/classifier.js";
 import { PolicyEngine, actionFingerprint } from "../policy/engine.js";
 import { loadRepositoryDenyRules } from "../policy/project-policy.js";
-import { acknowledgeJob, attachJobProcess, cancelJob, finishJob, getJob, heartbeatJob, JOB_HEARTBEAT_INTERVAL_MS, listJobs, markJobRunning, readJobPrompt, readJobRequest, updateJobExecutionWorkspace, requestJobApproval, startJob, waitForApprovalResolution, createJobLeaseProvider, appendPolicyEvent, waitForJob, approveJob, denyJobApproval, listJobApprovals, isTerminalJobStatus, } from "../state/jobs.js";
+import { acknowledgeJob, attachJobProcess, cancelJob, finishJob, getJob, heartbeatJob, JOB_HEARTBEAT_INTERVAL_MS, listJobs, markJobRunning, readJobPrompt, readJobRequest, updateJobExecutionWorkspace, updateJobProgress, requestJobApproval, startJob, waitForApprovalResolution, createJobLeaseProvider, appendPolicyEvent, waitForJob, approveJob, denyJobApproval, listJobApprovals, isTerminalJobStatus, } from "../state/jobs.js";
 import { clearModelConfiguration, loadModelConfiguration, modelPriority, saveModelPriority, } from "../state/model-config.js";
 import { clearConfiguration, defaultState, resolveStateDir, loadState, saveProfile, setAvailableModels, setModelPriority, updateState, } from "../state/state.js";
 import { StateMigrationConflictError } from "../state/state.js";
@@ -51,7 +51,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
     }
     if (args.command === "resume") {
         const continuation = await readContinuation(cwd, args.continuationId);
-        const resumed = await runCommand(requestArguments(continuation.request), continuation.request.cwd, dependencies, { ...options, requestOverride: continuation.request });
+        const resumed = await runCommand(requestArguments(continuation.request), continuation.request.cwd, dependencies, { ...options, requestOverride: continuation.request, continuationId: continuation.id });
         if (!("event" in resumed) || (resumed.event !== "setup-required" && resumed.event !== "workspace-action-required")) {
             await consumeContinuation(cwd, continuation.id);
         }
@@ -130,7 +130,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         ? parseDelegationSpec(await activeDependencies.readFile(args.specFile))
         : { request: rawPrompt });
     const timeoutMs = args.timeoutMs ?? defaultTimeoutMs(args.command);
-    const workspaceStrategy = args.workspaceStrategy ?? options.requestOverride?.workspaceStrategy ?? "auto";
+    let workspaceStrategy = args.workspaceStrategy ?? options.requestOverride?.workspaceStrategy ?? "auto";
     const target = args.target ?? options.requestOverride?.target;
     const adoptExisting = args.adoptExisting ?? options.requestOverride?.adoptExisting ?? false;
     const readiness = await inspectReadiness({
@@ -140,45 +140,76 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         availableModels: available.map(modelId),
         registryError: activeDependencies.catalog.error?.() ?? null,
     });
+    if (isMutationTask(args.command) && workspaceStrategy === "auto" && readiness.workspace.disposition === "safe-dirty") {
+        workspaceStrategy = "isolated-head";
+    }
+    const workerRequest = {
+        host,
+        kind: args.command,
+        cwd,
+        prompt: rawPrompt,
+        mode: isMutationTask(args.command) ? "implement" : "readonly",
+        executionMode,
+        sandboxMode,
+        timeoutMs,
+        ...(args.model ? { model: args.model } : {}),
+        role: roleId,
+        thinkingLevel: rolePolicy.thinkingLevel,
+        approvalMode,
+        delegationSpec,
+        policySnapshot,
+        workspaceStrategy,
+        ...(target ? { target } : {}),
+        ...(scaffoldSpec ? { scaffoldSpec } : {}),
+        ...(adoptExisting ? { adoptExisting: true } : {}),
+    };
     const setupBlocked = !dependencies && readiness.issues.some((issue) => issue.severity === "blocking" && issue.stage !== "workspace");
     if (setupBlocked) {
-        const continuation = await createContinuation(cwd, {
-            host,
-            kind: args.command,
-            cwd,
-            prompt: rawPrompt,
-            mode: isMutationTask(args.command) ? "implement" : "readonly",
-            executionMode,
-            sandboxMode,
-            timeoutMs,
-            role: roleId,
-            thinkingLevel: rolePolicy.thinkingLevel,
-            approvalMode,
-            delegationSpec,
-            policySnapshot,
-            workspaceStrategy,
-            ...(target ? { target } : {}),
-            ...(scaffoldSpec ? { scaffoldSpec } : {}),
-            ...(adoptExisting ? { adoptExisting: true } : {}),
-        });
+        const continuation = await createContinuation(cwd, workerRequest);
         return { event: "setup-required", continuationId: continuation.id, readiness };
     }
-    if ((args.command === "implement" || args.command === "setup") &&
-        (readiness.workspace.disposition === "unsafe" ||
+    const mutationCommand = args.command === "implement" || args.command === "setup";
+    if ((args.command !== "scaffold" && readiness.workspace.disposition === "unsafe") ||
+        (mutationCommand && (readiness.workspace.disposition === "git-unborn" ||
             readiness.workspace.disposition === "non-git-empty" ||
             readiness.workspace.disposition === "non-git-existing" ||
-            (readiness.workspace.disposition === "user-dirty" && workspaceStrategy === "auto"))) {
+            (readiness.workspace.disposition === "user-dirty" && workspaceStrategy === "auto")))) {
+        const continuationId = options.continuationId ?? (await createContinuation(cwd, workerRequest, { workspaceFence: "repair" })).id;
+        const userDirty = readiness.workspace.disposition === "user-dirty";
+        const unborn = readiness.workspace.disposition === "git-unborn";
+        const unsafe = readiness.workspace.disposition === "unsafe";
+        const strategies = unsafe ? ["inspect-workspace"] : userDirty ? ["isolated-head", "isolated-snapshot"] : ["scaffold", "inspect-adoption"];
         return {
             event: "workspace-action-required",
+            errorCode: unsafe ? "workspace-unsafe" : unborn ? "workspace-unborn-head" : userDirty ? "workspace-user-dirty" : `workspace-${readiness.workspace.disposition}`,
+            message: unsafe
+                ? "The workspace contains conflicts or unsafe filesystem entries. No model was started; inspect and repair the workspace before resuming."
+                : unborn
+                    ? "The Git repository has no initial commit. No model was started; scaffold or adopt the workspace, then resume the preserved request."
+                    : "The workspace requires an explicit execution strategy before a mutation worker can start.",
+            continuationId,
             workspace: readiness.workspace,
-            strategies: readiness.workspace.disposition === "user-dirty" ? ["isolated-head", "isolated-snapshot"] : ["scaffold", "inspect-adoption"],
+            strategies,
+            nextActions: strategies.map((action) => ({
+                action,
+                label: action === "isolated-head" ? "Run from HEAD"
+                    : action === "isolated-snapshot" ? "Include a local snapshot"
+                        : action === "scaffold" ? "Design the initial project"
+                            : action === "inspect-workspace" ? "Review blocking workspace entries"
+                                : "Inspect and adopt existing files",
+            })),
         };
     }
     if (args.command === "scaffold" && scaffoldSpec?.targetMode === "adopt" && !adoptExisting) {
+        const continuationId = options.continuationId ?? (await createContinuation(cwd, workerRequest, { workspaceFence: "repair" })).id;
         return {
             event: "workspace-action-required",
+            errorCode: "workspace-adoption-approval-required",
+            message: "Existing target content requires explicit adoption approval before a worker can start.",
+            continuationId,
             workspace: await assessWorkspace(path.resolve(cwd, target)),
             strategies: ["approve-adoption"],
+            nextActions: [{ action: "approve-adoption", label: "Review and approve adoption" }],
         };
     }
     const job = await startJob(cwd, {
@@ -287,8 +318,24 @@ async function handleJobs(args, cwd) {
                 };
             }
             const workspace = snapshot.job.executionWorkspace;
-            if (snapshot.job.kind !== "scaffold" || !workspace || !snapshot.result) {
-                throw new Error(`Job has no scaffold artifact: ${args.jobId}`);
+            if (!workspace || !snapshot.result?.artifact?.commit || !snapshot.result.artifact.deliverable) {
+                throw new Error(`Job has no verified deliverable artifact: ${args.jobId}`);
+            }
+            if (snapshot.job.kind !== "scaffold") {
+                const materialized = await materializeJobWorktree(cwd, args.jobId, {
+                    worktree: workspace.worktree,
+                    branch: workspace.branch,
+                    base: workspace.base,
+                    commit: snapshot.result.artifact.commit,
+                });
+                await updateState(cwd, (state) => {
+                    const job = state.jobs.find((item) => item.id === args.jobId);
+                    if (job) {
+                        job.materializedAt = new Date().toISOString();
+                        job.materializedTarget = materialized.target;
+                    }
+                });
+                return { materialized: true, jobId: args.jobId, ...materialized };
             }
             const sourceStateDir = await resolveStateDir(cwd);
             const target = path.resolve(args.target ?? workspace.target);
@@ -339,7 +386,7 @@ async function handleJobs(args, cwd) {
             await cleanupJobWorktree(cwd, {
                 ...workspace,
                 ...(snapshot.result?.artifact?.commit ? { commit: snapshot.result.artifact.commit } : {}),
-            }, args.discard ?? false);
+            }, args.discard ?? Boolean(snapshot.job.materializedAt));
             await updateState(cwd, (state) => {
                 const job = state.jobs.find((item) => item.id === args.jobId);
                 if (job)
@@ -433,6 +480,8 @@ async function runStartedJobSafely(options) {
     catch (error) {
         const kind = options.args.command;
         const failed = withMetadata(failure(kind, error instanceof Error ? error.message : String(error), options.args.model ?? null), options.host, options.job.id, 0);
+        if (error instanceof WorktreeBaselineError)
+            failed.errorCode = error.code;
         await finishJob(options.stateCwd, options.job.id, failed);
         return failed;
     }
@@ -466,6 +515,7 @@ async function runStartedJob(options) {
                 return result;
             }
         }
+        await updateJobProgress(options.stateCwd, jobId, options.job.workerToken, "delegating", "Pi is working on the assigned task.");
         const workerMode = isMutationTask(kind) ? "implement" : "readonly";
         const classifierModels = options.policySnapshot.adaptivePolicy.classifierModels
             .map((reference) => options.dependencies.catalog.available().find((model) => modelId(model) === reference))
@@ -557,6 +607,14 @@ async function runStartedJob(options) {
             final.role = options.policySnapshot.rolePolicy.role;
             final.requestedThinkingLevel = options.policySnapshot.rolePolicy.thinkingLevel;
             final.policySummary = { mode: options.sandboxMode, hash: options.policySnapshot.hash, ...metrics };
+            if (final.success) {
+                final.nextActions = [{
+                        action: "review-handoff",
+                        label: "Review the durable analysis before starting implementation",
+                        requiresConfirmation: true,
+                        jobId,
+                    }];
+            }
             await finishJob(options.stateCwd, jobId, final);
             return final;
         }
@@ -624,6 +682,9 @@ async function runStartedJob(options) {
         let diff = "";
         result = { ...result, attempts: totalRoleAttempts };
         if (isMutationTask(kind)) {
+            await updateJobProgress(options.stateCwd, jobId, options.job.workerToken, "postflight", "Inspecting changes and preserved workspace paths.");
+            if (worktreeLease)
+                await assertWorktreeBaseline(options.cwd, worktreeLease.baseline);
             const changes = await captureWorktreeChanges(options.cwd);
             diff = changes.diff;
             const ignored = worktreeLease
@@ -634,8 +695,6 @@ async function runStartedJob(options) {
                 .map((entry) => entry.path);
             const runtimeSideEffects = [...new Set([...ignored, ...preserved])].sort();
             try {
-                if (worktreeLease)
-                    await assertWorktreeBaseline(options.cwd, worktreeLease.baseline);
                 await validateChangedPaths(options.cwd, changes.changedFiles);
                 result = {
                     ...result,
@@ -652,6 +711,7 @@ async function runStartedJob(options) {
                     success: false,
                     output: `${result.output}\n\nSandbox postflight failed: ${message}`.trim(),
                     error: message,
+                    errorCode: error instanceof WorktreeBaselineError ? error.code : "sandbox-postflight-failed",
                     changedFiles: changes.changedFiles,
                     diffStat: changes.diffStat,
                     ...(runtimeSideEffects.length > 0 ? { runtimeSideEffects } : {}),
@@ -662,6 +722,7 @@ async function runStartedJob(options) {
                 const job = (await getJob(options.stateCwd, jobId)).job;
                 const workspace = job.executionWorkspace;
                 if (workspace) {
+                    await updateJobProgress(options.stateCwd, jobId, options.job.workerToken, "checkpointing", "Creating a trusted artifact from the isolated worktree.");
                     if (kind === "scaffold") {
                         const commit = await checkpointScaffold(workspace, jobId);
                         artifact = {
@@ -685,6 +746,7 @@ async function runStartedJob(options) {
                     }
                 }
                 if (result.success) {
+                    await updateJobProgress(options.stateCwd, jobId, options.job.workerToken, "verifying", "Running an independent read-only verification pass.");
                     const verification = await runAgentVerifier({
                         cwd: options.cwd,
                         task: options.rawPrompt,
@@ -695,6 +757,14 @@ async function runStartedJob(options) {
                         ...(options.signal ? { signal: options.signal } : {}),
                     });
                     result = { ...result, agentVerification: verification, ...(artifact ? { artifact: { ...artifact, deliverable: verification.status === "passed" } } : {}) };
+                    if (artifact && verification.status === "passed") {
+                        result.nextActions = [{
+                                action: "materialize",
+                                label: "Apply the verified artifact to the target workspace",
+                                requiresConfirmation: true,
+                                jobId,
+                            }];
+                    }
                     if (verification.status !== "passed") {
                         result = {
                             ...result,
@@ -845,6 +915,7 @@ async function handleReadiness(args, cwd, dependencies) {
             activeModel: null,
             sandboxMode: state.config.sandboxMode ?? "strict",
             workspace,
+            capabilities: { readonly: "blocked", mutation: "blocked", delivery: "blocked" },
             issues: [{
                     code: "state-migration-conflict",
                     stage: "recovery",

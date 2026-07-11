@@ -13,5 +13,7 @@ Read the [cross-host control protocol](../references/host-protocol.md).
 4. Use background only for an explicitly requested, project-enabled `mechanical-executor`; all other implementation stays supervised.
 5. Do not mutate the same worktree while Pi runs. Inspect the actual diff, changed files, `runtimeSideEffects`, verification, and artifact before delivery.
 6. Safe-dirty generated files do not block. For exit code `5`, present `isolated-head` and `isolated-snapshot`: HEAD omits local changes; snapshot delivery remains isolated.
+7. A `workspace-unborn-head` response is fail-fast: no model ran. Preserve its continuation, route an empty workspace to scaffold or existing content to adoption, then resume after the user-approved repair.
+8. Safe-dirty `auto` execution uses a job-owned worktree. After verification, show the artifact diff and request explicit delivery approval before `$RUNNER jobs materialize --job <id> --json`; materialization applies changes without committing them.
 
 Run host-owned verification. Never commit, merge, push, or integrate an artifact marked `deliverable: false`.

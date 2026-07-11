@@ -39,6 +39,46 @@ test("workspace assessment permits only untracked generated artifacts", async ()
   assert.equal((await assessWorkspace(repository)).disposition, "user-dirty");
 });
 
+test("unborn Git repositories report mutation and delivery as blocked", async () => {
+  const repository = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-unborn-readiness-"));
+  execFileSync("git", ["init", repository], { stdio: "ignore" });
+  fs.writeFileSync(path.join(repository, ".DS_Store"), "metadata");
+  await updateState(repository, (state) => { state.config.modelPriority = ["test/model"]; });
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "unused",
+    createSession: async () => { throw new Error("status must not create a session"); },
+  };
+  const result = await runCommand({ command: "status", reconfigure: false, reset: false, json: true }, repository, dependencies);
+  assert.equal("workspace" in result && result.workspace.disposition, "git-unborn");
+  assert.equal("capabilities" in result && result.capabilities.readonly, "ready");
+  assert.equal("capabilities" in result && result.capabilities.mutation, "blocked");
+  assert.equal("capabilities" in result && result.capabilities.delivery, "blocked");
+  assert.match(JSON.stringify("issues" in result ? result.issues : []), /workspace-unborn-head/);
+});
+
+test("unsafe workspaces block read-only delegation before model startup", async () => {
+  const repository = repositoryFixture();
+  fs.symlinkSync(os.tmpdir(), path.join(repository, "outside-link"));
+  let sessions = 0;
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Inspect safely",
+    createSession: async () => {
+      sessions += 1;
+      throw new Error("unsafe workspace must not start a model");
+    },
+  };
+  const result = await runCommand({
+    command: "ask", host: "codex", promptFile: "prompt.md",
+    reconfigure: false, reset: false, json: true,
+  }, repository, dependencies);
+  assert.equal("event" in result && result.event, "workspace-action-required");
+  assert.equal("errorCode" in result && result.errorCode, "workspace-unsafe");
+  assert.deepEqual("strategies" in result ? result.strategies : [], ["inspect-workspace"]);
+  assert.equal(sessions, 0);
+});
+
 test("continuations are workspace-bound and single use", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-continuation-"));
   const request: WorkerRequest = {

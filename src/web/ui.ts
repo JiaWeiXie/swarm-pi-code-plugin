@@ -725,8 +725,10 @@ const clientScript = String.raw`
   }
   function renderProject() {
     const workspace = boot.workspace || {git:false,disposition:"non-git-existing"};
-    $("workspace-state").textContent = workspace.git
-      ? "Git workspace detected. Implementation can use worktree safeguards."
+    $("workspace-state").textContent = workspace.disposition === "git-unborn"
+      ? "Git is initialized, but there is no initial commit. Research is available; implementation requires scaffold or adoption first."
+      : workspace.git
+      ? "Git workspace with a committed HEAD detected. Implementation can use worktree safeguards."
       : workspace.disposition === "non-git-empty"
         ? "This folder is ready for a new scaffold. Configuration does not require Git."
         : "This existing non-Git folder will require inspection and explicit adoption before file changes.";
