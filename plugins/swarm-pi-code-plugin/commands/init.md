@@ -1,5 +1,5 @@
 ---
-description: Configure or reconfigure Swarm Pi providers, models, roles, safety, and project setup
+description: Configure Swarm Pi providers, models, roles, safety, Host Assistance, decisions, actions, and project scope
 argument-hint: '[--reconfigure] [--reset] [--json] [--no-open]'
 allowed-tools: Bash(node:*), AskUserQuestion, Read, Write
 ---

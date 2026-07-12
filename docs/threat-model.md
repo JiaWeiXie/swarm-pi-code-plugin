@@ -40,6 +40,7 @@ repository instructions, or a supervisor approval.
 | Worker dies while waiting | heartbeat reconciliation, orphan terminal result, stale approval rejection |
 | Host Assistance is replayed, misrouted, or partially persisted | Job/generation/session/attempt/perspective fencing, stable request ID, request/fan-out quotas, `.pending` reconciliation, first-valid response, consume-once |
 | Host context injects instructions | `[UNTRUSTED_HOST_CONTEXT]`, typed bundles, policy/gate/spec precedence, secret egress hard deny |
+| Model claims an experiment replay passed | required structured fields, isolated child, changed-path validation, explicit limitation until trusted replay exists |
 | Action recommendation becomes an unapproved side effect | inert recommendation, explicit Host record/start, original mutation-intent check, isolated child, host-broker action-family lease, remote actions default off |
 | Host blocks while a worker waits for approval | managed relay, fixed 15-second parent wait, durable Job ID, bounded `jobs wait` |
 | Approval notification is left stale or acknowledged incorrectly | atomic approval/notification transaction, matching notification ID, separate terminal acknowledgement |
@@ -50,7 +51,7 @@ repository instructions, or a supervisor approval.
 | Browser or job artifact leaks a credential | opaque draft IDs, AuthStorage-only secrets, response and journal redaction |
 | OAuth flow outlives setup | bounded polling, AbortSignal, timeout, cancel and server-dispose cleanup |
 | Literal header triggers Pi config syntax | controlled allowlist, control-character rejection, literal escaping |
-| Settings change during a background job | immutable version-3 provider snapshot and integrity hash |
+| Settings change during a background job | immutable provider/model snapshot, PolicySnapshot v3, request v5 hashes |
 | Credential is revoked after submission | resolve current AuthStorage at execution and fail explicitly |
 | Background mutation conflicts with host | job-owned worktree and branch, no automatic integration |
 | Logs expose source or secrets | redacted summaries by default, mode 0600 artifacts, bounded diagnostics |
@@ -69,8 +70,24 @@ The SessionStart hook is a recovery aid, not an execution control boundary. A
 Host must still inspect the event, display the approval evidence, and make the
 decision. `jobs watch` is at-least-once and may replay an event after restart;
 stable event IDs allow deduplication, while the approval transaction and policy
-generation remain authoritative. Codex users must review and trust the bundled
-hook before enabling it.
+generation remain authoritative. The standard SessionStart hook is loaded by
+Claude Code; the Codex manifest does not declare hooks.
+
+The strict read-only implementation verifier is a semantic model review, not a
+trusted command-running verifier. Likewise, experiment `cleanReplayPassed` is
+schema-validated evidence reported by the experimenter, not a control-plane
+replay receipt. Until trusted verification executes allowlisted commands, Hosts
+must run the relevant build, lint, typecheck, and tests before delivery.
+
+Decision Mode, Advisor, and `first-principles-qds-v1` do not form a safety
+boundary. Advisor output is untrusted evidence. The doctrine value is currently
+snapshotted metadata and does not execute an automatic convergence pass.
+
+Claude Code and Codex share notifications, delivery state, and configuration.
+Matching IDs prevent unrelated acknowledgements, but there is no general Host
+claim token for notification presentation, materialization, or configuration
+transactions. Operators must serialize delivery and settings changes until a
+token-fenced project operation coordinator exists.
 
 These risks are surfaced in setup, recorded in job policy snapshots, and
 contained by the immutable ceiling. Node does not expose a portable `openat(2)`

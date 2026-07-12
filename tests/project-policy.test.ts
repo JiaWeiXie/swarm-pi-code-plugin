@@ -50,6 +50,11 @@ test("roots are minimized and task aliases are expanded", async () => {
   assert.deepEqual(policy.allowedTaskKinds, ["ask", "orchestrate", "plan"]);
 });
 
+test("the discovery choice expands to the discover task kind", async () => {
+  const policy = await compileEffectiveProjectPolicy({ cwd: workspace(), profile: { tasks: ["discovery"] } });
+  assert.deepEqual(policy.allowedTaskKinds, ["discover"]);
+});
+
 test("unknown task choices fail closed, while mixed choices retain valid choices", async () => {
   await assert.rejects(
     () => compileEffectiveProjectPolicy({ cwd: workspace(), profile: { tasks: ["unknown"] } }),

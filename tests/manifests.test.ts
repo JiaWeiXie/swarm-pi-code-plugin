@@ -155,8 +155,8 @@ test("repo marketplaces point at the shared plugin root", () => {
   assert.equal(claude.name, "swarm-pi-code-plugin");
   assert.equal(claude.plugins[0]?.name, "swarm-pi-code-plugin");
   assert.equal(claude.plugins[0]?.source, "./plugins/swarm-pi-code-plugin");
-  assert.equal(claude.metadata.version, "0.5.0");
-  assert.equal(claude.plugins[0]?.version, "0.5.0");
+  assert.equal(claude.metadata.version, "0.5.1");
+  assert.equal(claude.plugins[0]?.version, "0.5.1");
   assert.equal(codex.name, "swarm-pi-code-plugin-local");
   assert.equal(codex.plugins[0]?.name, "swarm-pi-code-plugin");
   assert.equal(codex.plugins[0]?.source.path, "./plugins/swarm-pi-code-plugin");

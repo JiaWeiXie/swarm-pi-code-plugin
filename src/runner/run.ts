@@ -1660,7 +1660,9 @@ async function handleReadiness(
       const model = available.find((candidate) => modelId(candidate) === report.activeModel);
       if (model) {
         try {
-          const session = await activeDependencies.createSession({ cwd, mode: "readonly", model, thinkingLevel: "minimal" });
+          // "low" is the reasoning-effort floor accepted by both OpenAI and Azure
+          // responses models; "minimal" is OpenAI-only and 400s on Azure gpt-5.x.
+          const session = await activeDependencies.createSession({ cwd, mode: "readonly", model, thinkingLevel: "low" });
           const result = await executeSession({
             kind: "ask",
             model: report.activeModel,

@@ -17,6 +17,11 @@ flowchart LR
     H[Claude Code or Codex] --> A[Host adapter]
     A --> R[Shared Pi runner]
     R --> P[Embedded Pi session]
+    P --> Q[Durable Host Assistance]
+    Q --> A
+    R --> D[Discovery parent]
+    D --> E[Isolated experiment child]
+    R --> C[Confirmed host-broker child]
     P --> W[Assigned Git worktree]
     R --> S[Shared state and job artifacts]
     H --> V[Host-owned review and verification]
@@ -29,7 +34,7 @@ worktree-aware state.
 
 Delegated tasks resolve to role-specific model chains and thinking levels.
 Implementation jobs add scoped mutation tools, require a clean assigned
-worktree, and receive a fresh read-only verifier. Strict exposes no shell,
+worktree, and receive a fresh read-only semantic verifier. Strict exposes no shell,
 Adaptive authorizes bounded shell and network actions through policy and
 durable approval, and Lenient retains broad outbound access inside the OS
 sandbox. Git delivery remains host-owned.
@@ -126,7 +131,8 @@ Run the host-specific setup entry point. The browser walks through six steps:
    provider-specific fields.
 2. Choose a project primary model and ordered fallbacks.
 3. Assign model chains and thinking levels to worker roles.
-4. Choose sandbox, classifier, approval, and background policies.
+4. Choose sandbox, classifier, approval, background, Decision Mode, Host
+   Assistance, Advisor, doctrine metadata, and Host Action policies.
 5. Review the detected Git, empty-folder, or adoption workspace state.
 6. Test the primary and required classifier models, then save atomically.
 
@@ -145,8 +151,6 @@ Custom endpoints select their API protocol before model discovery. Provider
 IDs remain internal, and model limits stay automatic when the endpoint and Pi
 catalog do not establish them.
 
-![Six-step setup with no usable connection](docs/assets/setup/01-empty-connections.png)
-
 ### Provider connections
 
 The setup form is driven by the pinned Pi provider catalog. OpenAI uses the
@@ -159,22 +163,16 @@ Pi's `openai-codex` browser or device-code OAuth. It is not loaded through an
 OpenAI API-key field. GitHub Copilot and Anthropic subscription sign-in use the
 same bounded OAuth flow.
 
-![ChatGPT Plus or Pro subscription OAuth](docs/assets/setup/02-chatgpt-subscription.png)
-
 Custom endpoints choose one protocol: OpenAI Chat Completions, OpenAI
 Responses, or Anthropic Messages. Model discovery and **Verify API** are
 separate actions; loading `/models` does not prove that generation, tools, or
 reasoning work. If a server has no model-list endpoint, model IDs can be entered
 manually without being marked verified.
 
-![Custom endpoint protocol and authentication](docs/assets/setup/02-endpoint-discovery.png)
-
 After a connection is staged, configuration, credential replacement, API
 verification, sign-out, and project removal remain separate actions. Leaving a
 secret field blank keeps the saved credential; no existing secret is returned
 to the browser.
-
-![Provider readiness and credential actions](docs/assets/setup/03-provider-actions.png)
 
 ### Reconfigure
 
@@ -190,8 +188,6 @@ The project flow reads current role, safety, and profile settings, then updates
 only `state.json`. It does not
 rewrite model configuration, credentials, or job history.
 
-![Project-only role and safety configuration](docs/assets/setup/06-project-only.png)
-
 ### Execution safety and roles
 
 Projects default to **Strict**, which keeps scoped Pi tools and exposes no
@@ -205,14 +201,23 @@ context to the configured provider. Lenient source visible to the worker can be
 sent to external services. Unsupported platforms and missing dependencies fail
 closed and never fall back to an unsandboxed shell.
 
+Decision Mode controls bounded orchestration depth: Cost runs one base
+perspective, Balance two, and Power three. Host Assistance context budget and
+Advisor quotas are configured separately. Advisor is off by default and adds
+read-only, non-recursive consultations when enabled. The
+`first-principles-qds-v1` toggle is currently persisted metadata; 0.5.0 does
+not yet execute an automatic Question/Delete/Simplify convergence pass.
+
+Host Assistance is on by default. It lets a live Pi session ask the Host for a
+bounded workspace, Web, official documentation, paper, connector, installed
+skill, or human-decision result. The Host chooses the actual capability and
+returns one typed, cited, correlated `[UNTRUSTED_HOST_CONTEXT]` bundle. Secret
+egress is denied; connectors and non-public egress can require approval.
+
 Role routing keeps each responsibility's primary model, Thinking level, retry
 limit, and supported execution modes visible. Adaptive mode separately selects
 the classifier chain and approval fallback inside the sandbox capability
 ceiling.
-
-![Per-role model and Thinking configuration](docs/assets/setup/04-role-routing.png)
-
-![Adaptive sandbox and classifier configuration](docs/assets/setup/05-execution-safety.png)
 
 ### Workspace and review
 
@@ -221,15 +226,10 @@ task kinds after reporting Git readiness. Review then shows the effective
 provider protocol, authentication source, model source, verification state,
 role routing, and safety policy before the transaction is committed.
 
-![Workspace goal, scope, and delegated task kinds](docs/assets/setup/03-project-setup.png)
-
-![Provider, model, project, and safety review](docs/assets/setup/04-review.png)
-
 Successful save replaces credentials and configuration transactionally, clears
-the in-memory drafts, and closes the temporary local server. These screenshots
-use an isolated demo workspace and contain no real credentials.
-
-![Configuration saved](docs/assets/setup/05-saved.png)
+the in-memory drafts, and closes the temporary local server. Any published
+setup example must use an isolated demo workspace and contain no real
+credentials.
 
 ### Enforced project policy
 
@@ -262,10 +262,16 @@ node scripts/pi-runner.mjs review --host codex --scope working-tree --json
 node scripts/pi-runner.mjs plan --host codex --prompt-file /path/to/plan.md --json
 node scripts/pi-runner.mjs implement --host codex --prompt-file /path/to/task.md --json
 node scripts/pi-runner.mjs orchestrate --host codex --prompt-file /path/to/task.md --json
+node scripts/pi-runner.mjs discover --host codex --prompt-file /path/to/discovery.md --json
+node scripts/pi-runner.mjs plan --host codex --prompt-file /path/to/plan.md --discovery-from <job-id> --json
 node scripts/pi-runner.mjs scaffold --host codex --spec-file /path/to/scaffold.json --target /path/to/new-project --json
 node scripts/pi-runner.mjs setup --host codex --prompt-file /path/to/setup.md --json
 node scripts/pi-runner.mjs roles list --json
 ```
+
+Delegated task commands also accept `--decision-mode cost|balance|power`,
+`--host-assistance inherit|on|off`, and `--host-context-file <file>`. These
+overrides are snapshotted into the new Job and never mutate workspace defaults.
 
 `implement` is guarded by a clean-worktree preflight and an exclusive worktree
 lease. The host must inspect the result and run verification before delivery.
@@ -318,6 +324,12 @@ node scripts/pi-runner.mjs jobs acknowledge --job <job-id> --json
 node scripts/pi-runner.mjs jobs approvals --job <job-id> --json
 node scripts/pi-runner.mjs jobs approve --job <job-id> --approval <approval-id> --json
 node scripts/pi-runner.mjs jobs deny --job <job-id> --approval <approval-id> --json
+node scripts/pi-runner.mjs jobs host-requests --job <job-id> --json
+node scripts/pi-runner.mjs jobs host-respond --job <job-id> --request <request-id> --response-file <bundle.json> --json
+node scripts/pi-runner.mjs jobs host-decline --job <job-id> --request <request-id> --reason <reason> --json
+node scripts/pi-runner.mjs jobs decisions --job <job-id> --json
+node scripts/pi-runner.mjs jobs decide --job <job-id> --request <request-id> --response-file <decision.json> --json
+node scripts/pi-runner.mjs jobs action-start --job <parent-job-id> --request <recommendation-id> --json
 node scripts/pi-runner.mjs jobs cleanup --job <job-id> [--discard] --json
 node scripts/pi-runner.mjs jobs materialize --job <job-id> --target /path/to/new-project --json
 ```
@@ -335,6 +347,8 @@ is required while the job remains live.
 | `queued` | No | The job is durably recorded and waiting for a worker. | Continue bounded polling. |
 | `running` | No | The worker is active. Inspect `phase` and progress timestamps. | Continue bounded polling; offer cancellation for long-running work. |
 | `awaiting-approval` | No | The worker is paused on a policy approval request. | Present the approval and obtain an explicit approve or deny decision. |
+| `awaiting-host` | No | The worker requested bounded Host context or recorded an action recommendation. | Inspect the matching request; respond, decline, or explicitly start a recorded action. |
+| `awaiting-decision` | No | The worker needs a human decision. | Present the exact question and record the user's decision; do not synthesize one. |
 | `succeeded` | Yes | Execution completed successfully. | Inspect verification and any deliverable artifact. |
 | `failed` | Yes | Execution or verification failed. | Read `errorCode`, `error`, and verification details. |
 | `cancelled` | Yes | Cancellation completed. | Preserve any reported side effects or recovery instructions. |
@@ -361,10 +375,40 @@ acknowledged the terminal result.
 `jobs watch --emit ndjson` polls canonical state and replays pending events so a
 Host can recover after a restart. Events are allowlisted and exclude worker
 tokens, provider credentials, raw prompts, complete agent output, and logs.
+The stream includes approval, Host Assistance, Human Decision, progress, and
+terminal required/resolved events.
 `--once` is used by the optional SessionStart recovery hook; it does not make
 approval decisions or acknowledge notifications. Hosts must deduplicate replayed
 events by `eventId` and must never auto-approve because a timeout, hook, or
 replay occurred.
+
+### Assistance, Discovery, and Host Actions
+
+A live worker can request bounded Host context without knowing which Host tool
+will satisfy it. The Host inspects `jobs host-requests`, chooses the narrowest
+allowed workspace/Web/docs/paper/connector/skill mechanism, and returns a typed
+bundle. Human choices use `jobs decisions` and `jobs decide`; they do not create
+leases. Responses must match the request's Job, generation, session, attempt,
+perspective, and request ID. A saved response survives a crash, but the old
+model call stack does not.
+
+`discover` is a fixed research → isolated experiment → convergence workflow.
+The experiment report must include reproducibility, test, evidence, metric,
+tolerance, and reported clean-replay fields and concludes only `supported`,
+`refuted`, or `inconclusive`. Its artifact is permanently non-deliverable. In
+0.5.0 the control plane schema-validates the replay report but does not
+independently execute every recorded experiment command.
+
+An `ActionRecommendation` is inert. Only a successful `implement` or `setup`
+parent plus explicit user confirmation can start an isolated `host-broker`
+child. Local mutation/draft classes are enabled by default; remote write,
+message, deploy, and transaction are off. Unknown external outcomes are never
+retried automatically.
+
+Implementation delivery includes deterministic path, policy, hash, and
+materialization checks plus a separate strict read-only model verifier. It does
+not yet include a general trusted command-running build/test pipeline, so the
+Host must run the relevant project checks before delivery.
 
 ### New projects and development setup
 
@@ -386,6 +430,15 @@ Restart the host or run `/reload` in Claude Code. In Codex, start a new task so
 the installed skill cache is refreshed. For local plugin development, use the
 `--plugin-dir` path for Claude Code or reinstall the local Codex marketplace
 plugin after changing the manifest or skills.
+
+### Claude reports a duplicate `hooks/hooks.json`
+
+Claude Code loads the standard plugin `hooks/hooks.json` automatically. The
+plugin manifest must not also point `hooks` at that same file. Confirm
+`plugins/swarm-pi-code-plugin/.claude-plugin/plugin.json` has no `hooks` field,
+reinstall or reload the local marketplace plugin, and start a new Claude Code
+session so an old in-memory manifest is not reused. The Codex manifest also
+omits `hooks`; the standard SessionStart hook is a Claude Code integration.
 
 ### The browser does not open
 
@@ -504,7 +557,7 @@ codex plugin marketplace add /absolute/path/to/swarm-pi-code-plugin
 codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 ```
 
-Validate packaged JavaScript with `node --check` on the two plugin scripts and
+Validate packaged JavaScript with `node --check` on every plugin script and
 validate the Codex manifest and skills with the Codex plugin validation tool
 when it is available in the local development environment.
 

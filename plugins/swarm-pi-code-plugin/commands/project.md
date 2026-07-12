@@ -1,5 +1,5 @@
 ---
-description: Reopen guided Swarm Pi role routing, project scope, delegated task, and sandbox setup
+description: Reopen guided Swarm Pi roles, scope, sandbox, Host Assistance, decision, Advisor, and action settings
 argument-hint: '[--no-open]'
 allowed-tools: Bash(node:*)
 ---

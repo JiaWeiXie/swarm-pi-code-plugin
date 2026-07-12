@@ -14,6 +14,7 @@ const TASK_ALIASES = {
     analysis: ["ask", "orchestrate"],
     scaffolding: ["scaffold"],
     "development-setup": ["setup"],
+    discovery: ["discover"],
 };
 /** An error suitable for serialization by later policy enforcement phases. */
 export class ProjectPolicyError extends Error {

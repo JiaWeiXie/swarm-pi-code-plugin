@@ -26,8 +26,9 @@ workspace fingerprint to change. Resume always repeats the complete preflight;
 no previous readiness decision is reused.
 
 The guided flow is Connect, Models, Roles, Execution & Safety, Workspace, and
-Review & Test. A missing Git repository is workspace context, not a provider
-configuration failure.
+Review & Test. Execution & Safety also contains Decision Mode, Host Assistance,
+context budget, Advisor, doctrine metadata, and Host Action policy. A missing
+Git repository is workspace context, not a provider configuration failure.
 
 ## Runtime State
 
@@ -72,8 +73,10 @@ supervision. Global installation, host configuration, deployment, and Git
 delivery remain outside worker authority.
 
 The trusted control plane initializes staging Git metadata, records provenance,
-runs deterministic validation and a fresh verifier, and creates an artifact
-commit. A successful job is not delivered automatically. `jobs materialize`
+runs deterministic path/schema checks and a fresh read-only semantic verifier,
+and creates an artifact commit. Version 0.5.0 does not yet run a general
+trusted build/test command profile. A successful job is not delivered
+automatically. `jobs materialize`
 revalidates the target fingerprint and moves the verified artifact only after
 host approval. Collisions or target changes preserve the artifact and stop.
 
@@ -95,6 +98,12 @@ system errors. Partial configuration rollback creates a redacted recovery
 journal and blocks delegation until `doctor` confirms repair.
 
 Running jobs expose a durable phase (`queued`, `preflight`, `delegating`,
-`postflight`, `checkpointing`, or `verifying`) and last-progress timestamp so a
-host relay can report useful progress without conflating its own detached shell
-with Pi background execution.
+`awaiting-approval`, `awaiting-host`, `awaiting-decision`, `postflight`,
+`checkpointing`, or `verifying`) and last-progress timestamp so a Host relay
+can report useful progress without conflating its own detached shell with Pi
+background execution.
+
+Host Assistance records and safe events survive a process failure, but the
+model call stack does not. After a crash the Job is reconciled to `orphaned`;
+the Host may use an already resolved bundle as evidence for a new Job, never as
+proof that the old session resumed.

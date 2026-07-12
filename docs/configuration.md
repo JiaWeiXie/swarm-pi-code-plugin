@@ -27,12 +27,28 @@ Project-only setup retains Roles, Execution & Safety, Workspace, and Review. It
 does not rewrite provider credentials or model configuration.
 
 Workspace defaults use Balance Decision Mode, Host Assistance on, Advisor off,
-and doctrine off. Cost mode reduces review and context budgets; Power mode
-increases bounded review depth. None of these modes can lower safety gates,
-private-data approval, experiment assurance, or deterministic verification.
-The same screen configures Host context classes, request/fan-out limits,
-private-connector policy, Advisor targets/limits, and Host Action classes,
-cost/use/expiry bounds. Remote Host Actions are off by default.
+and doctrine off. Cost, Balance, and Power currently select one, two, or three
+base `orchestrate` perspectives and bound some decision attempts. Context
+budget, Host Assistance request/fan-out limits, and Advisor quotas remain
+separate explicit settings; changing Decision Mode does not rewrite them.
+None of these controls can lower project scope, private-data approval,
+experiment schema gates, or delivery policy.
+
+The same screen configures Host context classes, private-connector policy,
+Advisor targets/limits, doctrine metadata, and Host Action classes plus
+cost/use/expiry bounds. Remote Host Actions are off by default. The doctrine
+toggle is persisted in PolicySnapshot v3, but version 0.5.0 does not yet run an
+automatic Question/Delete/Simplify convergence pass. It must not be treated as
+an active review or safety control.
+
+| Setting | Default | Runtime effect in 0.5.0 |
+| --- | --- | --- |
+| Decision Mode | `balance` | 1/2/3 base orchestration perspectives for Cost/Balance/Power; bounded decision attempts |
+| Host Assistance | on | Enables correlated context, decision, and recommendation requests |
+| Context budget | 4 | Maximum numeric budget accepted from one Host context request |
+| Advisor | off | Adds bounded read-only consultations for selected tasks when enabled |
+| Doctrine | off | Snapshotted metadata only; no automatic convergence pass yet |
+| Host Actions | local mutation and draft | Allows an explicitly confirmed isolated child; remote classes remain off |
 
 ## Provider Capability Registry
 
@@ -224,10 +240,13 @@ submitted snapshots even if the settings page changes later, while resolving
 current credentials at execution time. Credential revocation therefore fails
 explicitly instead of falling back to unauthenticated execution.
 
-Requests v1–v3 remain readable for recovery with their legacy execution
-semantics. Version 4 preserves its submitted v2 enforced-policy snapshot;
-version 5 adds the v3 decision, Host Assistance, Advisor, doctrine, context
-budget, and Host Action policy controls.
+Requests v1–v4 remain readable for recovery with their legacy execution
+semantics. Version 4 preserves its submitted v2 enforced-policy snapshot.
+Version 5 adds the v3 Decision Mode, Host Assistance, Advisor, doctrine, and
+context-budget controls. Host Action policy is checked from workspace
+configuration when a recommendation is explicitly started; the child keeps
+the parent's snapshotted effective project policy and receives a new bounded
+action-family lease.
 
 ## Server Lifecycle
 
@@ -244,10 +263,10 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 - Missing `providerProfiles` load as an empty list.
 - Legacy custom providers infer auth and wire protocol from existing fields.
 - Existing custom IDs are not rewritten.
-- Legacy jobs with request versions 1–3 retain their original semantics and
-  are not retroactively given a provider or enforced project-policy snapshot.
-  Version 3 jobs continue to use their submitted provider snapshot; version 4
-  jobs additionally use their submitted project-policy snapshot.
+- Legacy jobs with request versions 1–4 retain their original semantics and
+  are not retroactively given v5 controls. Version 3 jobs continue to use
+  their submitted provider snapshot; version 4 jobs additionally use their
+  submitted project-policy snapshot.
 - `init --set-model-priority[-file]`, `models --json`, and `providers --json`
   remain available for automation.
 

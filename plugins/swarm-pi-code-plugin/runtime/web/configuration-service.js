@@ -247,7 +247,10 @@ export async function verifyProviderConnection(cwd, request, credentialVault, en
         modelConfiguration: candidate,
         authStorage: pi.authStorage,
         modelRegistry: pi.modelRegistry,
-        thinkingLevel: "minimal",
+        // Lowest reasoning effort accepted by both OpenAI and Azure responses models.
+        // "minimal" is OpenAI-only; Azure gpt-5.x rejects it, and map-less custom
+        // providers pass the level through verbatim, so use the safe intersection.
+        thinkingLevel: "low",
     });
     const result = await executeSession({
         kind: "ask",
@@ -432,7 +435,8 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
                 modelConfiguration: candidate,
                 authStorage: pi.authStorage,
                 modelRegistry: pi.modelRegistry,
-                thinkingLevel: "minimal",
+                // See verifyProviderConnection: "low" is the OpenAI/Azure-safe floor.
+                thinkingLevel: "low",
             });
             const smoke = await executeSession({
                 kind: "ask",

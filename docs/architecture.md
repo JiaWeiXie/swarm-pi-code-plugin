@@ -16,21 +16,26 @@ specified in [Bootstrap, Onboarding, and Workspace Hygiene](bootstrap-and-onboar
 
 ```mermaid
 flowchart TB
-    C[Claude Code] --> H[Host adapter]
+    CC[Claude Code] --> H[Host adapter]
     X[Codex CLI] --> H
     H --> R[Shared Pi runner]
     R --> Q{Task mode}
     Q --> O[Read-only Pi session]
     Q --> I[Scoped implementation Pi session]
+    Q --> DS[Discovery parent]
     O --> F[Repository evidence]
     I --> W[Assigned Git worktree]
+    DS --> EX[Isolated experiment child]
+    R --> HA[Durable Host Assistance]
+    HA --> H
+    R --> AC[Isolated host-broker action child]
     R --> B{Sandbox mode}
     B --> T[Strict scoped tools]
     B --> A[Adaptive policy and approvals]
     B --> L[Lenient OS-sandboxed Bash]
     R --> D[Git common dir or user-state namespace]
-    R --> C[Provider capability registry]
-    C --> PR[Pi model registry and AuthStorage]
+    R --> CR[Provider capability registry]
+    CR --> PR[Pi model registry and AuthStorage]
     D --> MF[model.json]
     D --> S[state.json and jobs]
     H --> V[Host-owned verification and delivery]
@@ -81,8 +86,10 @@ node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|appro
 
 Every worker result includes the task kind, status, success flag, selected
 model, output, changed files, diff summary, verification status, and any
-explicit next action. Status reports separate read-only, mutation, and delivery
-readiness so an unborn repository cannot be described as implementation-ready.
+explicit next action. Discovery results add stage reports and an experiment
+conclusion; Host Action children add a receipt. Status reports separate
+read-only, mutation, and delivery readiness so an unborn repository cannot be
+described as implementation-ready.
 
 Task commands accept role, thinking, execution, approval, timeout, and optional
 delegation-spec arguments. Background readonly work returns an accepted job ID
@@ -92,8 +99,10 @@ implementation first creates an isolated job worktree.
 The live `request_host_assistance` tool persists safe required/resolved events,
 correlates Job/generation/session/attempt/perspective, enforces request and
 fan-out budgets, and consumes the structured response once in the same live
-session. Discovery creates an isolated experiment child; Host Actions create a
-separate host-broker child only after an explicitly recorded recommendation.
+session. The Host adapter chooses the actual Web, documentation, paper,
+connector, skill, or workspace mechanism. Discovery creates an isolated
+experiment child; Host Actions create a separate host-broker child only after
+an explicitly recorded recommendation and explicit confirmation.
 
 The runner creates one in-memory Pi session per delegated model attempt.
 Strict jobs use scoped repository tools only. Adaptive and Lenient jobs share
@@ -102,15 +111,18 @@ parallel sessions cannot reset each other's process boundary. Pi provider failur
 from the terminal assistant message rather than inferred from whether
 `prompt()` rejected; only a terminal `stop` is successful.
 
-Each job moves through `queued`, `running`, optional `awaiting-approval`, and one terminal state:
-`succeeded`, `failed`, `cancelled`, `timed-out`, or `orphaned`. Workers maintain
-a heartbeat and process lease. Queries reconcile result artifacts, stale
-leases, and cancellation requests before returning state.
+Each job moves through `queued`, `running`, optional `awaiting-approval`,
+`awaiting-host`, or `awaiting-decision`, and one terminal state: `succeeded`,
+`failed`, `cancelled`, `timed-out`, or `orphaned`. Workers maintain a heartbeat
+and process lease while waiting. Queries reconcile result artifacts, pending
+Host Assistance records, stale leases, and cancellation requests before
+returning state.
 While running, the job also records a durable phase and progress timestamp for
 bounded host polling.
 
-When `executionMode=supervised` uses `approvalMode=wait`, the runner starts a
-managed detached worker but keeps the request and policy semantics supervised.
+When `executionMode=supervised` uses `approvalMode=wait`, or effective Host
+Assistance requires a live relay, the runner starts a managed detached worker
+but keeps the request and policy semantics supervised.
 The initiating command returns within a 15-second relay window with a terminal
 result, `approval-required`, or `wait-timed-out`; the host then resumes control
 with bounded `jobs wait` calls. `jobs watch --emit ndjson` is an at-least-once
@@ -157,17 +169,19 @@ worktrees normally observe the same setup:
     ├── prompt.md               # copied prompt, safe after host temp cleanup
     ├── heartbeat.json          # PID lease updated while running
     ├── approvals/              # generation-bound approval requests
-    ├── leases/                 # bounded capability leases
+    ├── host-assistance/        # correlated context/decision/action records
+    ├── leases/                 # worker and host-broker capability leases
     ├── policy-events.jsonl     # redacted authorization decisions
     ├── result.json             # terminal WorkerResult and verifier outcome
     ├── changes.patch           # optional implementation diff
     └── worker.*.log            # detached worker stdout and stderr
 ```
 
-Orchestration prompts may include a Host-created EvidencePack. Its cited facts,
-unknowns, and version constraints are copied into the durable job prompt so the
-next implementation brief can reference the source job instead of rebuilding
-research from chat history.
+Static Host context is copied into the durable prompt. Live Host context is
+stored as typed assistance records with hashes and consumed once. Discovery
+persists schema-validated stage artifacts and supports the narrow
+`plan --discovery-from` handoff. There is no general cross-Job evidence memory
+or cross-Job model-session reuse in 0.5.0.
 
 `model.json` is the canonical provider and model file. Provider profiles hold
 only non-secret adapter, endpoint, readiness, and controlled-header metadata.
@@ -225,10 +239,18 @@ profile together. Project-only setup starts at **Roles**, pre-populates the
 existing settings, and writes only shared state. Neither flow deletes jobs or
 global Pi credentials.
 
-New job requests use schema version 3 and embed the submitted non-secret model
-and provider configuration plus an integrity hash. Background workers use that
-snapshot but resolve credentials at execution time, so later settings changes
-affect only new jobs and credential revocation remains effective.
+New jobs use request version 5. They embed the submitted non-secret model and
+provider configuration plus an integrity hash and PolicySnapshot v3. The
+policy snapshot contains the effective project policy, Decision Mode, Host
+Assistance, Advisor, doctrine metadata, and context budget. Workers use those
+snapshots even when settings change later, while resolving credentials at
+execution time so revocation remains effective. Requests v1-v4 remain readable
+with their original semantics.
+
+Host Action policy is stored in current workspace configuration and checked
+when `jobs action-start` creates a child. The child receives the parent's
+snapshotted project policy and a new bounded action-family lease; it does not
+inherit the parent's writer lease.
 
 ## Migration
 

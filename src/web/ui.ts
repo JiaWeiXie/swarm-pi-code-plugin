@@ -154,11 +154,11 @@ export function renderConfigurationPage(
           </div>
         </div>
         <div class="form-band">
-          <div class="form-copy"><h2>Decision mode</h2><p>Controls review depth and bounded context budget without weakening safety gates.</p></div>
+          <div class="form-copy"><h2>Decision mode</h2><p>Selects one, two, or three base orchestrate perspectives. Context and Advisor limits stay separate; safety gates are unchanged.</p></div>
           <div class="form-control">
             <label for="decision-mode">Review and decision depth</label>
             <select id="decision-mode"><option value="cost">Cost</option><option value="balance">Balance</option><option value="power">Power</option></select>
-            <label class="inline-check"><input id="decision-doctrine" type="checkbox"> Apply first-principles Question → Delete → Simplify during final convergence</label>
+            <label class="inline-check"><input id="decision-doctrine" type="checkbox"> Record a Question → Delete → Simplify preference (not executed automatically in 0.5.0)</label>
           </div>
         </div>
         <div class="form-band">
@@ -174,12 +174,12 @@ export function renderConfigurationPage(
           </div>
         </div>
         <div class="form-band">
-          <div class="form-copy"><h2>Advisor</h2><p>Optional bounded consultations coordinated at selected tasks.</p></div>
+          <div class="form-copy"><h2>Advisor</h2><p>Optional bounded read-only consultations on selected tasks; no dynamic coordinator runs in 0.5.0.</p></div>
           <div class="form-control">
             <label class="inline-check"><input id="advisor-enabled" type="checkbox"> Enable Advisor</label>
             <label>Advisor targets</label><div id="advisor-targets" class="check-list"></div>
             <label for="advisor-max-requests">Consultations per Job</label><input id="advisor-max-requests" type="number" min="0" max="8">
-            <label for="advisor-max-perspectives">Virtual perspectives</label><input id="advisor-max-perspectives" type="number" min="0" max="8">
+            <label for="advisor-max-perspectives">Maximum Advisor perspectives</label><input id="advisor-max-perspectives" type="number" min="0" max="8">
           </div>
         </div>
         <div class="form-band">
@@ -447,6 +447,7 @@ h2 { letter-spacing: 0; }
 .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
 .row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .row-actions button { min-height: 34px; padding: 0 11px; }
+.verify-model-select { min-height: 34px; max-width: 190px; padding: 0 8px; border: 1px solid #c8d0cd; border-radius: 6px; background: #fff; color: #26312f; font-size: 13px; }
 .section-actions { display: flex; align-items: center; gap: 12px; padding-top: 18px; }
 .inline-status { color: var(--muted); font-size: 13px; }
 .inline-status.error, .dialog-status.error, .save-status.error { color: var(--coral); }
@@ -680,6 +681,17 @@ const clientScript = String.raw`
     catch { return String(provider.baseUrl).replace(/\/$/, "") + "|" + provider.api; }
   }
   function modelById(id) { return state.models.find(item => item.id === id); }
+  function selectedModelIds() {
+    const ids = [state.primary, ...state.fallbacks];
+    for (const policy of Object.values(state.rolePolicies)) if (Array.isArray(policy.models)) ids.push(...policy.models);
+    return new Set(ids.filter(Boolean));
+  }
+  function preferredVerifyModel(id) {
+    const forProvider = state.models.filter(item => item.provider === id);
+    if (!forProvider.length) return null;
+    const selected = selectedModelIds();
+    return (forProvider.find(item => selected.has(item.id)) || forProvider.find(item => item.available) || forProvider[0]).id;
+  }
   function providerName(id) { return connection(id)?.name || state.providerCatalog.find(item => item.id === id)?.name || id; }
   function modelLabel(model) { return model.name === model.model ? model.model : model.name + " - " + model.model; }
   function sourceLabel(source) {
@@ -768,7 +780,13 @@ const clientScript = String.raw`
         const replace = document.createElement("button"); replace.type = "button"; replace.className = "secondary-button"; replace.textContent = "Replace credential"; replace.addEventListener("click", () => replaceConnectionCredential(item.id, item.custom, authMethod)); actions.append(replace);
       }
       if (state.models.some(model => model.provider === item.id)) {
-        const verify = document.createElement("button"); verify.type = "button"; verify.className = "secondary-button"; verify.textContent = "Verify API"; verify.addEventListener("click", () => verifyConnection(item.id)); actions.append(verify);
+        const picker = document.createElement("select"); picker.className = "verify-model-select"; picker.setAttribute("aria-label", "Model to verify");
+        const preferred = preferredVerifyModel(item.id);
+        for (const model of state.models.filter(entry => entry.provider === item.id)) {
+          const option = document.createElement("option"); option.value = model.id; option.textContent = model.model; if (model.id === preferred) option.selected = true; picker.append(option);
+        }
+        actions.append(picker);
+        const verify = document.createElement("button"); verify.type = "button"; verify.className = "secondary-button"; verify.textContent = "Verify API"; verify.addEventListener("click", () => verifyConnection(item.id, picker.value)); actions.append(verify);
       }
       if (authMethod === "api-key" || authMethod === "oauth" || authMethod === "custom-header") {
         const signout = document.createElement("button"); signout.type = "button"; signout.className = "secondary-button"; signout.textContent = "Sign out"; signout.addEventListener("click", () => signOutConnection(item.id)); actions.append(signout);
@@ -1282,8 +1300,9 @@ const clientScript = String.raw`
   function removeConnection(id) {
     const item = connection(id); if (!item || !confirm("Remove " + item.name + " from this project?")) return; state.customProviders = state.customProviders.filter(provider => provider.id !== id); state.providerProfiles = state.providerProfiles.filter(profile => profile.provider !== id); state.connections = state.connections.filter(connection => connection.id !== id); state.models = state.models.filter(model => model.provider !== id); delete state.credentialDrafts[id]; if (state.primary.startsWith(id + "/")) state.primary = ""; state.fallbacks = state.fallbacks.filter(model => !model.startsWith(id + "/")); render();
   }
-  async function verifyConnection(id) {
-    const status = $("connection-status"), model = state.models.find(item => item.provider === id && (item.available || state.credentialDrafts[id])) || state.models.find(item => item.provider === id); if (!model) { status.textContent = "No model is available to verify."; return; }
+  async function verifyConnection(id, chosenModelId) {
+    const status = $("connection-status"); const targetId = chosenModelId || preferredVerifyModel(id); const model = targetId ? modelById(targetId) : null; if (!model) { status.textContent = "No model is available to verify."; return; }
+    status.className = "inline-status";
     status.textContent = "Verifying " + model.id + " with a minimal request...";
     try { const result = await post("/api/providers/verify", {model:model.id,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id}))}); upsertProviderProfile(result.profile); const item = connection(id); if (item) item.ready = true; status.textContent = "API verified for " + model.id + "."; render(); }
     catch (error) { status.className = "inline-status error"; status.textContent = error.message; }

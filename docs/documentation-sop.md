@@ -47,13 +47,14 @@ examples. Keep runtime details, file formats, and security rationale in
 `docs/architecture.md` or `docs/configuration.md` and cross-link from the
 README.
 
-## 3. Capture Safe, Current Screenshots
+## 3. Use Screenshots Only as Current Evidence
 
-Capture screenshots from the current build after the flow is stable. Use mock
-local endpoints and fictional data only; never include API keys, real tokens,
-personal repository paths, or live customer/provider information.
+Screenshots are optional. Include them only when they materially improve the
+user journey and can be reproduced from the current build with mock local
+endpoints and fictional data. Never include API keys, real tokens, personal
+repository paths, or live customer/provider information.
 
-For the guided configuration flow, capture the current desktop sequence:
+When documenting the complete guided configuration flow, a useful sequence is:
 
 1. Empty connection state.
 2. Custom endpoint discovery.
@@ -63,11 +64,11 @@ For the guided configuration flow, capture the current desktop sequence:
 6. Project-only reconfiguration.
 
 Store committed images under `docs/assets/setup/` using ordered, descriptive
-names such as `01-empty-connections.png`. Use a small representative subset in
-the README and the complete sequence in the configuration reference. Inspect
-the images at desktop size and exercise the same flow at a mobile viewport to
-catch clipped controls, overlapping content, or missing navigation before
-publishing.
+names. Inspect them at desktop size and exercise the same flow at a mobile
+viewport before publishing. If labels, controls, provider/model examples, or
+the step sequence no longer match, remove the image reference immediately;
+do not keep a stale screenshot as decoration. Unreferenced historical assets
+may be cleaned up in a separate binary-asset change.
 
 ## 4. Write And Cross-Link
 
@@ -90,8 +91,8 @@ only usable connections.
 Run the checks that match the changed surface:
 
 ```bash
-mise run check
-node /path/to/check-doc-links.mjs .
+npm run check
+claude plugin validate plugins/swarm-pi-code-plugin
 ```
 
 When a documentation change mentions plugin commands, skills, manifests, or
@@ -104,7 +105,23 @@ Check every local Markdown link and image path. Confirm command examples match
 the actual runner arguments and host manifests. Review the final diff with a
 reader's eye: the README should remain a usable guide rather than a changelog.
 
-## 6. Close The Documentation Loop
+For Codex skills, run the installed `quick_validate.py` from the skill-creator
+package against every changed skill. When source or packaged runtime behavior
+is mentioned, `npm run check:runtime-parity` is mandatory.
+
+## 6. Maintain Research Separately
+
+Research directories are decision records, not release notes. Keep one current
+assessment, one durable decision record, one roadmap, and focused risk studies
+that still affect implementation. When a later synthesis supersedes several
+proposal drafts, move the surviving decisions into those maintained documents
+and delete the duplicates. Git history preserves the original investigation.
+
+Research may describe future work, but it must label implemented, partial,
+deferred, and deleted behavior explicitly. Stable user references must never
+inherit a future claim from research without code and test evidence.
+
+## 7. Close The Documentation Loop
 
 Keep documentation work in its own feature branch and worktree after the
 decision is made. Commit a reviewable, rollback-sized documentation batch once

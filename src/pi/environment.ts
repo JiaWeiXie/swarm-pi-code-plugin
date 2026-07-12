@@ -4,14 +4,46 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { getProviderDefinition } from "../providers/capabilities.js";
+import { wireProtocolForRuntimeApi } from "../providers/endpoints.js";
 import {
   CONTROLLED_SECRET_HEADER_NAMES,
   DEFAULT_MODEL_CONTEXT_WINDOW,
   DEFAULT_MODEL_MAX_TOKENS,
   type ControlledProviderHeader,
+  type CustomProviderConfiguration,
   type ModelConfiguration,
   type ProviderProfile,
 } from "../state/model-config.js";
+
+// Pi's thinking-level vocabulary (off/minimal/low/medium/high/xhigh/max) is
+// wider than any single provider's accepted reasoning.effort set. Custom
+// providers carry no thinkingLevelMap, so Pi levels pass through verbatim and
+// mismatched values 400 (e.g. Azure gpt-5.x rejects "minimal"). We clamp every
+// level into {low, medium, high} — the set BOTH OpenAI-responses and Azure
+// OpenAI-responses accept — so a request can never 400 on either. (Azure loses
+// xhigh -> high; OpenAI loses minimal -> low. Real delegation uses
+// medium/high/xhigh, which are unaffected apart from xhigh -> high.)
+// Only applied to OpenAI-family wire protocols; anthropic-messages is excluded
+// because Claude takes effort through output_config.effort + a native thinking
+// config that the SDK manages, not a reasoning.effort string.
+const OPENAI_SAFE_EFFORT_MAP: Readonly<Record<string, string>> = {
+  off: "low",
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "high",
+  max: "high",
+};
+
+function customProviderEffortMap(
+  provider: CustomProviderConfiguration,
+): Readonly<Record<string, string>> | undefined {
+  const wire = provider.wireProtocol ?? wireProtocolForRuntimeApi(provider.api);
+  return wire === "openai-responses" || wire === "openai-chat-completions"
+    ? OPENAI_SAFE_EFFORT_MAP
+    : undefined;
+}
 
 export interface PiEnvironment {
   authStorage: AuthStorage;
@@ -60,6 +92,7 @@ export function applyCustomProviders(
   for (const provider of configuration.customProviders) {
     const authMethod = provider.auth?.method ?? (provider.requiresApiKey ? "api-key" : "none");
     const headers = resolvedHeaders(provider.id, provider.headers ?? []);
+    const effortMap = customProviderEffortMap(provider);
     const input: Parameters<ModelRegistry["registerProvider"]>[1] = {
       name: provider.name,
       baseUrl: provider.baseUrl,
@@ -79,6 +112,10 @@ export function applyCustomProviders(
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow,
           maxTokens: Math.min(model.maxTokens ?? DEFAULT_MODEL_MAX_TOKENS, contextWindow),
+          // Reasoning models on OpenAI-family protocols get a clamped effort map
+          // so Pi's thinking levels never emit an unsupported reasoning.effort.
+          // Non-reasoning models omit it (no effort is sent for them).
+          ...(model.reasoning && effortMap ? { thinkingLevelMap: effortMap } : {}),
         };
       }),
     };

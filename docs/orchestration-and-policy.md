@@ -32,11 +32,14 @@ instructions are untrusted input and may only add restrictions.
 | `reviewer` | `review` | `high` | supervised, background | none |
 | `analyst` | `orchestrate`, `discover` | `medium` | supervised, background | none |
 | `experimenter` | internal discovery experiment stage | `high` | supervised | bounded/sandboxed only |
-| `review-coordinator` | internal review and discovery convergence | `high` | supervised | none |
+| `review-coordinator` | reserved internal review/convergence role | `high` | supervised | none |
 | `advisor` | optional review/discovery consultation | `high` | supervised | none; context-only |
 | `mechanical-executor` | `implement` | `low` | supervised; optional background | worktree |
 | `executor` | `implement` | `high` | supervised | worktree |
 | `security-executor` | ask, review, implement | `high` | supervised | role dependent |
+| `project-architect` | `plan` for scaffold specification | `high` | supervised, background | none |
+| `scaffolder` | `scaffold` | `high` | supervised | isolated staging |
+| `environment-engineer` | `setup` | `high` | supervised | worktree |
 | `verifier` | internal | `medium` | internal | none; no Bash |
 | `classifier` | internal | `medium` | internal | no tools |
 
@@ -44,6 +47,20 @@ Each role has an ordered model chain, maximum two model attempts, a capability
 ceiling, and a verification policy. Requested and effective thinking levels
 are recorded because Pi clamps thinking to model capabilities. Model fallback
 handles provider or model failure only and never bypasses a policy decision.
+
+`review-coordinator` is excluded from public `--role` selection, but version
+0.5.0 does not yet start a coordinator session or produce a dynamic
+`ReviewPlan`. `orchestrate` uses a bounded fixed set of perspectives: Cost
+selects one, Balance two, and Power three. All selected perspectives are
+read-only. Any failed perspective currently fails the whole orchestration
+result, and outputs are concatenated rather than reduced to one canonical
+semantic report.
+
+Advisor is optional and disabled by default. When enabled for a task, the
+runner adds up to the configured minimum of `maxRequests` and
+`maxPerspectives` read-only consultations. Advisor output is additional
+evidence; it cannot recurse, mutate, start Host Actions, or override policy,
+verification, or a user decision.
 
 The default role follows the public task kind. A host may select another
 compatible role explicitly. A mechanical executor may escalate only before any
@@ -100,6 +117,12 @@ context budget, and doctrine controls. Queued, running, and resumed jobs use tha
 edits affect only subsequently submitted jobs. The worker prompt includes the
 project goal and canonical rendered policy text, but enforcement never depends
 on model compliance with that prompt.
+
+Decision Mode does not compile all review and context limits into a preset in
+0.5.0. It changes bounded orchestration depth and some decision-attempt limits;
+Host Assistance, context budget, and Advisor quotas remain independent fields.
+The optional `first-principles-qds-v1` doctrine is snapshotted but is not yet
+executed by the runner. It is metadata, not an active gate.
 
 ### Enforcement layers
 
@@ -201,12 +224,13 @@ classifier succeeds, the action requires approval when a live approval channel
 exists and is denied otherwise. A classifier can issue only capabilities
 already present in the effective ceiling.
 
-## Approval and Job Lifecycle
+## Approval, Assistance, and Job Lifecycle
 
-Jobs use `queued`, `running`, `awaiting-approval`, and explicit terminal
-states. A worker waiting for approval keeps its heartbeat, deadline, and signal
-handlers active. Approval and terminal notifications have separate IDs and
-acknowledgements.
+Jobs use `queued`, `running`, `awaiting-approval`, `awaiting-host`,
+`awaiting-decision`, and explicit terminal states. A worker waiting for
+approval or Host Assistance keeps its heartbeat, deadline, and signal handlers
+active. Approval, assistance, human-decision, and terminal notifications have
+separate IDs and matching acknowledgements.
 
 Approval, denial, cancellation, timeout, and worker completion are serialized
 through the state lock and generation fencing. A stale, expired, consumed, or
@@ -221,15 +245,44 @@ the durable job phase; a detached Host relay is not reported as Pi background
 execution. `jobs watch --emit ndjson` replays allowlisted events for recovery,
 but it never auto-approves or acknowledges a notification.
 
+The same managed relay is enabled when effective Host Assistance is active.
+`jobs wait` may return `host-assistance-required` or
+`human-decision-required`. Responses are fenced by Job, generation, session,
+attempt, optional perspective, and request ID. Only the first valid response
+can be consumed by the live session. Secret egress is denied; connector and
+non-public egress requests can enter the normal approval path. See
+[Host Assistance, Discovery, and Host Actions](host-assistance-discovery.md).
+
+## Verification Boundaries
+
+Project scope, postflight changed-path validation, schema validation, hashes,
+and artifact/materialization checks are deterministic control-plane evidence.
+The implementation verifier in 0.5.0 is a separate strict read-only Pi review:
+it is instructed not to run shell and classifies its response as verified,
+refuted, or inconclusive. It is useful semantic review, not a trusted
+command-running verification pipeline.
+
+Discovery validates all required stage fields. The experiment child records
+commands, tests, evidence, and a reported clean replay and runs in an isolated
+worktree or scratch root. The control plane does not yet independently execute
+the complete ExperimentSpec replay. Neither mechanism should be described as
+deterministic build/test proof.
+
 ## Delivery
 
 Read-only roles may run in the background. Background mechanical
 implementation is separately opt-in and always receives a job-owned Git
 worktree and branch. The trusted control plane may create a checkpoint artifact
-after path validation; the Pi session cannot write Git metadata. Verification
-must pass before the artifact is considered deliverable. Refuted, failed, or
-orphaned work is preserved for inspection and never merged automatically.
+after path validation; the Pi session cannot write Git metadata. The
+independent semantic verifier must pass before the artifact is considered
+deliverable. Refuted, failed, or orphaned work is preserved for inspection and
+never merged automatically.
 Safe-dirty implementation uses this isolated path automatically. After explicit
 delivery approval, `jobs materialize` applies the verified patch to the original
 HEAD while preserving pre-existing ephemeral files and leaves commit ownership
 with the Host.
+
+Experiment artifacts are permanently non-deliverable. A recorded Host Action
+recommendation is also inert: only an explicitly confirmed
+`jobs action-start` from a successful `implement` or `setup` parent can create
+a separate isolated `host-broker` child with a new action-family lease.

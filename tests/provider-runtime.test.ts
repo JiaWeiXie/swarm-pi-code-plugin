@@ -179,3 +179,79 @@ test("literal provider headers cannot invoke Pi config expansion", async () => {
   }
   delete process.env.SWARM_HEADER_MUST_NOT_EXPAND;
 });
+
+test("openai-family custom providers clamp reasoning effort into the OpenAI/Azure-safe set", () => {
+  const provider = "azure-responses-test";
+  const configuration = parseModelConfiguration({
+    version: 1,
+    primary: null,
+    fallbacks: [],
+    customProviders: [{
+      id: provider,
+      name: "Azure Responses",
+      baseUrl: "https://resource.services.ai.azure.com/openai/v1",
+      api: "openai-responses",
+      // Azure OpenAI Responses persists as the plain openai-responses wire protocol.
+      wireProtocol: "openai-responses",
+      authHeader: true,
+      requiresApiKey: true,
+      auth: { method: "api-key", secretRef: `auth:${provider}` },
+      models: [
+        { id: "gpt-5.6-luna", reasoning: true },
+        { id: "gpt-3.5-nonreasoning", reasoning: false },
+      ],
+    }],
+    providerProfiles: [],
+    updatedAt: null,
+  });
+  const environment = createPiEnvironment(configuration, {}, {
+    authStorage: AuthStorage.inMemory({ [provider]: { type: "api_key", key: "secret" } }),
+  });
+
+  const reasoning = environment.modelRegistry.find(provider, "gpt-5.6-luna")!;
+  // "minimal" (OpenAI-only) and "off" clamp down to Azure's floor; "xhigh"/"max"
+  // clamp down to "high" so nothing outside {low,medium,high} ever reaches the wire.
+  assert.deepEqual(reasoning.thinkingLevelMap, {
+    off: "low",
+    minimal: "low",
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: "high",
+    max: "high",
+  });
+
+  // Non-reasoning models get no map, so no reasoning.effort is emitted for them.
+  const plain = environment.modelRegistry.find(provider, "gpt-3.5-nonreasoning")!;
+  assert.equal(plain.thinkingLevelMap, undefined);
+});
+
+test("anthropic-messages custom providers are excluded from the OpenAI effort map", () => {
+  const provider = "anthropic-compat-test";
+  const configuration = parseModelConfiguration({
+    version: 1,
+    primary: null,
+    fallbacks: [],
+    customProviders: [{
+      id: provider,
+      name: "Anthropic Compatible",
+      baseUrl: "https://models.example.test",
+      api: "anthropic-messages",
+      wireProtocol: "anthropic-messages",
+      authHeader: false,
+      requiresApiKey: true,
+      auth: { method: "api-key", secretRef: `auth:${provider}` },
+      models: [{ id: "claude-compat", reasoning: true }],
+    }],
+    providerProfiles: [],
+    updatedAt: null,
+  });
+  const environment = createPiEnvironment(configuration, {}, {
+    authStorage: AuthStorage.inMemory({ [provider]: { type: "api_key", key: "secret" } }),
+  });
+
+  // Claude takes effort via output_config.effort + native thinking config, not a
+  // reasoning.effort string — so a clamped map must NOT be injected here.
+  const model = environment.modelRegistry.find(provider, "claude-compat")!;
+  assert.equal(model.thinkingLevelMap, undefined);
+});

@@ -28,6 +28,7 @@ const TASK_ALIASES: Record<string, TaskKind[]> = {
   analysis: ["ask", "orchestrate"],
   scaffolding: ["scaffold"],
   "development-setup": ["setup"],
+  discovery: ["discover"],
 };
 
 /** An error suitable for serialization by later policy enforcement phases. */
