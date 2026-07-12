@@ -1,7 +1,7 @@
 ---
 description: Configure or reconfigure Swarm Pi providers, models, roles, safety, and project setup
 argument-hint: '[--reconfigure] [--reset] [--json] [--no-open]'
-allowed-tools: Bash, AskUserQuestion, Read, Write
+allowed-tools: Bash(node:*), AskUserQuestion, Read, Write
 ---
 
 # swarm-pi-code-plugin init

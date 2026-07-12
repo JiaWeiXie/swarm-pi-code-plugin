@@ -1,7 +1,7 @@
 ---
 description: Reopen guided Swarm Pi role routing, project scope, delegated task, and sandbox setup
 argument-hint: '[--no-open]'
-allowed-tools: Bash
+allowed-tools: Bash(node:*)
 ---
 
 # swarm-pi-code-plugin project setup

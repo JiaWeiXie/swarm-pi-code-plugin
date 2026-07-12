@@ -33,11 +33,14 @@ repository instructions, or a supervisor approval.
 | --- | --- |
 | Prompt injection requests broader access | immutable ceiling, untrusted-context labeling, structured classifier output |
 | Tool hook is bypassed | enforcement inside scoped tools and Bash adapter, postflight validation |
-| Symlink or path traversal escapes | realpath and parent checks before every read/write, deny special files |
+| Symlink, TOCTOU, or recursive search escapes | lexical/realpath scope, no-follow descriptor open, descriptor identity check, parent dev/inode revalidation, recursive symlink refusal, postflight |
 | Classifier fails open | schema validation, bounded retries, approval or deny fallback |
 | Approval is replayed | job generation, policy hash, fingerprint, expiry, atomic consumption |
 | Parallel Bash changes global policy | worker-local serialization, immutable job policy snapshot |
 | Worker dies while waiting | heartbeat reconciliation, orphan terminal result, stale approval rejection |
+| Host Assistance is replayed, misrouted, or partially persisted | Job/generation/session/attempt/perspective fencing, stable request ID, request/fan-out quotas, `.pending` reconciliation, first-valid response, consume-once |
+| Host context injects instructions | `[UNTRUSTED_HOST_CONTEXT]`, typed bundles, policy/gate/spec precedence, secret egress hard deny |
+| Action recommendation becomes an unapproved side effect | inert recommendation, explicit Host record/start, original mutation-intent check, isolated child, host-broker action-family lease, remote actions default off |
 | Host blocks while a worker waits for approval | managed relay, fixed 15-second parent wait, durable Job ID, bounded `jobs wait` |
 | Approval notification is left stale or acknowledged incorrectly | atomic approval/notification transaction, matching notification ID, separate terminal acknowledgement |
 | Watcher restart replays an approval | stable `eventId`, Host-side deduplication, replay is informational and never consent |
@@ -70,8 +73,11 @@ generation remain authoritative. Codex users must review and trust the bundled
 hook before enabling it.
 
 These risks are surfaced in setup, recorded in job policy snapshots, and
-contained by the immutable ceiling. Whole-process container isolation remains
-a future mode for projects requiring a stronger kernel and credential boundary.
+contained by the immutable ceiling. Node does not expose a portable `openat(2)`
+API, so scoped tools combine no-follow final descriptors with parent identity
+revalidation and the OS sandbox/postflight boundary. Projects facing a hostile
+concurrent local process should use a stronger whole-process/container
+boundary; that remains a future mode.
 
 Bootstrap artifacts add a delivery boundary: models write only to a staging
 repository, while the trusted control plane owns Git initialization, artifact

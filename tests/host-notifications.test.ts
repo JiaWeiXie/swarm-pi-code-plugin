@@ -71,6 +71,14 @@ test("SessionStart hook renders allowlisted Job events as host context without d
       expiresAt: "2026-07-12T01:00:00.000Z",
     }),
     event({
+      event: "host-assistance-required",
+      jobId: "job-123",
+      requestId: "request-789",
+      contextClass: "docs",
+      safeSummary: "docs context requested (public)",
+      expiresAt: "2026-07-12T01:00:00.000Z",
+    }),
+    event({
       event: "job-terminal",
       jobId: "job-123",
       status: "failed",
@@ -83,6 +91,7 @@ test("SessionStart hook renders allowlisted Job events as host context without d
   assert.equal(parsed.hookSpecificOutput.hookEventName, "SessionStart");
   assert.match(context, /approval-required job=job-123 approval=approval-456/);
   assert.match(context, /job-terminal job=job-123 status=failed/);
+  assert.match(context, /host-assistance-required job=job-123 request=request-789/);
   assert.match(context, /No approval or acknowledgement was performed/);
   assert.doesNotMatch(context, /sk-super-secret-value/);
   assert.doesNotMatch(context, /\/Users\/alice\/project/);

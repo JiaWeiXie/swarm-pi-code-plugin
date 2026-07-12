@@ -254,6 +254,12 @@ function normalizeProjectSubmission(value) {
         ...(record.backgroundRolePolicy !== undefined
             ? { backgroundRolePolicy: record.backgroundRolePolicy }
             : {}),
+        ...(record.decisionMode !== undefined ? { decisionMode: record.decisionMode } : {}),
+        ...(record.hostAssistance !== undefined ? { hostAssistance: record.hostAssistance } : {}),
+        ...(record.contextBudget !== undefined ? { contextBudget: record.contextBudget } : {}),
+        ...(record.advisor !== undefined ? { advisor: record.advisor } : {}),
+        ...(record.doctrine !== undefined ? { doctrine: record.doctrine } : {}),
+        ...(record.hostActions !== undefined ? { hostActions: record.hostActions } : {}),
     };
 }
 function normalizeDiscoveryRequest(value) {

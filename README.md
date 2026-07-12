@@ -42,6 +42,9 @@ never enters project artifacts or localStorage.
 
 See the [architecture reference](docs/architecture.md) and
 [configuration reference](docs/configuration.md) for implementation details.
+See [Host Assistance and Discovery](docs/host-assistance-discovery.md) for the
+live worker-to-host context loop, schema-gated experiment micro-SDLC, Advisor
+boundaries, discover-to-plan handoff, and isolated Host Actions 0.5.
 
 ## Install
 
@@ -87,6 +90,7 @@ $swarm-pi-code-plugin-review
 $swarm-pi-code-plugin-plan
 $swarm-pi-code-plugin-implement
 $swarm-pi-code-plugin-orchestrate
+$swarm-pi-code-plugin-discover
 $swarm-pi-code-plugin-scaffold
 $swarm-pi-code-plugin-setup
 ```
@@ -105,6 +109,7 @@ $swarm-pi-code-plugin-setup
 | Review working-tree or branch changes | `/swarm-pi-code-plugin:review` | `$swarm-pi-code-plugin-review` |
 | Make an explicit scoped code change | `/swarm-pi-code-plugin:implement` | `$swarm-pi-code-plugin-implement` |
 | Run multiple read-only perspectives | `/swarm-pi-code-plugin:orchestrate` | `$swarm-pi-code-plugin-orchestrate` |
+| Investigate unknown requirements with gated evidence and experiments | `/swarm-pi-code-plugin:discover` | `$swarm-pi-code-plugin-discover` |
 | Design and create a new project | `/swarm-pi-code-plugin:scaffold` | `$swarm-pi-code-plugin-scaffold` |
 | Configure project-local development tools | `/swarm-pi-code-plugin:setup` | `$swarm-pi-code-plugin-setup` |
 

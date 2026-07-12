@@ -24,9 +24,151 @@ export async function assertMutationPath(cwd: string, candidate: string): Promis
   assertUnprotected(lexicalRoot, absolute);
 
   const existingAncestor = await closestExistingPath(absolute);
+  try {
+    if ((await fs.lstat(absolute)).isSymbolicLink()) {
+      throw new Error(`Mutation path cannot be a symlink: ${candidate}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   const realAncestor = await fs.realpath(existingAncestor);
   assertInside(root, realAncestor);
   return absolute;
+}
+
+interface PathIdentity {
+  path: string;
+  dev: number;
+  ino: number;
+}
+
+export async function secureWriteFile(cwd: string, candidate: string, content: string | Uint8Array): Promise<void> {
+  const absolute = await assertMutationPath(cwd, candidate);
+  const root = await fs.realpath(cwd);
+  const parent = path.dirname(absolute);
+  const identities = await captureDirectoryChain(root, parent);
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  let handle: Awaited<ReturnType<typeof fs.open>>;
+  try {
+    handle = await fs.open(absolute, constants.O_WRONLY | noFollow);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    handle = await fs.open(absolute, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600);
+  }
+  try {
+    await assertDirectoryChainStable(identities);
+    const descriptor = await handle.stat();
+    const final = await fs.lstat(absolute);
+    if (final.isSymbolicLink() || final.dev !== descriptor.dev || final.ino !== descriptor.ino) {
+      throw new Error(`Mutation path changed during secure open: ${candidate}`);
+    }
+    await handle.truncate(0);
+    await handle.writeFile(content);
+    await handle.sync();
+    await assertDirectoryChainStable(identities);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function secureReadFile(cwd: string, candidate: string): Promise<Buffer> {
+  const absolute = await assertReadPath(cwd, candidate);
+  const root = await fs.realpath(cwd);
+  const identities = await captureDirectoryChain(root, path.dirname(absolute));
+  const handle = await fs.open(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    await assertDirectoryChainStable(identities);
+    const descriptor = await handle.stat();
+    const final = await fs.lstat(absolute);
+    if (final.isSymbolicLink() || final.dev !== descriptor.dev || final.ino !== descriptor.ino) {
+      throw new Error(`Read path changed during secure open: ${candidate}`);
+    }
+    const content = await handle.readFile();
+    await assertDirectoryChainStable(identities);
+    return content;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function secureAccess(cwd: string, candidate: string, write: boolean): Promise<void> {
+  const absolute = write ? await assertMutationPath(cwd, candidate) : await assertReadPath(cwd, candidate);
+  const root = await fs.realpath(cwd);
+  const identities = await captureDirectoryChain(root, path.dirname(absolute));
+  const flags = (write ? constants.O_RDWR : constants.O_RDONLY) | (constants.O_NOFOLLOW ?? 0);
+  const handle = await fs.open(absolute, flags);
+  try {
+    await assertDirectoryChainStable(identities);
+    const descriptor = await handle.stat();
+    const final = await fs.lstat(absolute);
+    if (final.isSymbolicLink() || final.dev !== descriptor.dev || final.ino !== descriptor.ino) {
+      throw new Error(`Access path changed during secure open: ${candidate}`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+async function assertReadPath(cwd: string, candidate: string): Promise<string> {
+  const lexicalRoot = path.resolve(cwd);
+  const root = await fs.realpath(cwd);
+  const absolute = path.resolve(cwd, candidate);
+  assertInside(lexicalRoot, absolute);
+  const existingAncestor = await closestExistingPath(absolute);
+  const realAncestor = await fs.realpath(existingAncestor);
+  assertInside(root, realAncestor);
+  return absolute;
+}
+
+async function secureMkdir(cwd: string, candidate: string): Promise<void> {
+  const absolute = await assertMutationPath(cwd, candidate);
+  const root = await fs.realpath(cwd);
+  const relative = path.relative(root, absolute);
+  let current = root;
+  for (const component of relative.split(path.sep).filter(Boolean)) {
+    const parentIdentity = await captureIdentity(current);
+    const next = path.join(current, component);
+    try {
+      const existing = await fs.lstat(next);
+      if (existing.isSymbolicLink() || !existing.isDirectory()) throw new Error(`Directory component is not a stable directory: ${next}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await fs.mkdir(next, { mode: 0o700 });
+    }
+    await assertDirectoryChainStable([parentIdentity]);
+    const created = await fs.lstat(next);
+    if (created.isSymbolicLink() || !created.isDirectory()) throw new Error(`Directory component changed during creation: ${next}`);
+    current = next;
+  }
+}
+
+async function captureDirectoryChain(root: string, target: string): Promise<PathIdentity[]> {
+  assertInside(root, target);
+  const relative = path.relative(root, target);
+  const identities: PathIdentity[] = [await captureIdentity(root)];
+  let current = root;
+  for (const component of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, component);
+    const stat = await fs.lstat(current);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Path component is not a stable directory: ${current}`);
+    identities.push({ path: current, dev: stat.dev, ino: stat.ino });
+  }
+  return identities;
+}
+
+async function captureIdentity(candidate: string): Promise<PathIdentity> {
+  const stat = await fs.lstat(candidate);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Path component is not a stable directory: ${candidate}`);
+  return { path: candidate, dev: stat.dev, ino: stat.ino };
+}
+
+async function assertDirectoryChainStable(identities: PathIdentity[]): Promise<void> {
+  for (const identity of identities) {
+    const current = await fs.lstat(identity.path);
+    if (current.isSymbolicLink() || !current.isDirectory() || current.dev !== identity.dev || current.ino !== identity.ino) {
+      throw new Error(`Directory identity changed during filesystem operation: ${identity.path}`);
+    }
+  }
 }
 
 function assertUnprotected(root: string, candidate: string): void {
@@ -40,7 +182,7 @@ export interface CreateScopedFilesystemToolsOptions {
   cwd: string;
   mode: "readonly" | "implement";
   boundProjectPolicy: BoundProjectPolicy;
-  onPolicyViolation?: (error: ProjectPolicyError) => void;
+  onPolicyViolation?: (error: ProjectPolicyError) => void | Promise<void>;
 }
 
 /**
@@ -58,7 +200,13 @@ export function createScopedFilesystemTools(
     try {
       return await assertPathAllowed(options.boundProjectPolicy, operation, candidate);
     } catch (error) {
-      if (error instanceof ProjectPolicyError) options.onPolicyViolation?.(error);
+      if (error instanceof ProjectPolicyError) {
+        try {
+          await options.onPolicyViolation?.(error);
+        } catch {
+          // Preserve the structured policy rejection even if audit persistence fails.
+        }
+      }
       throw error;
     }
   };
@@ -66,16 +214,18 @@ export function createScopedFilesystemTools(
   const read = createReadToolDefinition(options.cwd, {
     operations: {
       async access(file) {
-        await fs.access(await assertAllowed("read", file), constants.R_OK);
+        const scoped = await assertAllowed("read", file);
+        await secureAccess(options.cwd, scoped, false);
       },
       async readFile(file) {
-        return fs.readFile(await assertAllowed("read", file));
+        const scoped = await assertAllowed("read", file);
+        return secureReadFile(options.cwd, scoped);
       },
     },
   });
-  const grep = withSearchPolicy(createGrepToolDefinition(options.cwd), assertAllowed);
-  const find = withSearchPolicy(createFindToolDefinition(options.cwd), assertAllowed);
-  const ls = withSearchPolicy(createLsToolDefinition(options.cwd), assertAllowed);
+  const grep = withSearchPolicy(createGrepToolDefinition(options.cwd), assertAllowed, options.onPolicyViolation, options.boundProjectPolicy);
+  const find = withSearchPolicy(createFindToolDefinition(options.cwd), assertAllowed, options.onPolicyViolation, options.boundProjectPolicy);
+  const ls = withSearchPolicy(createLsToolDefinition(options.cwd), assertAllowed, options.onPolicyViolation, options.boundProjectPolicy);
 
   if (options.mode === "readonly") {
     return [read, grep, find, ls] as unknown as NonNullable<CreateAgentSessionOptions["customTools"]>;
@@ -86,12 +236,12 @@ export function createScopedFilesystemTools(
       async mkdir(directory) {
         const scoped = await assertMutationPath(options.cwd, directory);
         await assertAllowed("write", scoped);
-        await fs.mkdir(scoped, { recursive: true });
+        await secureMkdir(options.cwd, scoped);
       },
       async writeFile(file, content) {
         const scoped = await assertMutationPath(options.cwd, file);
         await assertAllowed("write", scoped);
-        await fs.writeFile(scoped, content);
+        await secureWriteFile(options.cwd, scoped, content);
       },
     },
   });
@@ -101,17 +251,17 @@ export function createScopedFilesystemTools(
         const scoped = await assertMutationPath(options.cwd, file);
         await assertAllowed("write", scoped);
         await assertAllowed("read", scoped);
-        await fs.access(scoped, constants.R_OK | constants.W_OK);
+        await secureAccess(options.cwd, scoped, true);
       },
       async readFile(file) {
         const scoped = await assertMutationPath(options.cwd, file);
         await assertAllowed("read", scoped);
-        return fs.readFile(scoped);
+        return secureReadFile(options.cwd, scoped);
       },
       async writeFile(file, content) {
         const scoped = await assertMutationPath(options.cwd, file);
         await assertAllowed("write", scoped);
-        await fs.writeFile(scoped, content);
+        await secureWriteFile(options.cwd, scoped, content);
       },
     },
   });
@@ -121,9 +271,14 @@ export function createScopedFilesystemTools(
 }
 
 type PolicyAssertion = (operation: "read" | "search" | "write", candidate: string) => Promise<string>;
-type ExecutableTool = { execute: (...args: unknown[]) => unknown };
+type ExecutableTool = { name?: string; execute: (...args: unknown[]) => unknown };
 
-function withSearchPolicy(definition: unknown, assertAllowed: PolicyAssertion): unknown {
+function withSearchPolicy(
+  definition: unknown,
+  assertAllowed: PolicyAssertion,
+  onPolicyViolation?: (error: ProjectPolicyError) => void | Promise<void>,
+  boundProjectPolicy?: BoundProjectPolicy,
+): unknown {
   const tool = definition as ExecutableTool;
   return {
     ...tool,
@@ -131,13 +286,49 @@ function withSearchPolicy(definition: unknown, assertAllowed: PolicyAssertion): 
       // SDK tool executions receive a call id before their parameter object.
       // Locate the parameter object defensively so this remains transparent to
       // SDK context arguments added after signal/onUpdate.
-      const params = args.find((value): value is { path?: unknown } => (
+      const params = args.find((value): value is { path?: unknown; glob?: unknown; pattern?: unknown } => (
         typeof value === "object" && value !== null && !Array.isArray(value)
       ));
-      await assertAllowed("search", typeof params?.path === "string" ? params.path : ".");
-      return tool.execute(...args);
+      const searchRoot = await assertAllowed("search", typeof params?.path === "string" ? params.path : ".");
+      const selectorKeys: Array<"glob" | "pattern"> = tool.name === "grep"
+        ? ["glob"]
+        : tool.name === "find" ? ["pattern"] : [];
+      for (const key of selectorKeys) {
+        const selector = params?.[key];
+        if (typeof selector === "string" && isUnsafeSearchSelector(selector)) {
+          const violation = new ProjectPolicyError({
+            event: "policy-rejected",
+            errorCode: "project-scope-violation",
+            stage: "preflight",
+            recoverable: false,
+            message: `Search selector is outside the execution workspace: ${selector}`,
+            preserved: [],
+            nextActions: [{ action: "review-project-policy", label: "Review project policy" }],
+            ...(boundProjectPolicy ? { policyHash: boundProjectPolicy.effective.hash, scopeHash: boundProjectPolicy.effective.scopeHash } : {}),
+            violatingPaths: [selector],
+          });
+          try {
+            await onPolicyViolation?.(violation);
+          } catch {
+            // Preserve the structured policy rejection even if audit persistence fails.
+          }
+          throw violation;
+        }
+      }
+      const tree = await assertSearchTreeHasNoSymlinks(searchRoot);
+      const result = await tool.execute(...args);
+      await assertDirectoryChainStable(tree);
+      return result;
     },
   };
+}
+
+function isUnsafeSearchSelector(selector: string): boolean {
+  // Check every glob alternative boundary, not only the first character. This
+  // rejects `{../outside/**,**/*.ts}` and `{src/**,/etc/**}` while allowing
+  // harmless names such as `*..test.ts`.
+  return /(?:^|[,{(|])\s*(?:[\\/]|[A-Za-z]:)/.test(selector)
+    || /(?:^|[\\/{(|])\.\.(?:[\\/]|$)/.test(selector);
 }
 
 export function createScopedMutationTools(
@@ -146,23 +337,23 @@ export function createScopedMutationTools(
   const write = createWriteToolDefinition(cwd, {
     operations: {
       async mkdir(directory) {
-        await fs.mkdir(await assertMutationPath(cwd, directory), { recursive: true });
+        await secureMkdir(cwd, directory);
       },
       async writeFile(file, content) {
-        await fs.writeFile(await assertMutationPath(cwd, file), content);
+        await secureWriteFile(cwd, file, content);
       },
     },
   });
   const edit = createEditToolDefinition(cwd, {
     operations: {
       async access(file) {
-        await fs.access(await assertMutationPath(cwd, file), constants.R_OK | constants.W_OK);
+        await secureAccess(cwd, file, true);
       },
       async readFile(file) {
-        return fs.readFile(await assertMutationPath(cwd, file));
+        return secureReadFile(cwd, file);
       },
       async writeFile(file, content) {
-        await fs.writeFile(await assertMutationPath(cwd, file), content);
+        await secureWriteFile(cwd, file, content);
       },
     },
   });
@@ -190,4 +381,25 @@ async function closestExistingPath(candidate: string): Promise<string> {
       current = parent;
     }
   }
+}
+
+async function assertSearchTreeHasNoSymlinks(root: string): Promise<PathIdentity[]> {
+  const rootStat = await fs.lstat(root);
+  if (rootStat.isSymbolicLink()) throw new Error(`Recursive search refuses symlinked root: ${root}`);
+  if (!rootStat.isDirectory()) return [];
+  const pending = [root];
+  const identities: PathIdentity[] = [];
+  while (pending.length > 0) {
+    const directory = pending.pop()!;
+    const identity = await captureIdentity(directory);
+    identities.push(identity);
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const candidate = path.join(directory, entry.name);
+      const stat = await fs.lstat(candidate);
+      if (stat.isSymbolicLink()) throw new Error(`Recursive search refuses symlinked entries: ${candidate}`);
+      if (stat.isDirectory()) pending.push(candidate);
+    }
+  }
+  return identities;
 }

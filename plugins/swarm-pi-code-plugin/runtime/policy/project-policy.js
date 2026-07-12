@@ -5,7 +5,7 @@ const CAPABILITIES = new Set([
     "filesystem.read-workspace", "filesystem.write-workspace", "filesystem.write-temp",
     "git.read", "shell.execute", "network.connect",
 ]);
-const TASK_KINDS = ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup"];
+const TASK_KINDS = ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"];
 const OPERATIONS = ["read", "search", "write", "shell"];
 const TASK_ALIASES = {
     implementation: ["implement"],
@@ -108,6 +108,10 @@ export async function assertChangedPathsAllowed(policy, changedPaths) {
     if (violations.length) {
         throw rejection("project-scope-violation", "postflight", "Changed paths exceed allowed write roots", policy.effective, violations);
     }
+}
+/** Validate a durable effective-policy snapshot before it is bound to a workspace. */
+export function assertEffectiveProjectPolicyValid(policy) {
+    validatePolicy(policy);
 }
 export function renderProjectPolicy(policy) {
     const roots = OPERATIONS.map((operation) => `${operation}: ${policy.roots[operation].join(", ")}`).join("; ");

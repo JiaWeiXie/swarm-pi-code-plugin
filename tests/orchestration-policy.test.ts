@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { assertPolicySnapshotValid, createPolicySnapshot, defaultRoleForTask, resolveRolePolicy } from "../src/orchestration/roles.js";
+import { assertPolicySnapshotValid, createPolicySnapshot, defaultRoleForTask, policySnapshotHash, resolveRolePolicy } from "../src/orchestration/roles.js";
 import { ClassifierDecisionCache, PolicyEngine, actionFingerprint } from "../src/policy/engine.js";
-import { compileEffectiveProjectPolicy, loadRepositoryDenyRules } from "../src/policy/project-policy.js";
+import { ProjectPolicyError, compileEffectiveProjectPolicy, loadRepositoryDenyRules } from "../src/policy/project-policy.js";
 
 test("role registry keeps task compatibility and requested thinking defaults", () => {
   assert.equal(defaultRoleForTask("plan"), "planner");
@@ -101,6 +101,35 @@ test("v2 policy snapshot embeds the effective project policy and its scope hash"
   assert.doesNotThrow(() => assertPolicySnapshotValid(snapshot));
 });
 
+test("v3 policy snapshot carries bounded decision, host, and advisor controls", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-snapshot-v3-"));
+  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({ cwd: workspace, profile: { dirs: ["src"], tasks: ["discover"] } });
+  const snapshot = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("analyst"),
+    effectiveProjectPolicy,
+    decisionMode: "power",
+    hostAssistance: { enabled: true, mode: "on", contextClasses: ["workspace", "docs"], privateConnector: "ask", maxRequests: 6, maxFanOut: 3 },
+    advisor: { enabled: false, targets: ["discover"], maxRequests: 0, maxPerspectives: 0 },
+    contextBudget: 6,
+  });
+  assert.equal(snapshot.version, 3);
+  assert.doesNotThrow(() => assertPolicySnapshotValid(snapshot));
+  const invalid = structuredClone(snapshot);
+  invalid.hostAssistance.maxRequests = -1;
+  invalid.hash = policySnapshotHash(invalid);
+  assert.throws(() => assertPolicySnapshotValid(invalid), /v3 controls|invalid/i);
+  const invalidBudget = structuredClone(snapshot);
+  invalidBudget.contextBudget = -1;
+  invalidBudget.hash = policySnapshotHash(invalidBudget);
+  assert.throws(() => assertPolicySnapshotValid(invalidBudget), /v3 controls|invalid/i);
+  const invalidDoctrine = structuredClone(snapshot);
+  invalidDoctrine.doctrine = "unsupported" as never;
+  invalidDoctrine.hash = policySnapshotHash(invalidDoctrine);
+  assert.throws(() => assertPolicySnapshotValid(invalidDoctrine), /v3 controls|invalid/i);
+});
+
 test("a snapshot without an effective project policy stays version 1", () => {
   const snapshot = createPolicySnapshot({ sandboxMode: "strict", approvalMode: "deny", rolePolicy: resolveRolePolicy("executor") });
   assert.equal(snapshot.version, 1);
@@ -133,6 +162,42 @@ test("snapshot validation rejects tampered fields", async () => {
   const tamperedHash = clone();
   tamperedHash.hash = "0".repeat(64);
   assert.throws(() => assertPolicySnapshotValid(tamperedHash), /hash/i);
+});
+
+test("snapshot validation rejects malformed effective project policy as a typed error", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-snapshot-shape-"));
+  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({ cwd: workspace, profile: { dirs: ["src"], tasks: ["implementation"] } });
+  const base = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    effectiveProjectPolicy,
+  });
+  const malformed = [
+    { ...structuredClone(base), effectiveProjectPolicy: null },
+    { ...structuredClone(base), effectiveProjectPolicy: { ...structuredClone(base.effectiveProjectPolicy), roots: null } },
+    { ...structuredClone(base), effectiveProjectPolicy: { ...structuredClone(base.effectiveProjectPolicy), roots: { ...structuredClone(base.effectiveProjectPolicy.roots), write: null } } },
+    { ...structuredClone(base), effectiveProjectPolicy: { ...structuredClone(base.effectiveProjectPolicy), roots: { ...structuredClone(base.effectiveProjectPolicy.roots), write: ["C:outside"] } } },
+  ];
+  for (const snapshot of malformed) {
+    assert.throws(
+      () => assertPolicySnapshotValid(snapshot as never),
+      (error: unknown) => error instanceof ProjectPolicyError && error.rejection.errorCode === "policy-snapshot-invalid",
+    );
+  }
+});
+
+test("snapshot validation rejects outer-hash-only policy tampering", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-snapshot-policy-hash-"));
+  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({ cwd: workspace, profile: { dirs: ["src"], tasks: ["implementation"] } });
+  const base = createPolicySnapshot({ sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("executor"), effectiveProjectPolicy });
+  const tampered = structuredClone(base);
+  tampered.effectiveProjectPolicy.allowedTaskKinds = ["ask"];
+  tampered.hash = policySnapshotHash(tampered);
+  assert.throws(
+    () => assertPolicySnapshotValid(tampered),
+    (error: unknown) => error instanceof ProjectPolicyError && error.rejection.errorCode === "policy-snapshot-invalid",
+  );
 });
 
 test("v2 snapshot hash ignores object key insertion order", async () => {

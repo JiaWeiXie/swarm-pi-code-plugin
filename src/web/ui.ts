@@ -153,6 +153,46 @@ export function renderConfigurationPage(
             <label class="inline-check"><input id="background-mechanical" type="checkbox"> Allow mechanical executor in a job-owned worktree</label>
           </div>
         </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Decision mode</h2><p>Controls review depth and bounded context budget without weakening safety gates.</p></div>
+          <div class="form-control">
+            <label for="decision-mode">Review and decision depth</label>
+            <select id="decision-mode"><option value="cost">Cost</option><option value="balance">Balance</option><option value="power">Power</option></select>
+            <label class="inline-check"><input id="decision-doctrine" type="checkbox"> Apply first-principles Question → Delete → Simplify during final convergence</label>
+          </div>
+        </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Host Assistance</h2><p>Let workers request bounded workspace, Web, docs, paper, connector, or installed-skill context from the Host.</p></div>
+          <div class="form-control">
+            <label for="host-assistance-mode">Default</label>
+            <select id="host-assistance-mode"><option value="on">On</option><option value="inherit">Inherit</option><option value="off">Off</option></select>
+            <label>Allowed context classes</label><div id="host-context-classes" class="check-list"></div>
+            <label for="context-budget">Context budget</label><input id="context-budget" type="number" min="0" max="64">
+            <label for="host-max-requests">Requests per Job</label><input id="host-max-requests" type="number" min="0" max="32">
+            <label for="host-max-fanout">Concurrent fan-out</label><input id="host-max-fanout" type="number" min="0" max="8">
+            <label for="private-connector">Private connectors</label><select id="private-connector"><option value="deny">Deny</option><option value="ask">Ask each time</option></select>
+          </div>
+        </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Advisor</h2><p>Optional bounded consultations coordinated at selected tasks.</p></div>
+          <div class="form-control">
+            <label class="inline-check"><input id="advisor-enabled" type="checkbox"> Enable Advisor</label>
+            <label>Advisor targets</label><div id="advisor-targets" class="check-list"></div>
+            <label for="advisor-max-requests">Consultations per Job</label><input id="advisor-max-requests" type="number" min="0" max="8">
+            <label for="advisor-max-perspectives">Virtual perspectives</label><input id="advisor-max-perspectives" type="number" min="0" max="8">
+          </div>
+        </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Host Actions 0.5</h2><p>Run explicitly recorded recommendations in isolated child Jobs. Remote effects remain disabled by default.</p></div>
+          <div class="form-control">
+            <label class="inline-check"><input id="host-actions-enabled" type="checkbox"> Enable isolated Host Action children</label>
+            <label>Allowed action classes</label><div id="host-action-classes" class="check-list"></div>
+            <label class="inline-check"><input id="host-actions-remote" type="checkbox"> Enable remote write, message, deploy, and transaction actions</label>
+            <label for="host-action-max-uses">Maximum uses</label><input id="host-action-max-uses" type="number" min="1" max="100">
+            <label for="host-action-max-cost">Maximum cost</label><input id="host-action-max-cost" type="number" min="0" step="0.01">
+            <label for="host-action-ttl">Lease TTL (minutes)</label><input id="host-action-ttl" type="number" min="1" max="1440">
+          </div>
+        </div>
       </section>
 
       <section id="project-screen" class="screen" hidden>
@@ -201,6 +241,7 @@ export function renderConfigurationPage(
         <div class="review-section"><h2>Working area</h2><div id="review-directories" class="review-list"></div></div>
         <div class="review-section"><h2>Delegated work</h2><div id="review-tasks" class="review-list"></div></div>
         <div class="review-section"><h2>Execution safety</h2><div id="review-sandbox" class="review-value"></div></div>
+        <div class="review-section"><h2>Workflow controls</h2><div id="review-workflow" class="review-list"></div></div>
         <div class="review-section"><h2>Role routing</h2><div id="review-roles" class="review-list"></div></div>
       </section>
 
@@ -541,6 +582,7 @@ const clientScript = String.raw`
     {value:"analysis",label:"Analysis",description:"Investigate behavior, architecture, and technical questions."},
     {value:"scaffolding",label:"Project scaffolding",description:"Create a verified new project in isolated staging."},
     {value:"development-setup",label:"Development setup",description:"Configure project-local dependencies and tools."},
+    {value:"discovery",label:"Discovery",description:"Research unknowns, run reproducible experiments, and converge requirements."},
   ];
   const setupMode = boot.setupMode === "project" ? "project" : "full";
   const initialPhase = setupMode === "project" ? 3 : 1;
@@ -549,7 +591,7 @@ const clientScript = String.raw`
   const savedTasks = savedProfile?.tasks || [];
   function canonicalTask(value) {
     const normalized = String(value).trim().toLowerCase().replace(/[ _]+/g, "-");
-    return ({implement:"implementation",implementation:"implementation",coding:"implementation",plan:"planning",planning:"planning",review:"code-review","code-review":"code-review",analysis:"analysis",analyze:"analysis"})[normalized] || null;
+    return ({implement:"implementation",implementation:"implementation",coding:"implementation",plan:"planning",planning:"planning",review:"code-review","code-review":"code-review",analysis:"analysis",analyze:"analysis",discover:"discovery",discovery:"discovery",scaffold:"scaffolding",scaffolding:"scaffolding",setup:"development-setup","development-setup":"development-setup"})[normalized] || null;
   }
   const savedKnownTasks = savedTasks.map(canonicalTask).filter(Boolean);
   const state = {
@@ -575,6 +617,12 @@ const clientScript = String.raw`
     rolePolicies: structuredClone(boot.rolePolicies || {}),
     adaptivePolicy: structuredClone(boot.adaptivePolicy || {classifierModels:[],classifierThinkingLevel:"medium",approvalPolicy:"deny",trustedDomains:[],rules:[],diagnostics:false}),
     backgroundRolePolicy: structuredClone(boot.backgroundRolePolicy || {mechanicalExecutor:false}),
+    decisionMode: ["cost","balance","power"].includes(boot.decisionMode) ? boot.decisionMode : "balance",
+    hostAssistance: structuredClone(boot.hostAssistance || {enabled:true,mode:"on",contextClasses:["workspace","web","docs","paper","skill"],privateConnector:"ask",maxRequests:4,maxFanOut:2}),
+    contextBudget: Number.isInteger(boot.contextBudget) ? boot.contextBudget : 4,
+    advisor: structuredClone(boot.advisor || {enabled:false,targets:["review","plan","orchestrate","discover"],maxRequests:2,maxPerspectives:2}),
+    doctrine: boot.doctrine || null,
+    hostActions: structuredClone(boot.hostActions || {enabled:true,allowedActionClasses:["local-mutation","draft"],remoteActionsEnabled:false,maxUses:1,maxCost:1,ttlMs:1800000}),
     profile: {
       goal: savedProfile?.goal || "",
       scope: savedProfile?.dirs?.length ? "selected" : "all",
@@ -595,6 +643,12 @@ const clientScript = String.raw`
       if (draft.rolePolicies) state.rolePolicies = draft.rolePolicies;
       if (draft.adaptivePolicy) state.adaptivePolicy = draft.adaptivePolicy;
       if (draft.backgroundRolePolicy) state.backgroundRolePolicy = draft.backgroundRolePolicy;
+      if (draft.decisionMode) state.decisionMode = draft.decisionMode;
+      if (draft.hostAssistance) state.hostAssistance = draft.hostAssistance;
+      if (Number.isInteger(draft.contextBudget)) state.contextBudget = draft.contextBudget;
+      if (draft.advisor) state.advisor = draft.advisor;
+      if ("doctrine" in draft) state.doctrine = draft.doctrine;
+      if (draft.hostActions) state.hostActions = draft.hostActions;
       if (["strict","adaptive","lenient"].includes(draft.sandboxMode)) state.sandboxMode = draft.sandboxMode;
       if (draft.profile) state.profile = draft.profile;
     }
@@ -606,7 +660,9 @@ const clientScript = String.raw`
     localStorage.setItem(draftKey, JSON.stringify({
       primary:state.primary,fallbacks:state.fallbacks,rolePolicies:state.rolePolicies,
       adaptivePolicy:state.adaptivePolicy,backgroundRolePolicy:state.backgroundRolePolicy,
-      sandboxMode:state.sandboxMode,profile:state.profile,
+      sandboxMode:state.sandboxMode,profile:state.profile,decisionMode:state.decisionMode,
+      hostAssistance:state.hostAssistance,contextBudget:state.contextBudget,advisor:state.advisor,
+      doctrine:state.doctrine,hostActions:state.hostActions,
     }));
   }
   document.addEventListener("input", persistDraft);
@@ -897,11 +953,44 @@ const clientScript = String.raw`
     $("policy-diagnostics").checked = Boolean(state.adaptivePolicy.diagnostics);
     if (document.activeElement !== $("policy-rules")) $("policy-rules").value = JSON.stringify(state.adaptivePolicy.rules || [], null, 2);
     $("background-mechanical").checked = Boolean(state.backgroundRolePolicy.mechanicalExecutor);
+    $("decision-mode").value = state.decisionMode;
+    $("decision-doctrine").checked = state.doctrine === "first-principles-qds-v1";
+    $("host-assistance-mode").value = state.hostAssistance.mode;
+    const hostClasses = $("host-context-classes"); hostClasses.replaceChildren();
+    [["workspace","Workspace files"],["web","Public Web"],["docs","SDK/API docs"],["paper","Papers"],["connector","Private connector"],["skill","Installed skill"]].forEach(([value,label]) => hostClasses.append(checkRow({
+      value,label,checked:state.hostAssistance.contextClasses.includes(value),
+      onChange:checked => { state.hostAssistance.contextClasses = checked ? [...new Set([...state.hostAssistance.contextClasses,value])] : state.hostAssistance.contextClasses.filter(item => item !== value); },
+    })));
+    $("context-budget").value = String(state.contextBudget);
+    $("host-max-requests").value = String(state.hostAssistance.maxRequests);
+    $("host-max-fanout").value = String(state.hostAssistance.maxFanOut);
+    $("private-connector").value = state.hostAssistance.privateConnector;
+    $("advisor-enabled").checked = Boolean(state.advisor.enabled);
+    const advisorTargets = $("advisor-targets"); advisorTargets.replaceChildren();
+    ["ask","review","plan","implement","orchestrate","scaffold","setup","discover"].forEach(value => advisorTargets.append(checkRow({
+      value,label:value,checked:state.advisor.targets.includes(value),
+      onChange:checked => { state.advisor.targets = checked ? [...new Set([...state.advisor.targets,value])] : state.advisor.targets.filter(item => item !== value); },
+    })));
+    $("advisor-max-requests").value = String(state.advisor.maxRequests);
+    $("advisor-max-perspectives").value = String(state.advisor.maxPerspectives);
+    $("host-actions-enabled").checked = Boolean(state.hostActions.enabled);
+    const actionClasses = $("host-action-classes"); actionClasses.replaceChildren();
+    [["local-mutation","Local mutation"],["draft","Draft"],["remote-write","Remote write"],["message","Message"],["deploy","Deploy"],["transaction","Transaction"]].forEach(([value,label]) => actionClasses.append(checkRow({
+      value,label,checked:state.hostActions.allowedActionClasses.includes(value),
+      onChange:checked => { state.hostActions.allowedActionClasses = checked ? [...new Set([...state.hostActions.allowedActionClasses,value])] : state.hostActions.allowedActionClasses.filter(item => item !== value); },
+    })));
+    $("host-actions-remote").checked = Boolean(state.hostActions.remoteActionsEnabled);
+    $("host-action-max-uses").value = String(state.hostActions.maxUses);
+    $("host-action-max-cost").value = String(state.hostActions.maxCost);
+    $("host-action-ttl").value = String(Math.round(state.hostActions.ttlMs / 60000));
   }
   function validateSafety() {
     let message = "";
     if (state.sandboxMode !== "strict" && !boot.sandboxAvailability.available) message = boot.sandboxAvailability.reason || "Sandbox backend is unavailable.";
     else if (state.sandboxMode === "adaptive" && state.adaptivePolicy.classifierModels.length === 0) message = "Choose at least one classifier model for Adaptive mode.";
+    else if (state.hostAssistance.mode !== "off" && state.hostAssistance.maxFanOut > state.hostAssistance.maxRequests) message = "Host Assistance fan-out cannot exceed its request limit.";
+    else if (state.advisor.enabled && (state.advisor.maxRequests < 1 || state.advisor.maxPerspectives < 1)) message = "Enabled Advisor requires at least one consultation and perspective.";
+    else if (state.hostActions.remoteActionsEnabled && !state.hostActions.allowedActionClasses.some(value => ["remote-write","message","deploy","transaction"].includes(value))) message = "Remote Host Actions require at least one remote action class.";
     if (!message) {
       try {
         const rules = JSON.parse($("policy-rules").value || "[]");
@@ -957,6 +1046,14 @@ const clientScript = String.raw`
       : state.sandboxMode === "adaptive"
         ? "Adaptive - classified capabilities with " + state.adaptivePolicy.approvalPolicy + " fallback"
         : "Strict - scoped Pi tools only";
+    const workflow = $("review-workflow"); workflow.replaceChildren();
+    [
+      "Decision mode: " + state.decisionMode,
+      "Host Assistance: " + state.hostAssistance.mode + " · budget " + state.contextBudget + " · requests " + state.hostAssistance.maxRequests + " · fan-out " + state.hostAssistance.maxFanOut,
+      "Advisor: " + (state.advisor.enabled ? "on for " + state.advisor.targets.join(", ") : "off"),
+      "Doctrine: " + (state.doctrine || "off"),
+      "Host Actions: " + (state.hostActions.enabled ? "isolated · " + state.hostActions.allowedActionClasses.join(", ") + (state.hostActions.remoteActionsEnabled ? " · remote enabled" : " · remote disabled") : "off"),
+    ].forEach(value => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = value; workflow.append(row); });
     const roleReview = $("review-roles"); roleReview.replaceChildren();
     (boot.roles || []).filter(role => !["verifier","classifier"].includes(role.role)).forEach(role => {
       const policy = state.rolePolicies[role.role] || {}, row = document.createElement("div"); row.className = "review-item";
@@ -1266,6 +1363,21 @@ const clientScript = String.raw`
   $("policy-diagnostics").addEventListener("change", () => { state.adaptivePolicy.diagnostics = $("policy-diagnostics").checked; });
   $("policy-rules").addEventListener("change", () => { validateSafety(); });
   $("background-mechanical").addEventListener("change", () => { state.backgroundRolePolicy.mechanicalExecutor = $("background-mechanical").checked; });
+  $("decision-mode").addEventListener("change", () => { state.decisionMode = $("decision-mode").value; });
+  $("decision-doctrine").addEventListener("change", () => { state.doctrine = $("decision-doctrine").checked ? "first-principles-qds-v1" : null; });
+  $("host-assistance-mode").addEventListener("change", () => { state.hostAssistance.mode = $("host-assistance-mode").value; state.hostAssistance.enabled = state.hostAssistance.mode !== "off"; });
+  $("context-budget").addEventListener("input", () => { state.contextBudget = Math.max(0, Math.min(64, Number($("context-budget").value) || 0)); });
+  $("host-max-requests").addEventListener("input", () => { state.hostAssistance.maxRequests = Math.max(0, Math.min(32, Number($("host-max-requests").value) || 0)); });
+  $("host-max-fanout").addEventListener("input", () => { state.hostAssistance.maxFanOut = Math.max(0, Math.min(8, Number($("host-max-fanout").value) || 0)); });
+  $("private-connector").addEventListener("change", () => { state.hostAssistance.privateConnector = $("private-connector").value; });
+  $("advisor-enabled").addEventListener("change", () => { state.advisor.enabled = $("advisor-enabled").checked; });
+  $("advisor-max-requests").addEventListener("input", () => { state.advisor.maxRequests = Math.max(0, Math.min(8, Number($("advisor-max-requests").value) || 0)); });
+  $("advisor-max-perspectives").addEventListener("input", () => { state.advisor.maxPerspectives = Math.max(0, Math.min(8, Number($("advisor-max-perspectives").value) || 0)); });
+  $("host-actions-enabled").addEventListener("change", () => { state.hostActions.enabled = $("host-actions-enabled").checked; });
+  $("host-actions-remote").addEventListener("change", () => { state.hostActions.remoteActionsEnabled = $("host-actions-remote").checked; });
+  $("host-action-max-uses").addEventListener("input", () => { state.hostActions.maxUses = Math.max(1, Math.min(100, Number($("host-action-max-uses").value) || 1)); });
+  $("host-action-max-cost").addEventListener("input", () => { state.hostActions.maxCost = Math.max(0, Number($("host-action-max-cost").value) || 0); });
+  $("host-action-ttl").addEventListener("input", () => { state.hostActions.ttlMs = Math.max(1, Math.min(1440, Number($("host-action-ttl").value) || 1)) * 60000; });
   $("next-button").addEventListener("click", () => {
     if (state.phase === 4 && !validateSafety()) return;
     if (state.phase === 5 && !validateProject()) return;
@@ -1277,7 +1389,11 @@ const clientScript = String.raw`
     const status = $("save-status"), button = $("save-button"); status.className = "save-status"; status.textContent = "Testing selected models and saving configuration..."; button.disabled = true;
     try {
       const profile = projectProfile();
-      const execution = {rolePolicies:state.rolePolicies,adaptivePolicy:state.adaptivePolicy,backgroundRolePolicy:state.backgroundRolePolicy};
+      const execution = {
+        rolePolicies:state.rolePolicies,adaptivePolicy:state.adaptivePolicy,backgroundRolePolicy:state.backgroundRolePolicy,
+        decisionMode:state.decisionMode,hostAssistance:state.hostAssistance,contextBudget:state.contextBudget,
+        advisor:state.advisor,doctrine:state.doctrine,hostActions:state.hostActions,
+      };
       if (setupMode === "project") await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution});
       else await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id})),profile,sandboxMode:state.sandboxMode,...execution});
       showCompletion(setupMode === "project" ? "Project setup saved" : "Configuration saved", "Swarm Pi will use these project settings for delegated work. You can close this tab.", true);

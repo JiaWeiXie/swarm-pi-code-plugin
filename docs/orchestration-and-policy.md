@@ -30,7 +30,10 @@ instructions are untrusted input and may only add restrictions.
 | `scout` | `ask` | `low` | supervised, background | none |
 | `planner` | `plan` | `xhigh` | supervised, background | none |
 | `reviewer` | `review` | `high` | supervised, background | none |
-| `analyst` | `orchestrate` | `medium` | supervised, background | none |
+| `analyst` | `orchestrate`, `discover` | `medium` | supervised, background | none |
+| `experimenter` | internal discovery experiment stage | `high` | supervised | bounded/sandboxed only |
+| `review-coordinator` | internal review and discovery convergence | `high` | supervised | none |
+| `advisor` | optional review/discovery consultation | `high` | supervised | none; context-only |
 | `mechanical-executor` | `implement` | `low` | supervised; optional background | worktree |
 | `executor` | `implement` | `high` | supervised | worktree |
 | `security-executor` | ask, review, implement | `high` | supervised | role dependent |
@@ -79,7 +82,8 @@ a project-scope change invalidates outstanding leases.
 
 Project-profile task categories compile to the admitted `TaskKind` allowlist:
 `analysis` maps to `ask` and `orchestrate`, `planning` to `plan`, `code-review`
-to `review`, and `implementation` to `implement`. Project-profile `dirs`
+to `review`, and `implementation` to `implement`; `discover` is a public
+task kind for unknown requirements and evidence-backed convergence. Project-profile `dirs`
 compile to relative roots for `read`, `search`, `write`, and `shell` operations.
 Roots use directory-segment prefix semantics, not globs. An omitted task or
 directory restriction permits all task kinds or the whole execution workspace
@@ -89,9 +93,10 @@ project policy.
 
 ### Durable per-job snapshot
 
-A new job persists a non-secret v2 policy snapshot in its request. The snapshot
+A new job persists a non-secret v2 or v3 policy snapshot in its request. The snapshot
 contains the effective project policy, its `scopeHash`, and the complete
-`policyHash`. Queued, running, and resumed jobs use that snapshot; profile
+`policyHash`; v3 additionally snapshots Decision Mode, Host Assistance, Advisor,
+context budget, and doctrine controls. Queued, running, and resumed jobs use that snapshot; profile
 edits affect only subsequently submitted jobs. The worker prompt includes the
 project goal and canonical rendered policy text, but enforcement never depends
 on model compliance with that prompt.
@@ -104,7 +109,10 @@ Enforcement runs in this order:
    side effect.
 2. The scoped Pi filesystem tools (`read`, `grep`, `find`, `ls`, `write`, and
    `edit`) validate every path against the bound policy before the underlying
-   operation runs.
+   operation runs. File mutation uses no-follow descriptors and final
+   descriptor identity checks; parent directories are revalidated by
+   device/inode identity. Recursive search rejects every symlink entry and
+   revalidates the traversed directory identities after the SDK operation.
 3. In adaptive and lenient sandbox modes, the Bash write allowlist limits
    writes to the bound write and shell roots plus the sandbox temporary
    directory.

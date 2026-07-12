@@ -4,6 +4,8 @@ import type {
   JobPhase,
   PolicyDecision,
   RiskLevel,
+  HostContextClass,
+  HostAssistanceRequestStatus,
 } from "../core/contracts.js";
 import type { JobRecord, SwarmState } from "./state.js";
 
@@ -62,12 +64,51 @@ export interface JobTerminalEvent extends JobEventBase<"job-terminal"> {
   finishedAt: string;
 }
 
+export interface JobHostAssistanceRequiredEvent extends JobEventBase<"host-assistance-required"> {
+  jobId: string;
+  notificationId: string;
+  requestId: string;
+  generation: number;
+  sessionId: string;
+  attempt: number;
+  perspective?: string;
+  contextClass?: HostContextClass;
+  safeSummary: string;
+  requestedAt: string;
+  expiresAt: string;
+}
+
+export interface JobHumanDecisionRequiredEvent extends JobEventBase<"human-decision-required"> {
+  jobId: string;
+  notificationId: string;
+  requestId: string;
+  generation: number;
+  sessionId: string;
+  attempt: number;
+  perspective?: string;
+  safeSummary: string;
+  requestedAt: string;
+  expiresAt: string;
+}
+
+export interface JobHostAssistanceResolvedEvent extends JobEventBase<"host-assistance-resolved" | "human-decision-resolved"> {
+  jobId: string;
+  notificationId: string;
+  requestId: string;
+  generation: number;
+  status: Exclude<HostAssistanceRequestStatus, "pending">;
+  resolvedAt: string;
+}
+
 /** Public, allowlisted events emitted by `jobs watch --emit ndjson`. */
 export type JobEventV1 =
   | JobWatchReadyEvent
   | JobApprovalRequiredEvent
   | JobApprovalResolvedEvent
   | JobProgressEvent
+  | JobHostAssistanceRequiredEvent
+  | JobHumanDecisionRequiredEvent
+  | JobHostAssistanceResolvedEvent
   | JobTerminalEvent;
 
 export interface JobEventProjectionOptions {
@@ -169,6 +210,56 @@ export function projectJobEvents(
       );
     }
 
+    for (const request of job.hostAssistanceRequests ?? []) {
+      const notification = notifications.find((candidate) => candidate.hostRequestId === request.id || candidate.id === request.notificationId);
+      const notificationPending = notification?.status === "pending";
+      if (request.status === "pending" && notificationPending) {
+        const base = {
+          schema: JOB_EVENT_SCHEMA,
+          version: JOB_EVENT_VERSION,
+          eventId: request.notificationId,
+          emittedAt,
+          jobId: job.id,
+          notificationId: request.notificationId,
+          requestId: request.id,
+          generation: request.generation,
+          sessionId: request.sessionId,
+          attempt: request.attempt,
+          ...(request.perspective ? { perspective: publicText(request.perspective, 200) } : {}),
+          safeSummary: publicText(request.safeSummary, 500),
+          requestedAt: request.requestedAt,
+          expiresAt: request.expiresAt,
+        };
+        if (request.kind === "decision") {
+          push({ ...base, event: "human-decision-required" }, time(request.requestedAt));
+        } else {
+          push({
+            ...base,
+            event: "host-assistance-required",
+            ...(request.contextClass ? { contextClass: request.contextClass } : {}),
+          }, time(request.requestedAt));
+        }
+        continue;
+      }
+      if (request.status === "pending" || !request.resolvedAt) continue;
+      const resolvedAt = time(request.resolvedAt);
+      const recentlyResolved = includeResolved && (since === undefined || resolvedAt >= since);
+      if (!notificationPending && !recentlyResolved) continue;
+      push({
+        schema: JOB_EVENT_SCHEMA,
+        version: JOB_EVENT_VERSION,
+        eventId: `host-resolved:${request.id}:${request.resolvedAt}`,
+        event: request.kind === "decision" ? "human-decision-resolved" : "host-assistance-resolved",
+        emittedAt,
+        jobId: job.id,
+        notificationId: request.notificationId,
+        requestId: request.id,
+        generation: request.generation,
+        status: request.status,
+        resolvedAt: request.resolvedAt,
+      }, resolvedAt);
+    }
+
     if (includeProgress && !isTerminalStatus(job.status)) {
       const updatedAt = job.updatedAt ?? job.lastProgressAt ?? job.createdAt;
       const progressAt = time(updatedAt);
@@ -213,10 +304,11 @@ export function createJobEventSnapshot(
   const snapshotAt = iso(options.now ?? new Date());
   const events = projectJobEvents(state, { ...options, now: snapshotAt });
   const pendingCount = events.filter((event) => {
-    if (event.event === "approval-required") return true;
-    if (event.event !== "approval-resolved" && event.event !== "job-terminal") return false;
+    if (event.event === "approval-required" || event.event === "host-assistance-required" || event.event === "human-decision-required") return true;
+    if (event.event !== "approval-resolved" && event.event !== "host-assistance-resolved" && event.event !== "human-decision-resolved" && event.event !== "job-terminal") return false;
     const job = state.jobs.find((candidate) => candidate.id === event.jobId);
-    const notification = job?.notifications?.find((candidate) => candidate.id === event.notificationId);
+    const notificationId = "notificationId" in event ? event.notificationId : undefined;
+    const notification = notificationId ? job?.notifications?.find((candidate) => candidate.id === notificationId) : undefined;
     // Missing notification metadata is a legacy pending notification when the
     // event was projected from the Job-level pending marker.
     return notification?.status === "pending" || notification === undefined;

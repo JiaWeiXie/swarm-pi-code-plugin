@@ -319,6 +319,12 @@ function normalizeProjectSubmission(value: unknown): ProjectSettingsSubmission {
     ...(record.backgroundRolePolicy !== undefined
       ? { backgroundRolePolicy: record.backgroundRolePolicy as ProjectSettingsSubmission["backgroundRolePolicy"] }
       : {}),
+    ...(record.decisionMode !== undefined ? { decisionMode: record.decisionMode as ProjectSettingsSubmission["decisionMode"] } : {}),
+    ...(record.hostAssistance !== undefined ? { hostAssistance: record.hostAssistance as ProjectSettingsSubmission["hostAssistance"] } : {}),
+    ...(record.contextBudget !== undefined ? { contextBudget: record.contextBudget as ProjectSettingsSubmission["contextBudget"] } : {}),
+    ...(record.advisor !== undefined ? { advisor: record.advisor as ProjectSettingsSubmission["advisor"] } : {}),
+    ...(record.doctrine !== undefined ? { doctrine: record.doctrine as ProjectSettingsSubmission["doctrine"] } : {}),
+    ...(record.hostActions !== undefined ? { hostActions: record.hostActions as ProjectSettingsSubmission["hostActions"] } : {}),
   };
 }
 

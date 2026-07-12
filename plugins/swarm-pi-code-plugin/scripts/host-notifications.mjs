@@ -164,6 +164,26 @@ function renderEvent(event, cwd) {
       const resolvedAt = safeText(event.resolvedAt, cwd);
       return `approval-resolved job=${jobId} approval=${approvalId} status=${status} resolvedAt=${resolvedAt}; notification still requires host acknowledgement if pending`;
     }
+    case "host-assistance-required": {
+      const requestId = safeIdentifier(event.requestId);
+      const contextClass = safeText(event.contextClass, cwd);
+      const summary = safeText(event.safeSummary, cwd);
+      const expiresAt = safeText(event.expiresAt, cwd);
+      return `host-assistance-required job=${jobId} request=${requestId} class=${contextClass} summary=${summary} expiresAt=${expiresAt}; inspect with jobs host-requests and respond or decline`;
+    }
+    case "human-decision-required": {
+      const requestId = safeIdentifier(event.requestId);
+      const summary = safeText(event.safeSummary, cwd);
+      const expiresAt = safeText(event.expiresAt, cwd);
+      return `human-decision-required job=${jobId} request=${requestId} summary=${summary} expiresAt=${expiresAt}; inspect with jobs decisions and decide explicitly`;
+    }
+    case "host-assistance-resolved":
+    case "human-decision-resolved": {
+      const requestId = safeIdentifier(event.requestId);
+      const status = safeText(event.status, cwd);
+      const resolvedAt = safeText(event.resolvedAt, cwd);
+      return `${event.event} job=${jobId} request=${requestId} status=${status} resolvedAt=${resolvedAt}`;
+    }
     case "job-progress": {
       const status = safeText(event.status, cwd);
       const phase = safeText(event.phase, cwd);

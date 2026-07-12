@@ -4,7 +4,8 @@ This reference describes the temporary browser setup shared by Claude Code and
 Codex. For installation and common workflows, start with the
 [README](../README.md). Runtime boundaries are documented in
 [architecture.md](architecture.md), and immutable security constraints are in
-[threat-model.md](threat-model.md).
+[threat-model.md](threat-model.md). The Host Assistance and Discovery contract
+is in [host-assistance-discovery.md](host-assistance-discovery.md).
 
 ## Product Model
 
@@ -17,12 +18,21 @@ The six full-setup steps are:
 1. Connect a built-in provider, subscription, cloud identity, or custom endpoint.
 2. Choose the primary model and ordered fallbacks.
 3. Assign model chains and thinking levels to worker roles.
-4. Configure sandbox, classifier, approval, and background behavior.
+4. Configure sandbox, classifier, approval, background behavior, Decision Mode,
+   Host Assistance, Advisor, doctrine, and isolated Host Actions.
 5. Review the workspace and project delegation profile.
 6. Review, smoke-test required models, and save transactionally.
 
 Project-only setup retains Roles, Execution & Safety, Workspace, and Review. It
 does not rewrite provider credentials or model configuration.
+
+Workspace defaults use Balance Decision Mode, Host Assistance on, Advisor off,
+and doctrine off. Cost mode reduces review and context budgets; Power mode
+increases bounded review depth. None of these modes can lower safety gates,
+private-data approval, experiment assurance, or deterministic verification.
+The same screen configures Host context classes, request/fan-out limits,
+private-connector policy, Advisor targets/limits, and Host Action classes,
+cost/use/expiry bounds. Remote Host Actions are off by default.
 
 ## Provider Capability Registry
 
@@ -206,11 +216,18 @@ smoke tests, then commits credentials, `model.json`, and `state.json`. A failure
 restores prior values. An incomplete rollback writes a redacted recovery journal
 and returns `configuration-recovery-required`.
 
-New durable jobs use `requestVersion: 3`. `request.json` contains the complete
-non-secret `ModelConfiguration` snapshot and a SHA-256 integrity hash. A
-background worker uses that snapshot even if the settings page changes later,
-while resolving current credentials at execution time. Credential revocation
-therefore fails explicitly instead of falling back to unauthenticated execution.
+New durable jobs use `requestVersion: 5`. `request.json` contains the complete
+non-secret `ModelConfiguration` snapshot, its SHA-256 integrity hash, and the
+version-3 enforced project-policy snapshot, Decision Mode, Host Assistance, and
+Advisor controls. A background worker uses those
+submitted snapshots even if the settings page changes later, while resolving
+current credentials at execution time. Credential revocation therefore fails
+explicitly instead of falling back to unauthenticated execution.
+
+Requests v1–v3 remain readable for recovery with their legacy execution
+semantics. Version 4 preserves its submitted v2 enforced-policy snapshot;
+version 5 adds the v3 decision, Host Assistance, Advisor, doctrine, context
+budget, and Host Action policy controls.
 
 ## Server Lifecycle
 
@@ -227,8 +244,10 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 - Missing `providerProfiles` load as an empty list.
 - Legacy custom providers infer auth and wire protocol from existing fields.
 - Existing custom IDs are not rewritten.
-- Legacy jobs keep request version 1 or 2 semantics and never receive a new
-  provider snapshot retroactively.
+- Legacy jobs with request versions 1–3 retain their original semantics and
+  are not retroactively given a provider or enforced project-policy snapshot.
+  Version 3 jobs continue to use their submitted provider snapshot; version 4
+  jobs additionally use their submitted project-policy snapshot.
 - `init --set-model-priority[-file]`, `models --json`, and `providers --json`
   remain available for automation.
 

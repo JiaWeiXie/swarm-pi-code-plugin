@@ -21,7 +21,7 @@ export async function createSandboxRunner(options) {
     const env = options.env ?? process.env;
     let config;
     try {
-        config = await sandboxConfiguration(cwd, tempRoot, options.mode, env, options.sandboxMode ?? "lenient", options.trustedDomains ?? []);
+        config = await sandboxConfiguration(cwd, tempRoot, options.mode, env, options.sandboxMode ?? "lenient", options.trustedDomains ?? [], options.boundProjectPolicy);
     }
     catch (error) {
         await fs.rm(tempRoot, { recursive: true, force: true });
@@ -67,7 +67,11 @@ export async function createSandboxRunner(options) {
         },
     };
 }
-export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.env, sandboxMode = "lenient", trustedDomains = []) {
+export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.env, sandboxMode = "lenient", trustedDomains = [], boundProjectPolicy) {
+    cwd = await fs.realpath(cwd);
+    if (boundProjectPolicy && boundProjectPolicy.executionRoot !== cwd) {
+        throw new Error("Bound project policy execution root does not match sandbox workspace");
+    }
     const stateDir = await resolveStateDir(cwd, env);
     const gitPaths = await resolveGitMetadataPaths(cwd);
     const denyRead = [
@@ -87,6 +91,7 @@ export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.en
         "/tmp/claude",
         "/private/tmp/claude",
     ];
+    const policyShellRoots = boundProjectPolicy ? [...boundProjectPolicy.roots.shell] : [];
     return {
         network: {
             allowedDomains: [],
@@ -99,8 +104,14 @@ export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.en
         },
         filesystem: {
             denyRead: uniquePaths(denyRead),
-            allowRead: executableReadPaths(cwd),
-            allowWrite: uniquePaths(mode === "implement" ? [cwd, tempRoot] : [tempRoot]),
+            // Bash is a distinct capability: it may read only its shell roots, not
+            // roots granted solely to the scoped read/search tools.
+            allowRead: uniquePaths([...executableReadPaths(cwd), ...policyShellRoots]),
+            allowWrite: uniquePaths(mode === "implement"
+                ? boundProjectPolicy
+                    ? [...boundProjectPolicy.roots.shell, tempRoot]
+                    : [cwd, tempRoot]
+                : [tempRoot]),
             denyWrite: uniquePaths(denyWrite),
             allowGitConfig: false,
         },

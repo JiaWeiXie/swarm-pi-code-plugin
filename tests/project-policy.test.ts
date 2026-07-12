@@ -19,7 +19,7 @@ function workspace(): string {
 
 test("default project policy allows every task kind and the workspace", async () => {
   const policy = await compileEffectiveProjectPolicy({ cwd: workspace() });
-  assert.deepEqual(policy.allowedTaskKinds, ["ask", "implement", "orchestrate", "plan", "review", "scaffold", "setup"]);
+  assert.deepEqual(policy.allowedTaskKinds, ["ask", "discover", "implement", "orchestrate", "plan", "review", "scaffold", "setup"]);
   assert.deepEqual(policy.roots, { read: ["."], search: ["."], write: ["."], shell: ["."] });
 });
 

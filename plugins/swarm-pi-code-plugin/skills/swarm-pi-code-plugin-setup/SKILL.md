@@ -5,7 +5,9 @@ description: Configure project-local dependencies, build, test, lint, and develo
 
 # Configure A Development Environment With Pi
 
-Read the [cross-host control protocol](../references/host-protocol.md).
+Read the [cross-host control protocol](../../references/host-protocol.md).
+
+Setup may ask the Host to find local files or current SDK/API documentation through scoped assistance. Preserve the returned provenance and keep setup changes reproducible and verifiable; do not grant a connector or side effect implicitly.
 
 1. Write the exact project-local setup request, allowed package manager, lifecycle-script policy, verification, and prohibited global actions to a temporary prompt file.
 2. Run `$RUNNER setup --host "$HOST" --role environment-engineer --prompt-file "$PROMPT_FILE" --execution-mode supervised --approval-mode "$APPROVAL_MODE" --workspace-strategy auto --json`. With `--approval-mode wait`, the managed relay returns within 15 seconds; retain the Job ID and continue with bounded `jobs wait` calls on approval or timeout.

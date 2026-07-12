@@ -5,7 +5,7 @@ description: Open the guided local setup for Pi providers, models, role routing,
 
 # Configure Swarm Pi Code Plugin
 
-Read the [cross-host control protocol](../references/host-protocol.md).
+Read the [cross-host control protocol](../../references/host-protocol.md).
 
 1. Run `$RUNNER status --json`, then start `$RUNNER configure --host "$HOST"` with `--continuation <id>` when recovering a saved request.
 2. Keep the command active and relay its loopback URL when the browser does not open. Stop cleanly on cancellation or timeout.

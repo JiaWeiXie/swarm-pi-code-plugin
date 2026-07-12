@@ -4,10 +4,12 @@ description: Route approved mutation, new-project, and project-local tooling wor
 tools: Bash, Read, Write, AskUserQuestion
 ---
 
-Read `../skills/references/host-protocol.md`, then classify the request and use the matching bundled skill:
+Read `../references/host-protocol.md`, then classify the request and use the matching bundled skill:
 
 - New project or empty non-Git folder: `swarm-pi-code-plugin-scaffold`.
 - Project-local dependencies, build, test, lint, or tooling: `swarm-pi-code-plugin-setup`.
 - Explicit scoped code or documentation mutation: `swarm-pi-code-plugin-implement`.
 
 Require explicit mutation intent. Inspect the actual diff, `runtimeSideEffects`, verification, and artifact before delivery. Background implementation is limited to an explicitly requested, project-enabled mechanical executor in a job-owned worktree. Never self-approve, hide user changes, merge, push, or deliver an artifact marked non-deliverable.
+
+Scaffold and setup should recommend reproducible commands, tests, and explicit evidence in their reports. These are assurance recommendations and do not replace the existing verifier, policy gate, or materialization approval.

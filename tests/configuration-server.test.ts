@@ -68,6 +68,12 @@ test("configuration page starts from connections and uses the original Swarm Pi 
     models: [],
     registryError: null,
     sandboxMode: "strict",
+    decisionMode: "balance",
+    hostAssistance: { enabled: true, mode: "on", contextClasses: ["workspace", "web", "docs"], privateConnector: "ask", maxRequests: 4, maxFanOut: 2 },
+    contextBudget: 4,
+    advisor: { enabled: false, targets: ["discover", "plan", "review", "orchestrate"], maxRequests: 2, maxPerspectives: 2 },
+    doctrine: null,
+    hostActions: { enabled: true, allowedActionClasses: ["local-mutation", "draft"], remoteActionsEnabled: false, maxUses: 1, maxCost: 1, ttlMs: 1_800_000 },
     sandboxAvailability: {
       available: true,
       backend: "macos-seatbelt",
@@ -82,6 +88,10 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   assert.match(html, /Execution &amp; safety/);
   assert.match(html, /sandbox-adaptive/);
   assert.match(html, /classifier-models/);
+  assert.match(html, /id="decision-mode"/);
+  assert.match(html, /id="host-assistance-mode"/);
+  assert.match(html, /id="advisor-enabled"/);
+  assert.match(html, /id="host-actions-enabled"/);
   assert.match(html, /class="brand-logo"/);
   assert.match(html, />Close setup</);
   assert.match(html, /id="closed-screen"/);
@@ -114,6 +124,12 @@ test("project-only page starts from the guided project setup", () => {
     models: [],
     registryError: null,
     sandboxMode: "lenient",
+    decisionMode: "balance",
+    hostAssistance: { enabled: true, mode: "on", contextClasses: ["workspace", "web", "docs"], privateConnector: "ask", maxRequests: 4, maxFanOut: 2 },
+    contextBudget: 4,
+    advisor: { enabled: false, targets: ["discover", "plan", "review", "orchestrate"], maxRequests: 2, maxPerspectives: 2 },
+    doctrine: null,
+    hostActions: { enabled: true, allowedActionClasses: ["local-mutation", "draft"], remoteActionsEnabled: false, maxUses: 1, maxCost: 1, ttlMs: 1_800_000 },
     sandboxAvailability: {
       available: true,
       backend: "macos-seatbelt",
@@ -144,12 +160,25 @@ test("project profile save validates scope and does not create model configurati
       tasks: ["implementation", "code-review"],
     },
     sandboxMode: "strict",
+    decisionMode: "power",
+    hostAssistance: { enabled: true, mode: "on", contextClasses: ["workspace", "docs", "web"], privateConnector: "deny", maxRequests: 6, maxFanOut: 3 },
+    contextBudget: 6,
+    advisor: { enabled: true, targets: ["discover", "plan"], maxRequests: 3, maxPerspectives: 3 },
+    doctrine: "first-principles-qds-v1",
+    hostActions: { enabled: true, allowedActionClasses: ["local-mutation", "draft"], remoteActionsEnabled: false, maxUses: 1, maxCost: 2, ttlMs: 900_000 },
   });
 
   assert.equal(profile.goal, "Ship a dependable project setup flow");
   assert.deepEqual(profile.dirs, ["src"]);
   assert.deepEqual(profile.tasks, ["implementation", "code-review"]);
-  assert.equal((await loadState(workspace)).config.sandboxMode, "strict");
+  const saved = await loadState(workspace);
+  assert.equal(saved.config.sandboxMode, "strict");
+  assert.equal(saved.config.decisionMode, "power");
+  assert.equal(saved.config.hostAssistance?.maxFanOut, 3);
+  assert.equal(saved.config.contextBudget, 6);
+  assert.equal(saved.config.advisor?.enabled, true);
+  assert.equal(saved.config.doctrine, "first-principles-qds-v1");
+  assert.equal(saved.config.hostActions?.remoteActionsEnabled, false);
   assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
   await assert.rejects(
     () => saveProjectProfileSubmission(workspace, { goal: "Invalid", dirs: ["../outside"], tasks: ["analysis"] }),

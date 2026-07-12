@@ -44,7 +44,7 @@ project profiles.
 ## Host Adapters
 
 Claude Code exposes one command per workflow: `init`, `project`, `ask`,
-`review`, `plan`, `implement`, `orchestrate`, `scaffold`, and `setup` under
+`review`, `plan`, `implement`, `orchestrate`, `discover`, `scaffold`, and `setup` under
 the `/swarm-pi-code-plugin:` prefix. Its `pi-worker` and `pi-builder` agents
 classify natural-language requests and route them to the matching workflow.
 
@@ -69,13 +69,14 @@ node scripts/pi-runner.mjs providers --json
 node scripts/pi-runner.mjs configure --host <host> [--section project] [--no-open]
 node scripts/pi-runner.mjs ask --host <host> --prompt-file <file> --json
 node scripts/pi-runner.mjs review --host <host> [--base <ref>] [--scope <scope>] --json
-node scripts/pi-runner.mjs plan --host <host> --prompt-file <file> --json
+node scripts/pi-runner.mjs plan --host <host> --prompt-file <file> [--discovery-from <job-id>] --json
 node scripts/pi-runner.mjs implement --host <host> --prompt-file <file> --json
 node scripts/pi-runner.mjs orchestrate --host <host> --prompt-file <file> --json
+node scripts/pi-runner.mjs discover --host <host> --prompt-file <file> --json
 node scripts/pi-runner.mjs roles list --json
 node scripts/pi-runner.mjs status|doctor|resume [options] --json
 node scripts/pi-runner.mjs scaffold|setup --host <claude|codex> [options] --json
-node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|approvals|approve|deny|cleanup|materialize> [options] --json
+node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|approvals|approve|deny|host-requests|host-respond|host-decline|decisions|decide|action-start|cleanup|materialize|export> [options] --json
 ```
 
 Every worker result includes the task kind, status, success flag, selected
@@ -87,6 +88,12 @@ Task commands accept role, thinking, execution, approval, timeout, and optional
 delegation-spec arguments. Background readonly work returns an accepted job ID
 after durable artifacts and a detached worker exist. Opt-in mechanical
 implementation first creates an isolated job worktree.
+
+The live `request_host_assistance` tool persists safe required/resolved events,
+correlates Job/generation/session/attempt/perspective, enforces request and
+fan-out budgets, and consumes the structured response once in the same live
+session. Discovery creates an isolated experiment child; Host Actions create a
+separate host-broker child only after an explicitly recorded recommendation.
 
 The runner creates one in-memory Pi session per delegated model attempt.
 Strict jobs use scoped repository tools only. Adaptive and Lenient jobs share

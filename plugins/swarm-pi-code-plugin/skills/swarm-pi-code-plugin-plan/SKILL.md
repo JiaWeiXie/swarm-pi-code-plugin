@@ -5,7 +5,9 @@ description: Delegate an implementation, migration, or architecture plan to a re
 
 # Plan With Pi
 
-Read the [cross-host control protocol](../references/host-protocol.md).
+Read the [cross-host control protocol](../../references/host-protocol.md).
+
+If requirements are evidence-poor, route the brief to `discover` first. A plan may cite Host-provided workspace/Web/Context7/paper/connector/skill bundles, but must preserve provenance, unknowns, and user decisions instead of presenting unverified assumptions.
 
 1. Inspect enough repository context to write a concrete brief with scope, alternatives, constraints, and acceptance criteria.
 2. Run `$RUNNER plan --host "$HOST" --role planner --prompt-file "$PROMPT_FILE" --execution-mode "$EXECUTION_MODE" --approval-mode "$APPROVAL_MODE" --json`. With `supervised + wait`, the managed relay returns within 15 seconds with a terminal result, `approval-required`, or `wait-timed-out`.

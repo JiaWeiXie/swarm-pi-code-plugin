@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_ADAPTIVE_POLICY, DEFAULT_BACKGROUND_ROLE_POLICY, isThinkingLevel, isWorkerRole, normalizeAdaptivePolicy, listDefaultRoles, } from "../orchestration/roles.js";
+import { DEFAULT_ADAPTIVE_POLICY, DEFAULT_BACKGROUND_ROLE_POLICY, isThinkingLevel, isWorkerRole, normalizeAdaptivePolicy, listDefaultRoles, defaultHostAssistancePolicy, defaultAdvisorPolicy, } from "../orchestration/roles.js";
 import { createPiEnvironment, customProviderHeaderVariable } from "../pi/environment.js";
 import { executeSession } from "../pi/execute.js";
 import { createWorkerSession } from "../pi/runtime.js";
@@ -13,7 +13,7 @@ import { normalizeModelsEndpoint, normalizeProtocolRoot, stableCustomProviderId 
 import { detectSandboxAvailability } from "../sandbox/availability.js";
 import { assessWorkspace } from "../git/worktree.js";
 import { loadModelConfiguration, modelPriority, parseModelConfiguration, saveModelConfiguration, resolveModelConfigurationFile, providerHeaderSecretRef, providerSecretRef, } from "../state/model-config.js";
-import { loadState, resolveStateDir, resolveStateFile, resolveWorkspaceRoot, saveProjectSettings, saveExecutionSettings, setModelPriority, setSandboxMode, } from "../state/state.js";
+import { loadState, resolveStateDir, resolveStateFile, resolveWorkspaceRoot, saveProjectSettings, saveExecutionSettings, setModelPriority, setSandboxMode, defaultHostActionPolicy, } from "../state/state.js";
 import { discoverEndpoint, discoverLocalEndpoints, } from "./model-discovery.js";
 export async function configureBuiltInProvider(cwd, request, credentialVault, env = process.env) {
     const definition = getProviderDefinition(request.provider);
@@ -335,6 +335,12 @@ export async function loadConfigurationView(cwd, env = process.env) {
         roles: listDefaultRoles(),
         workspace: await assessWorkspace(cwd),
         workspaceId: createHash("sha256").update(await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd))).digest("hex").slice(0, 24),
+        decisionMode: state.config.decisionMode ?? "balance",
+        hostAssistance: structuredClone(state.config.hostAssistance ?? defaultHostAssistancePolicy()),
+        contextBudget: state.config.contextBudget ?? 4,
+        advisor: structuredClone(state.config.advisor ?? defaultAdvisorPolicy()),
+        doctrine: state.config.doctrine ?? null,
+        hostActions: structuredClone(state.config.hostActions ?? defaultHostActionPolicy()),
     };
 }
 function browserModel(model, available, configuration) {
@@ -536,6 +542,12 @@ export async function saveProjectProfileSubmission(cwd, submission) {
         rolePolicies: current.config.rolePolicies ?? {},
         adaptivePolicy: normalizeAdaptivePolicy(current.config.adaptivePolicy),
         backgroundRolePolicy: current.config.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY,
+        decisionMode: current.config.decisionMode ?? "balance",
+        hostAssistance: current.config.hostAssistance ?? defaultHostAssistancePolicy(),
+        contextBudget: current.config.contextBudget ?? 4,
+        advisor: current.config.advisor ?? defaultAdvisorPolicy(),
+        doctrine: current.config.doctrine ?? null,
+        hostActions: current.config.hostActions ?? defaultHostActionPolicy(),
     });
     assertSandboxModeAvailable(sandboxMode);
     const modelConfiguration = await loadModelConfiguration(cwd, current.config.modelPriority);
@@ -552,6 +564,68 @@ function normalizeSandboxMode(value, fallback) {
     if (value === "strict" || value === "adaptive" || value === "lenient")
         return value;
     throw new Error("Sandbox mode must be strict, adaptive, or lenient");
+}
+function normalizeDecisionMode(value, fallback) {
+    if (value === undefined)
+        return fallback;
+    if (value === "cost" || value === "balance" || value === "power")
+        return value;
+    throw new Error("Decision mode must be cost, balance, or power");
+}
+function normalizeBoundedInteger(value, fallback, min, max, label) {
+    if (value === undefined)
+        return fallback;
+    if (!Number.isInteger(value) || value < min || value > max) {
+        throw new Error(`${label} must be an integer from ${min} to ${max}`);
+    }
+    return value;
+}
+function normalizeHostAssistance(value, fallback) {
+    if (value === undefined)
+        return structuredClone(fallback);
+    const contextClasses = Array.isArray(value.contextClasses)
+        ? [...new Set(value.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item)))]
+        : [];
+    if (value.mode !== "on" && value.mode !== "off" && value.mode !== "inherit")
+        throw new Error("Invalid Host Assistance mode");
+    if (value.privateConnector !== "ask" && value.privateConnector !== "deny")
+        throw new Error("Invalid private connector policy");
+    return {
+        enabled: value.mode === "off" ? false : value.enabled !== false,
+        mode: value.mode,
+        contextClasses,
+        privateConnector: value.privateConnector,
+        maxRequests: normalizeBoundedInteger(value.maxRequests, fallback.maxRequests, 0, 32, "Host Assistance request limit"),
+        maxFanOut: normalizeBoundedInteger(value.maxFanOut, fallback.maxFanOut, 0, 8, "Host Assistance fan-out"),
+    };
+}
+function normalizeAdvisor(value, fallback) {
+    if (value === undefined)
+        return structuredClone(fallback);
+    const targets = Array.isArray(value.targets)
+        ? [...new Set(value.targets.filter((item) => ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"].includes(item)))]
+        : [];
+    return {
+        enabled: value.enabled === true,
+        targets,
+        maxRequests: normalizeBoundedInteger(value.maxRequests, fallback.maxRequests, 0, 8, "Advisor request limit"),
+        maxPerspectives: normalizeBoundedInteger(value.maxPerspectives, fallback.maxPerspectives, 0, 8, "Advisor perspective limit"),
+    };
+}
+function normalizeHostActions(value, fallback) {
+    if (value === undefined)
+        return structuredClone(fallback);
+    const allowedActionClasses = Array.isArray(value.allowedActionClasses)
+        ? [...new Set(value.allowedActionClasses.filter((item) => ["local-mutation", "draft", "remote-write", "message", "deploy", "transaction"].includes(item)))]
+        : [];
+    return {
+        enabled: value.enabled === true,
+        allowedActionClasses,
+        remoteActionsEnabled: value.remoteActionsEnabled === true,
+        maxUses: normalizeBoundedInteger(value.maxUses, fallback.maxUses, 1, 100, "Host Action use limit"),
+        maxCost: typeof value.maxCost === "number" && Number.isFinite(value.maxCost) && value.maxCost >= 0 ? value.maxCost : (() => { throw new Error("Host Action cost limit must be non-negative"); })(),
+        ttlMs: normalizeBoundedInteger(value.ttlMs, fallback.ttlMs, 60_000, 86_400_000, "Host Action TTL"),
+    };
 }
 function assertSandboxModeAvailable(mode) {
     if (mode === "strict")
@@ -587,6 +661,12 @@ function normalizeExecutionSettings(value, fallback) {
         backgroundRolePolicy: {
             mechanicalExecutor: (value.backgroundRolePolicy ?? fallback.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY).mechanicalExecutor === true,
         },
+        decisionMode: normalizeDecisionMode(value.decisionMode, fallback.decisionMode),
+        hostAssistance: normalizeHostAssistance(value.hostAssistance, fallback.hostAssistance),
+        contextBudget: normalizeBoundedInteger(value.contextBudget, fallback.contextBudget, 0, 64, "Context budget"),
+        advisor: normalizeAdvisor(value.advisor, fallback.advisor),
+        doctrine: value.doctrine === undefined ? fallback.doctrine : value.doctrine === null || value.doctrine === "first-principles-qds-v1" ? value.doctrine : (() => { throw new Error("Unknown decision doctrine"); })(),
+        hostActions: normalizeHostActions(value.hostActions, fallback.hostActions),
     };
 }
 function validateAdaptivePolicy(policy) {

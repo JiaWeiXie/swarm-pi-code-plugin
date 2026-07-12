@@ -1,6 +1,6 @@
 export type Host = "claude" | "codex";
 
-export type TaskKind = "ask" | "review" | "plan" | "implement" | "orchestrate" | "scaffold" | "setup";
+export type TaskKind = "ask" | "review" | "plan" | "implement" | "orchestrate" | "scaffold" | "setup" | "discover";
 
 export type WorkerMode = "readonly" | "implement";
 
@@ -22,11 +22,167 @@ export type WorkerRoleId =
   | "security-executor"
   | "project-architect"
   | "scaffolder"
-  | "environment-engineer";
+  | "environment-engineer"
+  | "experimenter";
 
-export type InternalRoleId = "verifier" | "classifier";
+export type InternalRoleId = "verifier" | "classifier" | "review-coordinator" | "advisor";
 
 export type RoleId = WorkerRoleId | InternalRoleId;
+
+export type DecisionMode = "cost" | "balance" | "power";
+export type HostAssistanceMode = "inherit" | "on" | "off";
+export type DoctrineId = "first-principles-qds-v1";
+export type HostContextClass = "workspace" | "web" | "docs" | "paper" | "connector" | "skill";
+export type DataClassification = "public" | "project-internal" | "private" | "secret";
+
+export interface HostAssistancePolicy {
+  enabled: boolean;
+  mode: HostAssistanceMode;
+  contextClasses: HostContextClass[];
+  privateConnector: "ask" | "deny";
+  maxRequests: number;
+  maxFanOut: number;
+}
+
+export interface HostAssistanceCorrelation {
+  jobId: string;
+  generation: number;
+  sessionId: string;
+  attempt: number;
+  perspective?: string;
+}
+
+export interface HostContextRequest {
+  kind: "context";
+  contextClass: HostContextClass;
+  question: string;
+  unknowns: string[];
+  acceptanceCriteria: string[];
+  freshness?: string;
+  versionConstraint?: string;
+  dataClassification: DataClassification;
+  egressAllowed: boolean;
+  budget: number;
+}
+
+export interface HumanDecisionRequest {
+  kind: "decision";
+  question: string;
+  options: string[];
+  context: string;
+  dataClassification: DataClassification;
+}
+
+export interface ActionRecommendation {
+  kind: "action-recommendation";
+  actionClass: "local-mutation" | "draft" | "remote-write" | "message" | "deploy" | "transaction";
+  summary: string;
+  target?: string;
+  rationale: string;
+  expectedEvidence: string[];
+  dataClassification: DataClassification;
+}
+
+export type HostAssistanceRequest = HostContextRequest | HumanDecisionRequest | ActionRecommendation;
+
+export interface HostContextClaim {
+  claim: string;
+  evidenceIds: string[];
+  confidence: "low" | "medium" | "high";
+}
+
+export interface HostContextCitation {
+  id: string;
+  title: string;
+  url?: string;
+  version?: string;
+  retrievedAt: string;
+}
+
+export interface HostContextBundle {
+  kind: "context";
+  requestId: string;
+  answer: string;
+  claims: HostContextClaim[];
+  citations: HostContextCitation[];
+  conflicts: string[];
+  unknowns: string[];
+  provenance: string[];
+  redactions: string[];
+  retrievedAt: string;
+  hash: string;
+}
+
+export interface HumanDecisionResult {
+  kind: "decision";
+  requestId: string;
+  decision: string;
+  rationale?: string;
+  decidedAt: string;
+  hash: string;
+}
+
+export interface HostAssistanceUnavailable {
+  kind: "unavailable";
+  requestId: string;
+  reason: "declined" | "expired" | "disabled" | "quota-exceeded" | "policy-denied" | "cancelled";
+  message: string;
+  resolvedAt: string;
+  hash: string;
+}
+
+export interface ActionRecommendationReceipt {
+  kind: "action-recommendation";
+  requestId: string;
+  status: "recorded" | "declined";
+  message: string;
+  recordedAt: string;
+  hash: string;
+}
+
+export type HostAssistanceResult = HostContextBundle | HumanDecisionResult | HostAssistanceUnavailable | ActionRecommendationReceipt;
+export type HostAssistanceRequestStatus = "pending" | "resolved" | "declined" | "expired" | "consumed";
+
+export interface HostAssistanceRequestSummary {
+  id: string;
+  jobId: string;
+  generation: number;
+  sessionId: string;
+  attempt: number;
+  perspective?: string;
+  kind: HostAssistanceRequest["kind"];
+  contextClass?: HostContextClass;
+  safeSummary: string;
+  status: HostAssistanceRequestStatus;
+  requestedAt: string;
+  expiresAt: string;
+  resolvedAt?: string;
+  consumedAt?: string;
+  notificationId: string;
+  responseHash?: string;
+}
+
+export interface HostAssistanceRecord extends HostAssistanceRequestSummary {
+  request: HostAssistanceRequest;
+  response?: HostAssistanceResult;
+}
+
+export interface AssistanceTrace {
+  requestId: string;
+  correlation: HostAssistanceCorrelation;
+  route?: string;
+  approvalId?: string;
+  resultHash?: string;
+  deliveredAt?: string;
+  consumedAt?: string;
+}
+
+export interface AdvisorPolicy {
+  enabled: boolean;
+  targets: TaskKind[];
+  maxRequests: number;
+  maxPerspectives: number;
+}
 
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
@@ -48,7 +204,7 @@ export type WorkerStatus =
   | "orphaned"
   | "not-implemented";
 
-export type JobStatus = "queued" | "running" | "awaiting-approval" | WorkerStatus;
+export type JobStatus = "queued" | "running" | "awaiting-approval" | "awaiting-host" | "awaiting-decision" | WorkerStatus;
 
 export type NotificationStatus = "pending" | "acknowledged";
 
@@ -136,6 +292,73 @@ export interface DelegationSpec {
   relevantPaths?: string[];
 }
 
+export type DiscoveryStage = "research" | "experiment" | "convergence";
+export type ExperimentConclusion = "supported" | "refuted" | "inconclusive";
+
+export interface EvidencePlan {
+  unknowns: string[];
+  sources: Array<"workspace" | "web" | "docs" | "paper" | "connector" | "skill">;
+  acceptanceCriteria: string[];
+  budget: number;
+}
+
+export interface EvidencePack {
+  claims: Array<{ claim: string; evidenceIds: string[]; confidence: "low" | "medium" | "high" }>;
+  citations: HostContextCitation[];
+  conflicts: string[];
+  unknowns: string[];
+}
+
+export interface ExperimentSpec {
+  hypothesis: string;
+  baseline: string;
+  dependencies: string[];
+  fixture: string;
+  seedOrDataHash: string;
+  setupCommand: string;
+  runCommand: string;
+  testCommand: string;
+  verifyCommand: string;
+  cleanupCommand: string;
+  metrics: string[];
+  tolerance: string;
+  cleanReplayCommand: string;
+}
+
+export interface ExperimentExecutionEvidence {
+  commandsRun: string[];
+  testsRun: string[];
+  evidence: string[];
+  cleanReplayPassed: boolean;
+}
+
+export interface FeatureDefinition {
+  summary: string;
+  acceptanceCriteria: string[];
+  nonGoals: string[];
+}
+
+export interface DecisionLedgerEntry {
+  decision: string;
+  rationale: string;
+  evidenceIds: string[];
+}
+
+export type DiscoveryStructuredArtifact =
+  | { stage: "research"; evidencePlan: EvidencePlan; evidencePack: EvidencePack }
+  | { stage: "experiment"; experimentSpec: ExperimentSpec; execution: ExperimentExecutionEvidence; conclusion: ExperimentConclusion }
+  | { stage: "convergence"; featureDefinition: FeatureDefinition; decisionLedger: DecisionLedgerEntry[] };
+
+export interface DiscoveryStageReport {
+  stage: DiscoveryStage;
+  status: "passed" | "failed" | "inconclusive";
+  evidence: string[];
+  output: string;
+  verification: string[];
+  structuredArtifact?: DiscoveryStructuredArtifact;
+  childJobId?: string;
+}
+
 export interface RolePolicy {
   role: RoleId;
   taskKinds: TaskKind[];
@@ -194,7 +417,16 @@ export interface PolicySnapshotV2 {
   createdAt: string;
 }
 
-export type PolicySnapshot = LegacyPolicySnapshot | PolicySnapshotV2;
+export interface PolicySnapshotV3 extends Omit<PolicySnapshotV2, "version"> {
+  version: 3;
+  decisionMode: DecisionMode;
+  hostAssistance: HostAssistancePolicy;
+  advisor: AdvisorPolicy;
+  doctrine?: DoctrineId;
+  contextBudget: number;
+}
+
+export type PolicySnapshot = LegacyPolicySnapshot | PolicySnapshotV2 | PolicySnapshotV3;
 
 export type ProjectOperation = "read" | "search" | "write" | "shell";
 
@@ -273,15 +505,46 @@ export interface CapabilityLease {
   createdAt: string;
   expiresAt: string;
   consumedAt?: string;
+  principal?: "worker" | "host-broker";
+  actionFamily?: {
+    actionClass: ActionRecommendation["actionClass"];
+    target?: string;
+    scopeKey: string;
+    maxUses: number;
+    used: number;
+    maxCost?: number;
+  };
+}
+
+export interface HostActionPolicy {
+  enabled: boolean;
+  allowedActionClasses: Array<ActionRecommendation["actionClass"]>;
+  remoteActionsEnabled: boolean;
+  maxUses: number;
+  maxCost: number;
+  ttlMs: number;
+}
+
+export interface HostActionReceipt {
+  parentJobId: string;
+  recommendationId: string;
+  childJobId: string;
+  actionClass: ActionRecommendation["actionClass"];
+  target?: string;
+  principal: "host-broker";
+  outcome: "succeeded" | "failed" | "unknown";
+  artifactHash?: string;
+  createdAt: string;
 }
 
 export interface JobNotification {
   id: string;
-  kind: "approval" | "terminal";
+  kind: "approval" | "host-assistance" | "human-decision" | "terminal";
   status: NotificationStatus;
   createdAt: string;
   acknowledgedAt?: string;
   approvalId?: string;
+  hostRequestId?: string;
 }
 
 export interface WorkerRequest {
@@ -304,6 +567,10 @@ export interface WorkerRequest {
   projectGoal?: string;
   scaffoldSpec?: ScaffoldSpec;
   adoptExisting?: boolean;
+  decisionMode?: DecisionMode;
+  hostAssistance?: HostAssistanceMode;
+  hostContextFile?: string;
+  discoveryFrom?: string;
 }
 
 export interface WorkerResult {
@@ -347,11 +614,16 @@ export interface WorkerResult {
     branch?: string;
     commit?: string;
     deliverable: boolean;
-    kind?: "implementation" | "scaffold" | "snapshot";
+    kind?: "implementation" | "scaffold" | "snapshot" | "experiment" | "host-action";
     target?: string;
     targetFingerprint?: string;
     materializedAt?: string;
   };
+  discovery?: {
+    stages: DiscoveryStageReport[];
+    experimentConclusion?: ExperimentConclusion;
+  };
+  hostAction?: HostActionReceipt;
 }
 
 export interface AuditJobSummary {
@@ -374,7 +646,7 @@ export interface AuditJobSummary {
 }
 
 export interface AuditRequestSummary {
-  requestVersion?: 1 | 2 | 3 | 4;
+  requestVersion?: 1 | 2 | 3 | 4 | 5;
   id: string;
   host: Host;
   kind: TaskKind;

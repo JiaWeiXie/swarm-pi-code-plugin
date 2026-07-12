@@ -19,7 +19,7 @@ const CAPABILITIES = new Set<Capability>([
   "git.read", "shell.execute", "network.connect",
 ]);
 
-const TASK_KINDS: TaskKind[] = ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup"];
+const TASK_KINDS: TaskKind[] = ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"];
 const OPERATIONS: ProjectOperation[] = ["read", "search", "write", "shell"];
 const TASK_ALIASES: Record<string, TaskKind[]> = {
   implementation: ["implement"],
@@ -130,6 +130,11 @@ export async function assertChangedPathsAllowed(policy: BoundProjectPolicy, chan
   if (violations.length) {
     throw rejection("project-scope-violation", "postflight", "Changed paths exceed allowed write roots", policy.effective, violations);
   }
+}
+
+/** Validate a durable effective-policy snapshot before it is bound to a workspace. */
+export function assertEffectiveProjectPolicyValid(policy: EffectiveProjectPolicy): void {
+  validatePolicy(policy);
 }
 
 export function renderProjectPolicy(policy: EffectiveProjectPolicy): string {

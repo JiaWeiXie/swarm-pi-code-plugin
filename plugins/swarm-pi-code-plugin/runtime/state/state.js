@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { DEFAULT_ADAPTIVE_POLICY, DEFAULT_BACKGROUND_ROLE_POLICY, isWorkerRole, normalizeAdaptivePolicy, } from "../orchestration/roles.js";
+import { DEFAULT_ADAPTIVE_POLICY, DEFAULT_BACKGROUND_ROLE_POLICY, isWorkerRole, normalizeAdaptivePolicy, defaultAdvisorPolicy, defaultHostAssistancePolicy, MAX_HOST_ASSISTANCE_REQUESTS, MAX_HOST_ASSISTANCE_FAN_OUT, MAX_ADVISOR_REQUESTS, MAX_ADVISOR_PERSPECTIVES, } from "../orchestration/roles.js";
 const execFileAsync = promisify(execFile);
 export class StateMigrationConflictError extends Error {
     legacyDir;
@@ -27,6 +27,11 @@ export function defaultState() {
             rolePolicies: {},
             adaptivePolicy: structuredClone(DEFAULT_ADAPTIVE_POLICY),
             backgroundRolePolicy: structuredClone(DEFAULT_BACKGROUND_ROLE_POLICY),
+            decisionMode: "balance",
+            hostAssistance: defaultHostAssistancePolicy(),
+            contextBudget: 4,
+            advisor: defaultAdvisorPolicy(),
+            hostActions: defaultHostActionPolicy(),
         },
         jobs: [],
     };
@@ -174,6 +179,7 @@ export async function saveProjectSettings(cwd, profile, sandboxMode, execution) 
                 mechanicalExecutor: execution.backgroundRolePolicy.mechanicalExecutor === true,
             };
         }
+        applyWorkflowSettings(state.config, execution);
     });
 }
 export async function setSandboxMode(cwd, sandboxMode) {
@@ -189,7 +195,26 @@ export async function saveExecutionSettings(cwd, sandboxMode, execution) {
         state.config.backgroundRolePolicy = {
             mechanicalExecutor: execution.backgroundRolePolicy?.mechanicalExecutor === true,
         };
+        applyWorkflowSettings(state.config, execution);
     });
+}
+function applyWorkflowSettings(config, settings) {
+    if (!settings)
+        return;
+    if (settings.decisionMode)
+        config.decisionMode = settings.decisionMode;
+    if (settings.hostAssistance)
+        config.hostAssistance = normalizeHostAssistancePolicy(settings.hostAssistance);
+    if (settings.contextBudget !== undefined)
+        config.contextBudget = Math.min(64, Math.max(0, Math.trunc(settings.contextBudget)));
+    if (settings.advisor)
+        config.advisor = normalizeAdvisorPolicy(settings.advisor);
+    if (settings.hostActions)
+        config.hostActions = normalizeHostActionPolicy(settings.hostActions);
+    if (settings.doctrine === "first-principles-qds-v1")
+        config.doctrine = settings.doctrine;
+    else if (settings.doctrine === null)
+        delete config.doctrine;
 }
 export async function clearConfiguration(cwd) {
     return updateState(cwd, (state) => {
@@ -201,6 +226,11 @@ export async function clearConfiguration(cwd) {
             rolePolicies: {},
             adaptivePolicy: structuredClone(DEFAULT_ADAPTIVE_POLICY),
             backgroundRolePolicy: structuredClone(DEFAULT_BACKGROUND_ROLE_POLICY),
+            decisionMode: "balance",
+            hostAssistance: defaultHostAssistancePolicy(),
+            contextBudget: 4,
+            advisor: defaultAdvisorPolicy(),
+            hostActions: defaultHostActionPolicy(),
         };
     });
 }
@@ -266,6 +296,16 @@ function normalizeState(value) {
     state.config.adaptivePolicy = normalizeAdaptivePolicy(asRecord(config.adaptivePolicy));
     const background = asRecord(config.backgroundRolePolicy);
     state.config.backgroundRolePolicy = { mechanicalExecutor: background.mechanicalExecutor === true };
+    const decisionMode = config.decisionMode;
+    state.config.decisionMode = decisionMode === "cost" || decisionMode === "power" ? decisionMode : "balance";
+    state.config.hostAssistance = normalizeHostAssistancePolicy(config.hostAssistance);
+    state.config.contextBudget = Number.isInteger(config.contextBudget)
+        ? Math.min(64, Math.max(0, config.contextBudget))
+        : 4;
+    state.config.advisor = normalizeAdvisorPolicy(config.advisor);
+    state.config.hostActions = normalizeHostActionPolicy(config.hostActions);
+    if (config.doctrine === "first-principles-qds-v1")
+        state.config.doctrine = config.doctrine;
     if (Object.keys(profile).length > 0) {
         state.config.profile = {
             goal: stringValue(profile.goal),
@@ -283,6 +323,60 @@ function normalizeState(value) {
         state.migration = { source: migration.source, migratedAt: migration.migratedAt };
     }
     return state;
+}
+function normalizeHostAssistancePolicy(value) {
+    const defaults = defaultHostAssistancePolicy();
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return defaults;
+    const candidate = value;
+    const mode = candidate.mode === "off" || candidate.mode === "inherit" ? candidate.mode : "on";
+    return {
+        enabled: mode === "off" ? false : candidate.enabled !== false,
+        mode,
+        contextClasses: Array.isArray(candidate.contextClasses) ? candidate.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item)) : defaults.contextClasses,
+        privateConnector: candidate.privateConnector === "deny" ? "deny" : "ask",
+        maxRequests: Number.isInteger(candidate.maxRequests) ? Math.min(MAX_HOST_ASSISTANCE_REQUESTS, Math.max(0, candidate.maxRequests)) : defaults.maxRequests,
+        maxFanOut: Number.isInteger(candidate.maxFanOut) ? Math.min(MAX_HOST_ASSISTANCE_FAN_OUT, Math.max(0, candidate.maxFanOut)) : defaults.maxFanOut,
+    };
+}
+function normalizeAdvisorPolicy(value) {
+    const defaults = defaultAdvisorPolicy();
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return defaults;
+    const candidate = value;
+    return {
+        enabled: candidate.enabled === true,
+        targets: Array.isArray(candidate.targets) ? candidate.targets.filter((item) => ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"].includes(item)) : defaults.targets,
+        maxRequests: Number.isInteger(candidate.maxRequests) ? Math.min(MAX_ADVISOR_REQUESTS, Math.max(0, candidate.maxRequests)) : defaults.maxRequests,
+        maxPerspectives: Number.isInteger(candidate.maxPerspectives) ? Math.min(MAX_ADVISOR_PERSPECTIVES, Math.max(0, candidate.maxPerspectives)) : defaults.maxPerspectives,
+    };
+}
+export function defaultHostActionPolicy() {
+    return {
+        enabled: true,
+        allowedActionClasses: ["local-mutation", "draft"],
+        remoteActionsEnabled: false,
+        maxUses: 1,
+        maxCost: 1,
+        ttlMs: 30 * 60_000,
+    };
+}
+function normalizeHostActionPolicy(value) {
+    const defaults = defaultHostActionPolicy();
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return defaults;
+    const candidate = value;
+    const classes = Array.isArray(candidate.allowedActionClasses)
+        ? candidate.allowedActionClasses.filter((item) => ["local-mutation", "draft", "remote-write", "message", "deploy", "transaction"].includes(item))
+        : defaults.allowedActionClasses;
+    return {
+        enabled: candidate.enabled !== false,
+        allowedActionClasses: classes,
+        remoteActionsEnabled: candidate.remoteActionsEnabled === true,
+        maxUses: Number.isInteger(candidate.maxUses) ? Math.min(100, Math.max(1, candidate.maxUses)) : defaults.maxUses,
+        maxCost: typeof candidate.maxCost === "number" && Number.isFinite(candidate.maxCost) ? Math.max(0, candidate.maxCost) : defaults.maxCost,
+        ttlMs: Number.isInteger(candidate.ttlMs) ? Math.min(24 * 60 * 60_000, Math.max(60_000, candidate.ttlMs)) : defaults.ttlMs,
+    };
 }
 async function resolveGitCommonDir(cwd) {
     try {

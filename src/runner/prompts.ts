@@ -13,6 +13,7 @@ const TASK_CONTEXT: Record<TaskKind, string> = {
   orchestrate: "Analyze only your assigned perspective and return concise evidence for the host to synthesize.",
   scaffold: "Create the approved project scaffold in the assigned staging repository. Do not commit, push, or write outside staging.",
   setup: "Configure project-local dependencies and development tooling. Never install globally or modify host configuration.",
+    discover: "Coordinate schema-gated research, an isolated reproducible experiment child, and evidence-backed convergence; keep experiment artifacts non-materializing and require both Human Decision gates.",
 };
 
 export const WORKER_PROMPT_VERSION = 1;
@@ -24,6 +25,8 @@ export function buildWorkerPrompt(options: {
   projectGoal?: string | undefined;
   renderedProjectPolicy?: string | undefined;
   perspective?: string | undefined;
+  decisionMode?: "cost" | "balance" | "power";
+  advisorEnabled?: boolean;
 }): string {
   const projectLines = [
     options.projectGoal ? `Project goal: ${options.projectGoal}` : "",
@@ -34,6 +37,8 @@ export function buildWorkerPrompt(options: {
     `[HOST]\n${HOST_CONTEXT[options.host]}`,
     `[TASK]\n${TASK_CONTEXT[options.kind]}`,
     options.perspective ? `[PERSPECTIVE]\n${options.perspective}` : "",
+    options.decisionMode ? `[DECISION_MODE]\n${options.decisionMode}` : "",
+    options.advisorEnabled ? "[ADVISOR]\nUse bounded consultation only; do not execute actions or recurse." : "",
     projectLines.length ? `[PROJECT]\n${projectLines.join("\n")}` : "",
     `[REQUEST]\n${options.prompt}`,
   ]

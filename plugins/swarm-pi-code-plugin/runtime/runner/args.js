@@ -17,6 +17,7 @@ const COMMANDS = new Set([
     "orchestrate",
     "scaffold",
     "setup",
+    "discover",
 ]);
 export function parseArguments(argv) {
     const command = argv[0];
@@ -75,6 +76,18 @@ export function parseArguments(argv) {
             case "--adopt-existing":
                 parsed.adoptExisting = true;
                 break;
+            case "--decision-mode":
+                parsed.decisionMode = parseDecisionMode(readValue(argv, ++index, argument));
+                break;
+            case "--host-assistance":
+                parsed.hostAssistance = parseHostAssistanceMode(readValue(argv, ++index, argument));
+                break;
+            case "--host-context-file":
+                parsed.hostContextFile = readValue(argv, ++index, argument);
+                break;
+            case "--discovery-from":
+                parsed.discoveryFrom = readValue(argv, ++index, argument);
+                break;
             case "--model":
                 parsed.model = readValue(argv, ++index, argument);
                 break;
@@ -119,6 +132,15 @@ export function parseArguments(argv) {
                 break;
             case "--approval-scope":
                 parsed.approvalScope = parseApprovalScope(readValue(argv, ++index, argument));
+                break;
+            case "--request":
+                parsed.hostRequestId = readValue(argv, ++index, argument);
+                break;
+            case "--response-file":
+                parsed.responseFile = readValue(argv, ++index, argument);
+                break;
+            case "--reason":
+                parsed.declineReason = readValue(argv, ++index, argument);
                 break;
             case "--notification":
                 parsed.notificationId = readValue(argv, ++index, argument);
@@ -177,7 +199,7 @@ export function parseArguments(argv) {
     if (parsed.configurationSection && command !== "configure") {
         throw new Error("--section is only supported by configure");
     }
-    if ((command === "ask" || command === "plan" || command === "implement" || command === "orchestrate" || command === "setup") &&
+    if ((command === "ask" || command === "plan" || command === "implement" || command === "orchestrate" || command === "setup" || command === "discover") &&
         !parsed.promptFile) {
         throw new Error(`--prompt-file is required for ${command}`);
     }
@@ -190,9 +212,11 @@ export function parseArguments(argv) {
         throw new Error("--audit is only supported by jobs export");
     if (parsed.adoptExisting && command !== "scaffold")
         throw new Error("--adopt-existing is only supported by scaffold");
+    if (parsed.discoveryFrom && command !== "plan")
+        throw new Error("--discovery-from is only supported by plan");
     if (parsed.smokeTest && command !== "doctor")
         throw new Error("--smoke-test is only supported by doctor");
-    if ((parsed.executionMode || parsed.timeoutMs || parsed.role || parsed.thinkingLevel || parsed.approvalMode || parsed.specFile) && !isTaskCommand(command)) {
+    if ((parsed.executionMode || parsed.timeoutMs || parsed.role || parsed.thinkingLevel || parsed.approvalMode || parsed.specFile || parsed.decisionMode || parsed.hostAssistance || parsed.hostContextFile) && !isTaskCommand(command)) {
         throw new Error("Delegation options are only supported by delegated task commands");
     }
     if (command === "jobs")
@@ -204,12 +228,23 @@ export function parseArguments(argv) {
 }
 function isTaskCommand(command) {
     return command === "ask" || command === "review" || command === "plan" ||
-        command === "implement" || command === "orchestrate" || command === "scaffold" || command === "setup";
+        command === "implement" || command === "orchestrate" || command === "scaffold" || command === "setup" || command === "discover";
+}
+function parseDecisionMode(value) {
+    if (value === "cost" || value === "balance" || value === "power")
+        return value;
+    throw new Error(`Invalid decision mode: ${value}`);
+}
+function parseHostAssistanceMode(value) {
+    if (value === "inherit" || value === "on" || value === "off")
+        return value;
+    throw new Error(`Invalid host assistance mode: ${value}`);
 }
 function parseJobsAction(value) {
     if (value === "list" || value === "status" || value === "wait" || value === "watch" ||
         value === "cancel" || value === "acknowledge" || value === "approvals" ||
-        value === "approve" || value === "deny" || value === "cleanup" || value === "export")
+        value === "approve" || value === "deny" || value === "host-requests" || value === "host-respond" || value === "host-decline" ||
+        value === "decisions" || value === "decide" || value === "action-start" || value === "cleanup" || value === "export")
         return value;
     if (value === "materialize")
         return value;
@@ -252,6 +287,18 @@ function validateJobsArguments(args) {
     }
     if ((args.jobsAction === "approve" || args.jobsAction === "deny") && !args.approvalId) {
         throw new Error(`jobs ${args.jobsAction} requires --approval`);
+    }
+    if ((args.jobsAction === "host-respond" || args.jobsAction === "host-decline" || args.jobsAction === "decide" || args.jobsAction === "action-start") && !args.hostRequestId) {
+        throw new Error(`jobs ${args.jobsAction} requires --request`);
+    }
+    if ((args.jobsAction === "host-respond" || args.jobsAction === "decide") && !args.responseFile) {
+        throw new Error(`jobs ${args.jobsAction} requires --response-file`);
+    }
+    if (args.responseFile && args.jobsAction !== "host-respond" && args.jobsAction !== "decide") {
+        throw new Error("--response-file is only supported by jobs host-respond or jobs decide");
+    }
+    if (args.declineReason && args.jobsAction !== "host-decline") {
+        throw new Error("--reason is only supported by jobs host-decline");
     }
     if (args.approvalScope && args.jobsAction !== "approve") {
         throw new Error("--approval-scope is only supported by jobs approve");

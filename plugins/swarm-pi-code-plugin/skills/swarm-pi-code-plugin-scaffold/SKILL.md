@@ -5,7 +5,9 @@ description: Design and create a new project through a reviewed Pi scaffold spec
 
 # Scaffold A Project With Pi
 
-Read the [cross-host control protocol](../references/host-protocol.md).
+Read the [cross-host control protocol](../../references/host-protocol.md).
+
+Scaffold decisions can use Host-provided evidence bundles, but assurance remains recommended rather than a bypass: record reproducibility, testability, and evidence expectations, and keep materialization behind the existing explicit gate.
 
 1. Use `$RUNNER plan --host "$HOST" --role project-architect --prompt-file "$PROMPT_FILE" --execution-mode "$EXECUTION_MODE" --approval-mode "$APPROVAL_MODE" --json` to draft a version 1 `ScaffoldSpec`. With `supervised + wait`, the managed relay returns within 15 seconds; retain the Job ID and continue with bounded `jobs wait` calls if it reports approval or timeout.
 2. Require the spec to include request, project name, target mode, runtime, package manager, structure, dependencies, verification commands, lifecycle-script policy, and done criteria. Present it before mutation.

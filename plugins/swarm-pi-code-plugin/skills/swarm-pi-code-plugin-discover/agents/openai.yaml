@@ -1,0 +1,4 @@
+interface:
+  display_name: "Swarm Pi Code Plugin Discover"
+  short_description: "Research, experiment, and converge with evidence"
+  default_prompt: "Use $swarm-pi-code-plugin-discover to investigate this unknown and produce a gated discovery report."

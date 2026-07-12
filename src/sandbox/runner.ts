@@ -112,6 +112,7 @@ export async function sandboxConfiguration(
   trustedDomains: string[] = [],
   boundProjectPolicy?: BoundProjectPolicy,
 ): Promise<SandboxRuntimeConfig> {
+  cwd = await fs.realpath(cwd);
   if (boundProjectPolicy && boundProjectPolicy.executionRoot !== cwd) {
     throw new Error("Bound project policy execution root does not match sandbox workspace");
   }
@@ -134,6 +135,7 @@ export async function sandboxConfiguration(
     "/tmp/claude",
     "/private/tmp/claude",
   ];
+  const policyShellRoots = boundProjectPolicy ? [...boundProjectPolicy.roots.shell] : [];
   return {
     network: {
       allowedDomains: [],
@@ -146,10 +148,12 @@ export async function sandboxConfiguration(
     },
     filesystem: {
       denyRead: uniquePaths(denyRead),
-      allowRead: executableReadPaths(cwd),
+      // Bash is a distinct capability: it may read only its shell roots, not
+      // roots granted solely to the scoped read/search tools.
+      allowRead: uniquePaths([...executableReadPaths(cwd), ...policyShellRoots]),
       allowWrite: uniquePaths(mode === "implement"
         ? boundProjectPolicy
-          ? [...boundProjectPolicy.roots.write, ...boundProjectPolicy.roots.shell, tempRoot]
+          ? [...boundProjectPolicy.roots.shell, tempRoot]
           : [cwd, tempRoot]
         : [tempRoot]),
       denyWrite: uniquePaths(denyWrite),

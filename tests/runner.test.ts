@@ -88,6 +88,8 @@ test("argument parsing requires host and prompt file for ask", () => {
     },
   );
   assert.throws(() => parseArguments(["configure", "--section", "models"]), /configuration section/);
+  assert.equal(parseArguments(["plan", "--host", "codex", "--prompt-file", "plan.md", "--discovery-from", "discover-1"]).discoveryFrom, "discover-1");
+  assert.throws(() => parseArguments(["ask", "--host", "codex", "--prompt-file", "ask.md", "--discovery-from", "discover-1"]), /only supported by plan/);
   assert.throws(() => parseArguments(["init", "--section", "project"]), /only supported by configure/);
   assert.equal(parseArguments(["status", "--json"]).command, "status");
   assert.equal(parseArguments(["doctor", "--smoke-test", "--json"]).smokeTest, true);
@@ -887,7 +889,7 @@ test("branch review handles a repository with only a root commit", async () => {
   assert.match(receivedPrompt, /root\.txt/);
 });
 
-test("orchestrate runs exactly three readonly perspectives and records artifacts", async () => {
+test("orchestrate runs Balance-mode readonly perspectives and records artifacts", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-orchestrate-"));
   let sessions = 0;
   const dependencies: RunnerDependencies = {
@@ -925,7 +927,7 @@ test("orchestrate runs exactly three readonly perspectives and records artifacts
     dependencies,
   );
 
-  assert.equal(sessions, 3);
+  assert.equal(sessions, 2);
   assert.equal("success" in result && result.success, true);
   assert.match("output" in result ? result.output : "", /Correctness and failure modes/);
   const stateDir = await resolveStateDir(workspace);
@@ -935,6 +937,125 @@ test("orchestrate runs exactly three readonly perspectives and records artifacts
   assert.equal(fs.existsSync(path.join(jobDir, "request.json")), true);
   assert.equal(fs.existsSync(path.join(jobDir, "prompt.md")), true);
   assert.equal(fs.existsSync(path.join(jobDir, "result.json")), true);
+});
+
+test("discover runs fixed stages, propagates prior evidence, and parses experiment conclusion", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-discover-"));
+  let sessions = 0;
+  const prompts: string[] = [];
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Investigate the unknown",
+    createSession: async () => {
+      const stage = sessions;
+      sessions += 1;
+      return {
+        subscribe(listener) {
+          const output = stage === 0
+            ? JSON.stringify({
+                evidencePlan: { unknowns: ["unknown behavior"], sources: ["workspace"], acceptanceCriteria: ["evidence found"], budget: 1 },
+                evidencePack: {
+                  claims: [{ claim: "repository evidence exists", evidenceIds: ["repo-1"], confidence: "high" }],
+                  citations: [{ id: "repo-1", title: "Repository fixture", retrievedAt: "2026-07-12T00:00:00.000Z" }],
+                  conflicts: [], unknowns: [],
+                },
+              })
+            : stage === 1
+              ? JSON.stringify({
+                  experimentSpec: {
+                    hypothesis: "works", baseline: "control", dependencies: [], fixture: "fixture-a", seedOrDataHash: "sha256:test",
+                    setupCommand: "true", runCommand: "true", testCommand: "true", verifyCommand: "true", cleanupCommand: "true",
+                    metrics: ["success"], tolerance: "exact", cleanReplayCommand: "true",
+                  },
+                  execution: { commandsRun: ["true"], testsRun: ["true"], evidence: ["exit=0"], cleanReplayPassed: true },
+                  conclusion: "supported",
+                })
+              : JSON.stringify({
+                  featureDefinition: { summary: "minimal feature", acceptanceCriteria: ["works"], nonGoals: ["automatic productization"] },
+                  decisionLedger: [{ decision: "ship minimal", rationale: "evidence supports it", evidenceIds: ["repo-1"] }],
+                });
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: output } });
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+          return () => {};
+        },
+        async prompt(prompt) { prompts.push(prompt); },
+        dispose() {},
+      };
+    },
+  };
+  const result = await runCommand(
+    {
+      command: "discover",
+      host: "codex",
+      promptFile: "prompt.md",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal(sessions, 3);
+  assert.equal("success" in result && result.success, true);
+  assert.deepEqual("discovery" in result ? result.discovery?.stages.map((stage) => stage.stage) : [], [
+    "research",
+    "experiment",
+    "convergence",
+  ]);
+  assert.equal("discovery" in result && result.discovery?.experimentConclusion, "supported");
+  assert.match(prompts[1] ?? "", /repository evidence exists/);
+  assert.match(prompts[2] ?? "", /supported/);
+  assert.equal("discovery" in result && result.discovery?.stages[1]?.verification.includes("clean-replay-passed"), true);
+  assert.equal("discovery" in result && Boolean(result.discovery?.stages[1]?.childJobId), true);
+  const childJobId = "discovery" in result ? result.discovery?.stages[1]?.childJobId : undefined;
+  assert.ok(childJobId);
+  const child = await getJob(workspace, childJobId);
+  assert.equal(child.job.parentJobId, "jobId" in result ? result.jobId : undefined);
+  assert.equal(child.job.internalStage, "experiment");
+  assert.equal(child.job.role, "experimenter");
+  assert.equal(child.result?.artifact?.kind, "experiment");
+  assert.equal(child.result?.artifact?.deliverable, false);
+});
+
+test("plan accepts only a verified and final-gated DiscoveryResult handoff", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-discovery-handoff-"));
+  const discovery = await startJob(workspace, {
+    host: "codex", kind: "discover", prompt: "discover", cwd: workspace, executionMode: "supervised", timeoutMs: 60_000,
+  });
+  await finishJob(workspace, discovery.id, {
+    kind: "discover", status: "succeeded", success: true, output: "approved discovery", model: "test-provider/test-model",
+    changedFiles: [], diffStat: "", verification: { status: "passed", commands: ["all-stages"] },
+    discovery: {
+      stages: [
+        { stage: "research", status: "passed", output: "evidence", evidence: [], verification: ["schema"] },
+        { stage: "experiment", status: "passed", output: "experiment", evidence: [], verification: ["clean-replay-passed"] },
+        { stage: "convergence", status: "passed", output: "definition", evidence: [], verification: ["schema", "user-gate:approved"] },
+      ],
+      experimentConclusion: "supported",
+    },
+  });
+  let delegatedPrompt = "";
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Create the implementation plan",
+    createSession: async () => ({
+      subscribe(listener) {
+        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "plan" } });
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        return () => {};
+      },
+      async prompt(prompt) { delegatedPrompt = prompt; },
+      dispose() {},
+    }),
+  };
+  const result = await runCommand({
+    command: "plan", host: "codex", promptFile: "plan.md", discoveryFrom: discovery.id,
+    reconfigure: false, reset: false, json: true,
+  }, workspace, dependencies);
+  assert.equal("success" in result && result.success, true);
+  assert.match(delegatedPrompt, new RegExp(`VERIFIED_DISCOVERY_HANDOFF id=${discovery.id}`));
+  assert.match(delegatedPrompt, /user-gate:approved/);
 });
 
 test("background submission returns an accepted job without creating a Pi session", async () => {
@@ -978,7 +1099,7 @@ test("background submission returns an accepted job without creating a Pi sessio
   assert.equal(snapshot.job.timeoutMs, 30 * 60_000);
   assert.equal(snapshot.job.sandboxMode, "lenient");
   const request = await readJobRequest(workspace, "jobId" in result ? result.jobId : "");
-  assert.equal(request.requestVersion, 4);
+  assert.equal(request.requestVersion, 5);
   assert.equal(request.modelConfiguration?.version, 1);
   assert.match(request.providerSnapshotHash ?? "", /^[a-f0-9]{64}$/);
   assert.doesNotMatch(JSON.stringify(request.modelConfiguration), /apiKey|access-token|refresh-token/);
@@ -1289,7 +1410,7 @@ test("background durable replay ignores a later profile change", async () => {
     { spawnWorker: async () => 555 },
   );
   const jobId = "jobId" in submit ? submit.jobId : "";
-  assert.equal((await readJobRequest(workspace, jobId)).requestVersion, 4);
+  assert.equal((await readJobRequest(workspace, jobId)).requestVersion, 5);
   // Tighten the live profile so the original task kind would now be rejected.
   await updateState(workspace, (state) => { state.config.profile = { tasks: [] }; });
   const worker = await runCommand(
@@ -1452,10 +1573,11 @@ test("the durable background path re-checks task-kind admission on a valid snaps
     { spawnWorker: async () => 777 },
   );
   const jobId = "jobId" in submit ? submit.jobId : "";
-  // Replace the snapshot with a VALID (self-consistent) v2 snapshot whose allowed kinds exclude the request kind.
+  // Replace the snapshot with a VALID (self-consistent) v3 snapshot whose allowed kinds exclude the request kind.
   const planOnly = await compileEffectiveProjectPolicy({ cwd: workspace, profile: { tasks: ["planning"] } });
   const mismatched = createPolicySnapshot({
     sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("scout"), effectiveProjectPolicy: planOnly,
+    decisionMode: "balance",
   });
   const requestFile = path.join(await resolveStateDir(workspace), "jobs", jobId, "request.json");
   const request = JSON.parse(fs.readFileSync(requestFile, "utf8"));

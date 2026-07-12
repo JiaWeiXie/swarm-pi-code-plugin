@@ -1,17 +1,16 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.3.0+codex.20260712105508",
-  "description": "Dual-host agent swarm adapter backed by the embedded Pi coding-agent SDK.",
+  "version": "0.5.0+codex.20260712155539",
+  "description": "Dual-host Pi workflows with durable Host Assistance, discovery, review, and isolated implementation.",
   "author": {
     "name": "JiaWei Xie"
   },
   "license": "MIT",
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Swarm Pi Code Plugin",
-    "shortDescription": "Delegate bounded coding work to embedded Pi sessions.",
-    "longDescription": "Swarm Pi Code Plugin connects Codex and Claude Code to controlled Pi coding-agent sessions for analysis and implementation workflows.",
+    "shortDescription": "Delegate bounded, evidence-backed work to Pi.",
+    "longDescription": "Connect Codex and Claude Code to controlled Pi sessions for live Host-assisted research, schema-gated discovery, reviews, and verified isolated changes.",
     "developerName": "JiaWei Xie",
     "category": "Productivity",
     "capabilities": [
@@ -21,7 +20,8 @@
     "defaultPrompt": [
       "Use Pi to review the current changes.",
       "Use Pi to plan this implementation.",
-      "Use Pi to implement this scoped change."
+      "Use Pi to implement this scoped change.",
+      "Use Pi to investigate this unknown with a reproducible experiment."
     ]
   }
 }

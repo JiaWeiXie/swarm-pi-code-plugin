@@ -22,6 +22,14 @@ import type {
   WorkerResult,
   WorkspaceStrategy,
   ScaffoldSpec,
+  DecisionMode,
+  HostAssistanceMode,
+  HostAssistanceCorrelation,
+  HostAssistancePolicy,
+  HostAssistanceRecord,
+  HostAssistanceRequest,
+  HostAssistanceRequestSummary,
+  HostAssistanceResult,
 } from "../core/contracts.js";
 import { loadState, resolveStateDir, updateState, type JobRecord } from "./state.js";
 import type { ModelConfiguration } from "./model-config.js";
@@ -48,11 +56,15 @@ export interface JobStart {
   projectGoal?: string;
   scaffoldSpec?: ScaffoldSpec;
   adoptExisting?: boolean;
+  decisionMode?: DecisionMode;
+  hostAssistance?: HostAssistanceMode;
+  hostContextFile?: string;
+  discoveryFrom?: string;
   modelConfiguration?: ModelConfiguration;
 }
 
 export interface JobRequest {
-  requestVersion?: 1 | 2 | 3 | 4;
+  requestVersion?: 1 | 2 | 3 | 4 | 5;
   id: string;
   host: Host;
   kind: TaskKind;
@@ -71,6 +83,10 @@ export interface JobRequest {
   projectGoal?: string;
   scaffoldSpec?: ScaffoldSpec;
   adoptExisting?: boolean;
+  decisionMode?: DecisionMode;
+  hostAssistance?: HostAssistanceMode;
+  hostContextFile?: string;
+  discoveryFrom?: string;
   modelConfiguration?: ModelConfiguration;
   providerSnapshotHash?: string;
   workerToken: string;
@@ -104,6 +120,13 @@ export interface JobApprovalRequired {
   approval: ApprovalRequest;
 }
 
+export interface JobHostAssistanceRequired {
+  event: "host-assistance-required" | "human-decision-required";
+  jobId: string;
+  status: "awaiting-host" | "awaiting-decision";
+  request: HostAssistanceRequestSummary;
+}
+
 export async function startJob(cwd: string, input: JobStart): Promise<JobHandle> {
   await reconcileJobs(cwd);
   const id = `${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
@@ -114,11 +137,11 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
   const providerSnapshotHash = input.modelConfiguration
     ? modelConfigurationSnapshotHash(input.modelConfiguration)
     : undefined;
-  if (input.policySnapshot?.version === 2 && !input.modelConfiguration) {
-    throw new Error("Policy snapshot version 2 requires modelConfiguration");
+  if ((input.policySnapshot?.version === 2 || input.policySnapshot?.version === 3) && !input.modelConfiguration) {
+    throw new Error(`Policy snapshot version ${input.policySnapshot.version} requires modelConfiguration`);
   }
   const request: JobRequest = {
-    requestVersion: input.policySnapshot?.version === 2 ? 4 : input.modelConfiguration ? 3 : 2,
+    requestVersion: input.policySnapshot?.version === 3 ? 5 : input.policySnapshot?.version === 2 ? 4 : input.modelConfiguration ? 3 : 2,
     id,
     host: input.host,
     kind: input.kind,
@@ -137,6 +160,10 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
     ...(input.projectGoal !== undefined ? { projectGoal: input.projectGoal } : {}),
     ...(input.scaffoldSpec ? { scaffoldSpec: input.scaffoldSpec } : {}),
     ...(input.adoptExisting ? { adoptExisting: true } : {}),
+    ...(input.decisionMode ? { decisionMode: input.decisionMode } : {}),
+    ...(input.hostAssistance ? { hostAssistance: input.hostAssistance } : {}),
+    ...(input.hostContextFile ? { hostContextFile: path.relative(input.cwd, path.resolve(input.cwd, input.hostContextFile)) } : {}),
+    ...(input.discoveryFrom ? { discoveryFrom: input.discoveryFrom } : {}),
     ...(input.modelConfiguration ? { modelConfiguration: structuredClone(input.modelConfiguration) } : {}),
     ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
     workerToken,
@@ -158,7 +185,7 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       ...(input.model ? { model: input.model } : {}),
       ...(input.role ? { role: input.role } : {}),
       ...(input.policySnapshot ? { policyHash: input.policySnapshot.hash } : {}),
-      ...(input.policySnapshot?.version === 2 ? { scopeHash: input.policySnapshot.scopeHash } : {}),
+      ...(input.policySnapshot?.version === 2 || input.policySnapshot?.version === 3 ? { scopeHash: input.policySnapshot.scopeHash } : {}),
       ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
       generation: 1,
       approvals: [],
@@ -219,7 +246,7 @@ export async function markJobRunning(
     const job = requireJob(current.jobs, jobId);
     requireWorkerToken(job, workerToken);
     if (isTerminalJobStatus(job.status)) return;
-    job.status = "running";
+    job.status = activeWaitStatus(job);
     job.phase = "preflight";
     job.progressMessage = "Validating the assigned workspace and policy snapshot.";
     job.lastProgressAt = startedAt;
@@ -301,6 +328,16 @@ async function applyResultToState(
       }
       delete existing.pendingApprovalId;
     }
+    if (existing?.pendingHostRequestIds?.length) {
+      for (const request of existing.hostAssistanceRequests ?? []) {
+        if (existing.pendingHostRequestIds.includes(request.id) && request.status === "pending") {
+          request.status = "expired";
+          request.resolvedAt = finishedAt;
+          acknowledgeHostRequestNotification(existing, request, finishedAt);
+        }
+      }
+      existing.pendingHostRequestIds = [];
+    }
     const summary: JobRecord = {
       ...(existing ?? { id: jobId }),
       id: jobId,
@@ -371,7 +408,7 @@ export async function waitForJob(
   cwd: string,
   jobId: string,
   waitTimeoutMs?: number,
-): Promise<WorkerResult | JobWaitExpired | JobApprovalRequired> {
+): Promise<WorkerResult | JobWaitExpired | JobApprovalRequired | JobHostAssistanceRequired> {
   const deadline = waitTimeoutMs === undefined ? undefined : Date.now() + waitTimeoutMs;
   while (true) {
     const snapshot = await getJob(cwd, jobId);
@@ -379,9 +416,22 @@ export async function waitForJob(
       const approval = snapshot.job.approvals?.find((item) => item.id === snapshot.job.pendingApprovalId);
       if (approval) return { event: "approval-required", jobId, status: "awaiting-approval", approval };
     }
+    if (snapshot.job.status === "awaiting-host" || snapshot.job.status === "awaiting-decision") {
+      const request = snapshot.job.hostAssistanceRequests?.find((item) =>
+        snapshot.job.pendingHostRequestIds?.includes(item.id) && item.status === "pending",
+      );
+      if (request) {
+        return {
+          event: request.kind === "decision" ? "human-decision-required" : "host-assistance-required",
+          jobId,
+          status: request.kind === "decision" ? "awaiting-decision" : "awaiting-host",
+          request: structuredClone(request),
+        };
+      }
+    }
     if (isTerminalJobStatus(snapshot.job.status)) {
       if (snapshot.result) return snapshot.result;
-      return terminalResult(snapshot.job, snapshot.job.status as Exclude<JobStatus, "queued" | "running" | "awaiting-approval">,
+      return terminalResult(snapshot.job, snapshot.job.status as Exclude<JobStatus, "queued" | "running" | "awaiting-approval" | "awaiting-host" | "awaiting-decision">,
         `Job ${jobId} reached ${snapshot.job.status} without a result artifact.`);
     }
     if (deadline !== undefined && Date.now() >= deadline) {
@@ -519,7 +569,7 @@ export async function approveJob(
     job.leases.push(lease);
     acknowledgeApprovalNotification(job, approval, now.toISOString());
     delete job.pendingApprovalId;
-    job.status = "running";
+    job.status = activeWaitStatus(job);
     job.updatedAt = now.toISOString();
     resolvedApproval = structuredClone(approval);
   });
@@ -544,7 +594,7 @@ export async function denyJobApproval(
     approval.resolvedAt = now.toISOString();
     acknowledgeApprovalNotification(job, approval, approval.resolvedAt);
     delete job.pendingApprovalId;
-    job.status = "running";
+    job.status = activeWaitStatus(job);
     job.updatedAt = now.toISOString();
     resolvedApproval = structuredClone(approval);
   });
@@ -578,6 +628,226 @@ export async function waitForApprovalResolution(
       const abort = () => { clearTimeout(timeout); signal?.removeEventListener("abort", abort); reject(new Error("Approval wait was cancelled")); };
       signal?.addEventListener("abort", abort, { once: true });
     });
+  }
+}
+
+export async function requestJobHostAssistance(
+  cwd: string,
+  jobId: string,
+  workerToken: string,
+  input: {
+    correlation: HostAssistanceCorrelation;
+    request: HostAssistanceRequest;
+    policy: HostAssistancePolicy;
+    expiresAt: string;
+  },
+): Promise<HostAssistanceRequestSummary> {
+  if (!input.policy.enabled || input.policy.mode === "off") throw new Error("Host Assistance is disabled by policy");
+  if (input.request.dataClassification === "secret") throw new Error("Secret or credential Host Assistance is hard denied");
+  if (input.request.kind === "context") {
+    if (!input.policy.contextClasses.includes(input.request.contextClass)) {
+      throw new Error(`Host context class is not allowed: ${input.request.contextClass}`);
+    }
+    if (input.request.budget < 1) throw new Error("Host context request budget must be positive");
+  }
+  const requestedAt = new Date().toISOString();
+  const id = randomUUID();
+  const notificationId = randomUUID();
+  const summary: HostAssistanceRequestSummary = {
+    id,
+    jobId,
+    generation: input.correlation.generation,
+    sessionId: input.correlation.sessionId,
+    attempt: input.correlation.attempt,
+    ...(input.correlation.perspective ? { perspective: input.correlation.perspective } : {}),
+    kind: input.request.kind,
+    ...(input.request.kind === "context" ? { contextClass: input.request.contextClass } : {}),
+    safeSummary: safeHostRequestSummary(input.request),
+    status: "pending",
+    requestedAt,
+    expiresAt: input.expiresAt,
+    notificationId,
+  };
+  const record: HostAssistanceRecord = { ...summary, request: structuredClone(input.request) };
+  const directory = path.join(await jobDirectory(cwd, jobId), "host-assistance");
+  const file = path.join(directory, `${id}.json`);
+  const pendingFile = path.join(directory, `${id}.pending.json`);
+  try {
+    await writeJson(pendingFile, record);
+    await updateState(cwd, (state) => {
+      const job = requireJob(state.jobs, jobId);
+      requireWorkerToken(job, workerToken);
+      if (isTerminalJobStatus(job.status)) throw new Error(`Job is terminal: ${jobId}`);
+      if ((job.generation ?? 1) !== input.correlation.generation || input.correlation.jobId !== jobId) {
+        throw new Error(`Host Assistance correlation is stale for job: ${jobId}`);
+      }
+      const records = job.hostAssistanceRequests ?? [];
+      if (records.length >= input.policy.maxRequests) {
+        throw new Error(`Host Assistance request quota exceeded for job: ${jobId}`);
+      }
+      const activeRequests = records.filter((item) => item.status === "pending");
+      if (activeRequests.length >= input.policy.maxFanOut) {
+        throw new Error(`Host Assistance fan-out exceeded for job: ${jobId}`);
+      }
+      const activeForSession = records.find((item) => item.sessionId === input.correlation.sessionId && item.status === "pending");
+      if (activeForSession) throw new Error(`Session already has an active Host Assistance request: ${activeForSession.id}`);
+      job.hostAssistanceRequests ??= [];
+      job.pendingHostRequestIds ??= [];
+      job.notifications ??= [];
+      job.hostAssistanceRequests.push(summary);
+      job.pendingHostRequestIds.push(id);
+      job.notifications.push({
+        id: notificationId,
+        kind: input.request.kind === "decision" ? "human-decision" : "host-assistance",
+        status: "pending",
+        createdAt: requestedAt,
+        hostRequestId: id,
+      });
+      job.status = input.request.kind === "decision" ? "awaiting-decision" : "awaiting-host";
+      job.updatedAt = requestedAt;
+    });
+    await fs.rename(pendingFile, file).catch(() => {
+      // A crash or transient rename failure is reconciled from the durable
+      // .pending artifact before list/resolve/consume reads the request.
+    });
+  } catch (error) {
+    await updateState(cwd, (state) => {
+      const job = requireJob(state.jobs, jobId);
+      job.hostAssistanceRequests = (job.hostAssistanceRequests ?? []).filter((item) => item.id !== id);
+      job.pendingHostRequestIds = (job.pendingHostRequestIds ?? []).filter((item) => item !== id);
+      job.notifications = (job.notifications ?? []).filter((item) => item.hostRequestId !== id);
+      job.status = activeWaitStatus(job);
+      job.updatedAt = new Date().toISOString();
+    }).catch(() => {});
+    await fs.rm(file, { force: true }).catch(() => {});
+    await fs.rm(pendingFile, { force: true }).catch(() => {});
+    throw error;
+  }
+  return structuredClone(summary);
+}
+
+export async function listJobHostRequests(
+  cwd: string,
+  jobId: string,
+  kind?: "context" | "decision" | "action-recommendation",
+): Promise<HostAssistanceRecord[]> {
+  await reconcileJobs(cwd);
+  const job = (await getJob(cwd, jobId)).job;
+  const summaries = (job.hostAssistanceRequests ?? []).filter((item) => !kind || item.kind === kind);
+  const directory = await jobDirectory(cwd, jobId);
+  return Promise.all(summaries.map(async (summary) => readRequiredJson<HostAssistanceRecord>(
+    await ensureHostAssistanceArtifact(directory, summary.id),
+  )));
+}
+
+export async function resolveJobHostRequest(
+  cwd: string,
+  jobId: string,
+  requestId: string,
+  response: unknown,
+): Promise<HostAssistanceRecord> {
+  const directory = path.join(await jobDirectory(cwd, jobId), "host-assistance");
+  const file = await ensureHostAssistanceArtifact(path.dirname(directory), requestId);
+  const lockFile = path.join(directory, `${requestId}.resolve.lock`);
+  await fs.mkdir(directory, { recursive: true });
+  let lock: Awaited<ReturnType<typeof fs.open>>;
+  try {
+    lock = await fs.open(lockFile, "wx", 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Host Assistance response is already being resolved: ${requestId}`);
+    throw error;
+  }
+  try {
+    const currentJob = (await loadState(cwd)).jobs.find((item) => item.id === jobId);
+    if (!currentJob) throw new Error(`Unknown job: ${jobId}`);
+    assertHostRequestPending(currentJob, requireHostRequest(currentJob, requestId));
+    const record = await readRequiredJson<HostAssistanceRecord>(file);
+    const normalized = normalizeHostAssistanceResponse(record, response);
+    const resolvedAt = responseTimestamp(normalized);
+    const updated: HostAssistanceRecord = {
+      ...record,
+      status: normalized.kind === "unavailable" ? "declined" : "resolved",
+      resolvedAt,
+      responseHash: normalized.hash,
+      response: normalized,
+    };
+    await writeJson(file, updated);
+    await updateState(cwd, (state) => {
+      const job = requireJob(state.jobs, jobId);
+      const summary = requireHostRequest(job, requestId);
+      assertHostRequestPending(job, summary);
+      if (summary.generation !== record.generation || record.jobId !== jobId) throw new Error(`Host response correlation mismatch: ${requestId}`);
+      Object.assign(summary, {
+        status: updated.status,
+        resolvedAt,
+        responseHash: normalized.hash,
+      });
+      job.pendingHostRequestIds = (job.pendingHostRequestIds ?? []).filter((id) => id !== requestId);
+      acknowledgeHostRequestNotification(job, summary, resolvedAt);
+      job.status = activeWaitStatus(job);
+      job.updatedAt = resolvedAt;
+    });
+    return structuredClone(updated);
+  } finally {
+    await lock.close();
+    await fs.rm(lockFile, { force: true });
+  }
+}
+
+export async function declineJobHostRequest(
+  cwd: string,
+  jobId: string,
+  requestId: string,
+  message = "The Host declined this request.",
+): Promise<HostAssistanceRecord> {
+  return resolveJobHostRequest(cwd, jobId, requestId, {
+    kind: "unavailable",
+    reason: "declined",
+    message,
+  });
+}
+
+export async function waitForHostAssistanceResolution(
+  cwd: string,
+  jobId: string,
+  workerToken: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<HostAssistanceResult> {
+  while (true) {
+    if (signal?.aborted) throw new Error("Host Assistance wait was cancelled");
+    const state = await loadState(cwd);
+    const job = requireJob(state.jobs, jobId);
+    requireWorkerToken(job, workerToken);
+    const summary = requireHostRequest(job, requestId);
+    if (summary.generation !== (job.generation ?? 1)) throw new Error(`Host Assistance request generation is stale: ${requestId}`);
+    if (summary.status === "pending" && Date.now() >= Date.parse(summary.expiresAt)) {
+      await expireHostRequest(cwd, jobId, requestId);
+      continue;
+    }
+    if (summary.status === "resolved" || summary.status === "declined" || summary.status === "expired") {
+      const file = await ensureHostAssistanceArtifact(await jobDirectory(cwd, jobId), requestId);
+      const record = await readRequiredJson<HostAssistanceRecord>(file);
+      if (!record.response) throw new Error(`Host Assistance response artifact is missing: ${requestId}`);
+      const consumedAt = new Date().toISOString();
+      let consumed = false;
+      await updateState(cwd, (current) => {
+        const currentJob = requireJob(current.jobs, jobId);
+        requireWorkerToken(currentJob, workerToken);
+        const currentSummary = requireHostRequest(currentJob, requestId);
+        if (currentSummary.status === "consumed") return;
+        if (currentSummary.status !== "resolved" && currentSummary.status !== "declined" && currentSummary.status !== "expired") return;
+        currentSummary.status = "consumed";
+        currentSummary.consumedAt = consumedAt;
+        currentJob.updatedAt = consumedAt;
+        consumed = true;
+      });
+      if (!consumed) throw new Error(`Host Assistance response was already consumed: ${requestId}`);
+      await writeJson(file, { ...record, status: "consumed", consumedAt });
+      return structuredClone(record.response);
+    }
+    if (summary.status === "consumed") throw new Error(`Host Assistance response was already consumed: ${requestId}`);
+    await abortableDelay(250, signal, "Host Assistance wait was cancelled");
   }
 }
 
@@ -678,7 +948,7 @@ export function isTerminalJobStatus(status: string): boolean {
 
 function terminalResult(
   job: JobRecord,
-  status: Exclude<JobStatus, "queued" | "running" | "awaiting-approval">,
+  status: Exclude<JobStatus, "queued" | "running" | "awaiting-approval" | "awaiting-host" | "awaiting-decision">,
   output: string,
 ): WorkerResult {
   return {
@@ -704,6 +974,211 @@ function terminalNotifications(existing: JobNotification[] | undefined, createdA
   ];
 }
 
+function safeHostRequestSummary(request: HostAssistanceRequest): string {
+  if (request.kind === "decision") return `Human decision requested with ${request.options.length} bounded option(s)`;
+  if (request.kind === "action-recommendation") return `Action recommendation recorded for ${request.actionClass}`;
+  return `${request.contextClass} context requested (${request.dataClassification})`;
+}
+
+function requireHostRequest(job: JobRecord, requestId: string): HostAssistanceRequestSummary {
+  const request = job.hostAssistanceRequests?.find((item) => item.id === requestId);
+  if (!request) throw new Error(`Unknown Host Assistance request: ${requestId}`);
+  return request;
+}
+
+function assertHostRequestPending(job: JobRecord, request: HostAssistanceRequestSummary): void {
+  if (request.status !== "pending") throw new Error(`Host Assistance request is already ${request.status}: ${request.id}`);
+  if (request.generation !== (job.generation ?? 1)) throw new Error(`Host Assistance request generation is stale: ${request.id}`);
+  if (!(job.pendingHostRequestIds ?? []).includes(request.id)) throw new Error(`Host Assistance request is not active: ${request.id}`);
+  if (Date.parse(request.expiresAt) <= Date.now()) throw new Error(`Host Assistance request expired: ${request.id}`);
+}
+
+function acknowledgeHostRequestNotification(
+  job: JobRecord,
+  request: HostAssistanceRequestSummary,
+  acknowledgedAt: string,
+): void {
+  const notification = job.notifications?.find((item) =>
+    (item.kind === "host-assistance" || item.kind === "human-decision") &&
+    (item.hostRequestId === request.id || item.id === request.notificationId),
+  );
+  if (notification) {
+    notification.status = "acknowledged";
+    notification.acknowledgedAt = acknowledgedAt;
+  }
+}
+
+function activeWaitStatus(job: JobRecord): JobStatus {
+  if (job.pendingApprovalId) return "awaiting-approval";
+  const pending = (job.hostAssistanceRequests ?? []).filter((item) =>
+    (job.pendingHostRequestIds ?? []).includes(item.id) && item.status === "pending",
+  );
+  if (pending.some((item) => item.kind === "decision")) return "awaiting-decision";
+  if (pending.length > 0) return "awaiting-host";
+  return "running";
+}
+
+function normalizeHostAssistanceResponse(
+  record: HostAssistanceRecord,
+  input: unknown,
+): HostAssistanceResult {
+  const value = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  if (typeof value.requestId === "string" && value.requestId !== record.id) {
+    throw new Error(`Host response request correlation mismatch: ${record.id}`);
+  }
+  if (value.kind === "unavailable") {
+    const reason = ["declined", "expired", "disabled", "quota-exceeded", "policy-denied", "cancelled"].includes(String(value.reason))
+      ? value.reason as import("../core/contracts.js").HostAssistanceUnavailable["reason"]
+      : "declined";
+    const base = {
+      kind: "unavailable" as const,
+      requestId: record.id,
+      reason,
+      message: typeof value.message === "string" ? value.message.slice(0, 4_000) : "Host Assistance is unavailable.",
+      resolvedAt: new Date().toISOString(),
+    };
+    return { ...base, hash: valueHash(base) };
+  }
+  if (record.request.kind === "decision") {
+    if (typeof value.decision !== "string" || !value.decision.trim()) throw new Error("Human decision response requires a decision");
+    const base = {
+      kind: "decision" as const,
+      requestId: record.id,
+      decision: value.decision.slice(0, 4_000),
+      ...(typeof value.rationale === "string" ? { rationale: value.rationale.slice(0, 8_000) } : {}),
+      decidedAt: new Date().toISOString(),
+    };
+    return { ...base, hash: valueHash(base) };
+  }
+  if (record.request.kind === "action-recommendation") {
+    const base = {
+      kind: "action-recommendation" as const,
+      requestId: record.id,
+      status: value.status === "declined" ? "declined" as const : "recorded" as const,
+      message: typeof value.message === "string" ? value.message.slice(0, 4_000) : "Action recommendation recorded; no action was executed.",
+      recordedAt: new Date().toISOString(),
+    };
+    return { ...base, hash: valueHash(base) };
+  }
+  if (typeof value.answer !== "string" || !value.answer.trim()) throw new Error("Host context response requires an answer");
+  const retrievedAt = typeof value.retrievedAt === "string" && Number.isFinite(Date.parse(value.retrievedAt))
+    ? value.retrievedAt
+    : new Date().toISOString();
+  const claims = Array.isArray(value.claims) ? value.claims.flatMap((claim) => {
+    if (!claim || typeof claim !== "object" || Array.isArray(claim)) return [];
+    const candidate = claim as Record<string, unknown>;
+    if (typeof candidate.claim !== "string") return [];
+    return [{
+      claim: candidate.claim.slice(0, 8_000),
+      evidenceIds: stringList(candidate.evidenceIds, 100),
+      confidence: (candidate.confidence === "high" || candidate.confidence === "low" ? candidate.confidence : "medium") as "low" | "medium" | "high",
+    }];
+  }) : [];
+  const citations = Array.isArray(value.citations) ? value.citations.flatMap((citation) => {
+    if (!citation || typeof citation !== "object" || Array.isArray(citation)) return [];
+    const candidate = citation as Record<string, unknown>;
+    if (typeof candidate.id !== "string" || typeof candidate.title !== "string") return [];
+    return [{
+      id: candidate.id.slice(0, 200),
+      title: candidate.title.slice(0, 1_000),
+      ...(typeof candidate.url === "string" ? { url: candidate.url.slice(0, 4_000) } : {}),
+      ...(typeof candidate.version === "string" ? { version: candidate.version.slice(0, 500) } : {}),
+      retrievedAt: typeof candidate.retrievedAt === "string" && Number.isFinite(Date.parse(candidate.retrievedAt))
+        ? candidate.retrievedAt
+        : retrievedAt,
+    }];
+  }) : [];
+  const base = {
+    kind: "context" as const,
+    requestId: record.id,
+    answer: `[UNTRUSTED_HOST_CONTEXT]\n${value.answer.slice(0, 64_000)}`,
+    claims,
+    citations,
+    conflicts: stringList(value.conflicts, 100),
+    unknowns: stringList(value.unknowns, 100),
+    provenance: stringList(value.provenance, 100),
+    redactions: stringList(value.redactions, 100),
+    retrievedAt,
+  };
+  return { ...base, hash: valueHash(base) };
+}
+
+function stringList(value: unknown, limit: number): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string").slice(0, limit).map((item) => item.slice(0, 4_000))
+    : [];
+}
+
+function valueHash(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function responseTimestamp(result: HostAssistanceResult): string {
+  if (result.kind === "context") return result.retrievedAt;
+  if (result.kind === "decision") return result.decidedAt;
+  if (result.kind === "action-recommendation") return result.recordedAt;
+  return result.resolvedAt;
+}
+
+async function expireHostRequest(cwd: string, jobId: string, requestId: string): Promise<void> {
+  const file = await ensureHostAssistanceArtifact(await jobDirectory(cwd, jobId), requestId);
+  const record = await readRequiredJson<HostAssistanceRecord>(file);
+  const resolvedAt = new Date().toISOString();
+  const base = {
+    kind: "unavailable" as const,
+    requestId,
+    reason: "expired" as const,
+    message: "Host Assistance request expired before a response was provided.",
+    resolvedAt,
+  };
+  const response: HostAssistanceResult = { ...base, hash: valueHash(base) };
+  await updateState(cwd, (state) => {
+    const job = requireJob(state.jobs, jobId);
+    const summary = requireHostRequest(job, requestId);
+    if (summary.status !== "pending") return;
+    summary.status = "expired";
+    summary.resolvedAt = resolvedAt;
+    summary.responseHash = response.hash;
+    job.pendingHostRequestIds = (job.pendingHostRequestIds ?? []).filter((id) => id !== requestId);
+    acknowledgeHostRequestNotification(job, summary, resolvedAt);
+    job.status = activeWaitStatus(job);
+    job.updatedAt = resolvedAt;
+  });
+  await writeJson(file, { ...record, status: "expired", resolvedAt, responseHash: response.hash, response });
+}
+
+async function ensureHostAssistanceArtifact(jobDir: string, requestId: string): Promise<string> {
+  const directory = path.join(jobDir, "host-assistance");
+  const file = path.join(directory, `${requestId}.json`);
+  try {
+    await fs.access(file);
+    return file;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const pending = path.join(directory, `${requestId}.pending.json`);
+  try {
+    await fs.rename(pending, file);
+    return file;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Host Assistance request artifact is missing: ${requestId}`);
+    }
+    throw error;
+  }
+}
+
+async function abortableDelay(ms: number, signal: AbortSignal | undefined, message: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => { signal?.removeEventListener("abort", abort); resolve(); };
+    const timer = setTimeout(finish, ms);
+    const abort = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(new Error(message)); };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
 function requireApproval(job: JobRecord, approvalId: string): ApprovalRequest {
   const approval = job.approvals?.find((item) => item.id === approvalId);
   if (!approval) throw new Error(`Unknown approval: ${approvalId}`);
@@ -725,7 +1200,7 @@ async function expireApproval(cwd: string, jobId: string, approvalId: string): P
     approval.status = "expired";
     approval.resolvedAt = new Date().toISOString();
     delete job.pendingApprovalId;
-    job.status = "running";
+    job.status = activeWaitStatus(job);
     job.updatedAt = approval.resolvedAt;
   });
 }
