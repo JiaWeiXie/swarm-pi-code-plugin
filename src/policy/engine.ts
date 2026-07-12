@@ -22,6 +22,72 @@ export interface PolicyClassifier {
   classify(action: PolicyAction, snapshot: PolicySnapshot, signal?: AbortSignal): Promise<PolicyDecision>;
 }
 
+export type ClassifierCacheSource = "miss" | "hit" | "coalesced";
+
+export interface PolicyDecisionMetadata {
+  classifierCache?: ClassifierCacheSource;
+}
+
+interface ClassifierCacheEntry {
+  decision: PolicyDecision;
+  createdAt: number;
+  expiresAt: number;
+}
+
+/** A bounded, job-scoped cache for validated classifier decisions. */
+export class ClassifierDecisionCache {
+  private readonly entries = new Map<string, ClassifierCacheEntry>();
+
+  constructor(
+    private readonly ttlMs = 5 * 60_000,
+    private readonly maxEntries = 256,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  key(actionFingerprint: string, snapshot: PolicySnapshot): string {
+    return `${snapshot.hash}:${actionFingerprint}`;
+  }
+
+  get(key: string): PolicyDecision | null {
+    this.prune();
+    const entry = this.entries.get(key);
+    if (!entry) return null;
+    return structuredClone(entry.decision);
+  }
+
+  set(key: string, decision: PolicyDecision): void {
+    if (decision.decision === "deny") return;
+    this.prune();
+    const createdAt = this.now();
+    this.entries.set(key, {
+      decision: structuredClone(decision),
+      createdAt,
+      expiresAt: createdAt + this.ttlMs,
+    });
+    while (this.entries.size > this.maxEntries) {
+      const oldest = this.entries.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.entries.delete(oldest);
+    }
+  }
+
+  delete(key: string): void {
+    this.entries.delete(key);
+  }
+
+  size(): number {
+    this.prune();
+    return this.entries.size;
+  }
+
+  private prune(): void {
+    const now = this.now();
+    for (const [key, entry] of this.entries) {
+      if (entry.expiresAt <= now) this.entries.delete(key);
+    }
+  }
+}
+
 export interface LeaseProvider {
   find(actionFingerprint: string, snapshot: PolicySnapshot): Promise<CapabilityLease | null>;
   consume(lease: CapabilityLease): Promise<boolean>;
@@ -31,19 +97,28 @@ export interface PolicyEngineOptions {
   snapshot: PolicySnapshot;
   classifier?: PolicyClassifier;
   leases?: LeaseProvider;
-  onDecision?: (action: PolicyAction, decision: PolicyDecision, fingerprint: string) => Promise<void>;
+  classifierCache?: ClassifierDecisionCache;
+  onDecision?: (
+    action: PolicyAction,
+    decision: PolicyDecision,
+    fingerprint: string,
+    metadata?: PolicyDecisionMetadata,
+  ) => Promise<void>;
 }
 
 export class PolicyEngine {
   readonly snapshot: PolicySnapshot;
   private readonly classifier: PolicyClassifier | undefined;
   private readonly leases: LeaseProvider | undefined;
+  private readonly classifierCache: ClassifierDecisionCache;
+  private readonly classifierInflight = new Map<string, Promise<PolicyDecision>>();
   private readonly onDecision: PolicyEngineOptions["onDecision"] | undefined;
 
   constructor(options: PolicyEngineOptions) {
     this.snapshot = options.snapshot;
     this.classifier = options.classifier;
     this.leases = options.leases;
+    this.classifierCache = options.classifierCache ?? new ClassifierDecisionCache();
     this.onDecision = options.onDecision;
   }
 
@@ -97,24 +172,69 @@ export class PolicyEngine {
         : decision("deny", "high", capabilities, "Classifier unavailable and no approval channel exists.", this.snapshot);
       return this.record(action, fallback, fingerprint);
     }
+
+    const cacheKey = this.classifierCache.key(fingerprint, this.snapshot);
+    const cached = this.classifierCache.get(cacheKey);
+    if (cached) {
+      try {
+        const validated = validateClassifierDecision(cached, capabilities, this.snapshot);
+        if (validated.decision !== "deny") {
+          return this.record(action, validated, fingerprint, { classifierCache: "hit" });
+        }
+      } catch {
+        this.classifierCache.delete(cacheKey);
+      }
+    }
+
+    const inflight = this.classifierInflight.get(cacheKey);
+    if (inflight) {
+      try {
+        const classified = await inflight;
+        return this.record(action, classified, fingerprint, { classifierCache: "coalesced" });
+      } catch (error) {
+        const fallback = classifierFallback(capabilities, this.snapshot, error);
+        return this.record(action, fallback, fingerprint, { classifierCache: "coalesced" });
+      }
+    }
+
+    const classification = this.classify(action, signal);
+    this.classifierInflight.set(cacheKey, classification);
     try {
-      const classified = validateClassifierDecision(
-        await this.classifier.classify(action, this.snapshot, signal), capabilities, this.snapshot,
-      );
-      return this.record(action, classified, fingerprint);
+      const classified = await classification;
+      if (classified.decision !== "deny") this.classifierCache.set(cacheKey, classified);
+      return this.record(action, classified, fingerprint, { classifierCache: "miss" });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const fallback = this.snapshot.approvalMode === "wait"
-        ? approvalDecision(capabilities, `Classifier failed: ${message}`, this.snapshot)
-        : decision("deny", "high", capabilities, `Classifier failed closed: ${message}`, this.snapshot);
-      return this.record(action, fallback, fingerprint);
+      return this.record(action, classifierFallback(capabilities, this.snapshot, error), fingerprint, { classifierCache: "miss" });
+    } finally {
+      if (this.classifierInflight.get(cacheKey) === classification) this.classifierInflight.delete(cacheKey);
     }
   }
 
-  private async record(action: PolicyAction, value: PolicyDecision, fingerprint: string): Promise<PolicyDecision> {
-    await this.onDecision?.(action, value, fingerprint);
+  private async classify(action: PolicyAction, signal?: AbortSignal): Promise<PolicyDecision> {
+    const classified = await this.classifier!.classify(action, this.snapshot, signal);
+    return validateClassifierDecision(classified, capabilitiesFor(action), this.snapshot);
+  }
+
+  private async record(
+    action: PolicyAction,
+    value: PolicyDecision,
+    fingerprint: string,
+    metadata?: PolicyDecisionMetadata,
+  ): Promise<PolicyDecision> {
+    await this.onDecision?.(action, value, fingerprint, metadata);
     return value;
   }
+}
+
+function classifierFallback(
+  capabilities: Capability[],
+  snapshot: PolicySnapshot,
+  error: unknown,
+): PolicyDecision {
+  const message = error instanceof Error ? error.message : String(error);
+  return snapshot.approvalMode === "wait"
+    ? approvalDecision(capabilities, `Classifier failed: ${message}`, snapshot)
+    : decision("deny", "high", capabilities, `Classifier failed closed: ${message}`, snapshot);
 }
 
 export function actionFingerprint(action: PolicyAction): string {

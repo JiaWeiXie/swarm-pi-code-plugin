@@ -345,6 +345,12 @@ function parseProviderProfile(value: unknown): ProviderProfile {
     if (definition) {
       const field = definition.fields.find((candidate) => candidate.id === key);
       if (!field || field.secret) throw new Error(`unsupported setting for ${provider}: ${key}`);
+      if (field.type === "select" && !field.options?.some((option) => option.value === settings[key])) {
+        throw new Error(`invalid option for ${provider}: ${key}`);
+      }
+      if (field.visibleWhen?.field === "authMethod" && field.visibleWhen.equals !== auth.method) {
+        throw new Error(`setting ${key} is unavailable for ${provider} authentication method ${auth.method}`);
+      }
       if (field.type === "url") settings[key] = safeProfileUrl(settings[key]!, provider, auth.method);
     }
   }

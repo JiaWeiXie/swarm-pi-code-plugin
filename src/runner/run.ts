@@ -5,6 +5,7 @@ import { isIP } from "node:net";
 
 import type {
   ApprovalRequest,
+  JobAuditExportV1,
   DelegationSpec,
   Host,
   PolicyDecision,
@@ -45,8 +46,15 @@ import {
 import { createWorkerSession } from "../pi/runtime.js";
 import { createSandboxRunner, type SandboxRunner } from "../sandbox/runner.js";
 import { PiPolicyClassifier } from "../policy/classifier.js";
-import { PolicyEngine, actionFingerprint, type PolicyAction, type PolicyClassifier } from "../policy/engine.js";
+import {
+  ClassifierDecisionCache,
+  PolicyEngine,
+  actionFingerprint,
+  type PolicyAction,
+  type PolicyClassifier,
+} from "../policy/engine.js";
 import { loadRepositoryDenyRules } from "../policy/project-policy.js";
+import { exportJobAudit } from "../audit/export.js";
 import {
   acknowledgeJob,
   attachJobProcess,
@@ -137,6 +145,7 @@ export interface RunnerDependencies {
 
 export type RunnerOutput =
   | WorkerResult
+  | JobAuditExportV1
   | { event: "accepted"; jobId: string; status: "queued"; executionMode: "background" }
   | { event: "wait-timed-out"; jobId: string; status: string }
   | { event: "approval-required"; jobId: string; status: "awaiting-approval"; approval: ApprovalRequest }
@@ -474,6 +483,8 @@ async function handleJobs(args: RunnerArguments, cwd: string): Promise<RunnerOut
       const snapshot = await getJob(cwd, args.jobId!);
       return { job: publicJob(snapshot.job), result: snapshot.result };
     }
+    case "export":
+      return exportJobAudit(cwd, args.jobId!);
     case "wait":
       return waitForJob(cwd, args.jobId!, args.waitTimeoutMs);
     case "cancel":
@@ -767,8 +778,9 @@ async function runStartedJob(options: {
     const engine = new PolicyEngine({
       snapshot: options.policySnapshot,
       ...(classifier ? { classifier } : {}),
+      classifierCache: new ClassifierDecisionCache(),
       leases: createJobLeaseProvider(options.stateCwd, jobId),
-      onDecision: async (action, decision, fingerprint) => {
+      onDecision: async (action, decision, fingerprint, metadata) => {
         if (decision.decision === "allow") metrics.allowed += 1;
         else if (decision.decision === "deny") metrics.denied += 1;
         else metrics.approvals += 1;
@@ -784,6 +796,7 @@ async function runStartedJob(options: {
           risk: decision.risk,
           reason: decision.reason.slice(0, 500),
           ...(options.policySnapshot.adaptivePolicy.diagnostics ? { action: summarizePolicyAction(action) } : {}),
+          ...(metadata?.classifierCache ? { classifierCache: metadata.classifierCache } : {}),
           model: decision.model,
           policyHash: decision.policyHash,
         });

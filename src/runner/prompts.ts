@@ -16,6 +16,8 @@ const TASK_CONTEXT: Record<TaskKind, string> = {
   setup: "Configure project-local dependencies and development tooling. Never install globally or modify host configuration.",
 };
 
+export const WORKER_PROMPT_VERSION = 1;
+
 export function buildWorkerPrompt(options: {
   host: Host;
   kind: TaskKind;
@@ -28,6 +30,7 @@ export function buildWorkerPrompt(options: {
     options.profile?.dirs?.length ? `Directories in scope: ${options.profile.dirs.join(", ")}` : "",
   ].filter(Boolean);
   return [
+    `[PROMPT]\nversion=${WORKER_PROMPT_VERSION}`,
     `[HOST]\n${HOST_CONTEXT[options.host]}`,
     `[TASK]\n${TASK_CONTEXT[options.kind]}`,
     options.perspective ? `[PERSPECTIVE]\n${options.perspective}` : "",

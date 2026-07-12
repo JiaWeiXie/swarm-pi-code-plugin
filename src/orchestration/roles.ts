@@ -129,9 +129,23 @@ export function createPolicySnapshot(input: {
   };
   return {
     ...canonical,
-    hash: createHash("sha256").update(JSON.stringify(canonical)).digest("hex"),
+    hash: policySnapshotHash(canonical),
     createdAt,
   };
+}
+
+export function policySnapshotHash(snapshot: Pick<PolicySnapshot, "version" | "sandboxMode" | "approvalMode" | "rolePolicy" | "escalationPolicy" | "adaptivePolicy">): string {
+  const canonical = {
+    version: snapshot.version,
+    sandboxMode: snapshot.sandboxMode,
+    approvalMode: snapshot.approvalMode,
+    rolePolicy: snapshot.rolePolicy,
+    ...(snapshot.escalationPolicy ? { escalationPolicy: snapshot.escalationPolicy } : {}),
+    adaptivePolicy: snapshot.adaptivePolicy,
+    ...("effectiveProjectPolicy" in snapshot ? { effectiveProjectPolicy: snapshot.effectiveProjectPolicy } : {}),
+    ...("scopeHash" in snapshot ? { scopeHash: snapshot.scopeHash } : {}),
+  };
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
 export function normalizeAdaptivePolicy(

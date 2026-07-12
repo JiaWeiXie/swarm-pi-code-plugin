@@ -226,7 +226,29 @@ node scripts/pi-runner.mjs jobs materialize --job <job-id> --target /path/to/new
 
 已驗證的隔離 implementation artifact 可以省略 `--target`，將 patch 套用回原 workspace。Materialization 會驗證原始 HEAD 與 preserved paths、不建立 commit，套用失敗時會回復 patch。
 
-`jobs wait` 不會改變 worker 的 deadline。等待逾時會以 exit code `3` 結束；遇到 `awaiting-approval` 會以 `4` 結束，並讓仍在執行的 worker 等待核准。核准通知與 terminal notification 分開確認。Capability lease 會綁定 job generation、policy hash、action fingerprint 與有效期限。
+Job status 與 `jobs wait` exit code 表達的是不同層次：status 是持久化的 Job 生命週期；exit code 也可能只是通知 Host 需要使用者介入，此時 Job 仍然存活。
+
+| Job status | 終止狀態 | 意義 | Host 應採取的動作 |
+| --- | --- | --- | --- |
+| `queued` | 否 | Job 已持久化，正在等待 worker。 | 繼續有限時間輪詢。 |
+| `running` | 否 | Worker 正在執行。可查看 `phase` 與 progress timestamp。 | 繼續有限時間輪詢；長時間執行時提供取消方式。 |
+| `awaiting-approval` | 否 | Worker 因政策核准請求而暫停。 | 顯示核准內容，取得明確的 approve 或 deny 決定。 |
+| `succeeded` | 是 | 執行成功完成。 | 檢查 verification 與可交付 artifact。 |
+| `failed` | 是 | 執行或 verification 失敗。 | 查看 `errorCode`、`error` 與 verification 詳情。 |
+| `cancelled` | 是 | 取消已完成。 | 保留回傳的 side effects 或復原指示。 |
+| `timed-out` | 是 | Worker deadline 已到期。 | 檢查結果，確認適合重試後才建立新 Job。 |
+| `orphaned` | 是 | Worker 或 lease 在完成前消失。 | 檢查 heartbeat 與 lease 診斷，不得重用過期核准。 |
+
+| Exit code | Result/event | 意義 |
+| --- | --- | --- |
+| `0` | 成功的 command/result | 指令成功完成。 |
+| `1` | `success: false` | Job 或要求的操作產生真正的失敗結果。 |
+| `2` | `system-error` 或參數錯誤 | CLI 無法執行要求。 |
+| `3` | `wait-timed-out` | 只有本次有限時間等待結束；worker deadline 與 Job 都不受影響。 |
+| `4` | `approval-required` | 不是終止失敗；存活的 worker 正在等待明確核准或拒絕。 |
+| `5` | `setup-required` 或 `workspace-action-required` | 繼續執行前需要完成設定或 workspace 決策。 |
+
+核准通知與 terminal notification 分開確認。Capability lease 會綁定 job generation、policy hash、action fingerprint 與有效期限。
 
 ### 建立新專案與開發環境
 

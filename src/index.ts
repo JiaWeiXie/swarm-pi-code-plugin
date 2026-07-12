@@ -27,6 +27,13 @@ export type {
   WorkspaceDisposition,
   WorkspaceStrategy,
   ScaffoldSpec,
+  AuditJobSummary,
+  AuditRequestSummary,
+  AuditPolicyEvent,
+  AuditApproval,
+  AuditLease,
+  AuditResultSummary,
+  JobAuditExportV1,
 } from "./core/contracts.js";
 export { main } from "./cli.js";
 export { executeSession, notImplementedResult } from "./pi/execute.js";
@@ -47,6 +54,7 @@ export * from "./policy/project-policy.js";
 export * from "./state/jobs.js";
 export * from "./state/state.js";
 export * from "./state/model-config.js";
+export * from "./audit/export.js";
 export { parseArguments } from "./runner/args.js";
 export { spawnBackgroundWorker } from "./runner/background.js";
 export { buildWorkerPrompt } from "./runner/prompts.js";

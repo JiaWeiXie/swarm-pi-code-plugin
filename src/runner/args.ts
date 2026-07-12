@@ -11,7 +11,7 @@ import { isThinkingLevel, isWorkerRole } from "../orchestration/roles.js";
 
 export type RunnerCommand = "init" | "status" | "doctor" | "resume" | "models" | "providers" | "configure" | "roles" | "jobs" | "__worker" | TaskKind;
 export type ReviewScope = "auto" | "working-tree" | "branch";
-export type JobsAction = "list" | "status" | "wait" | "cancel" | "acknowledge" | "approvals" | "approve" | "deny" | "cleanup" | "materialize";
+export type JobsAction = "list" | "status" | "wait" | "cancel" | "acknowledge" | "approvals" | "approve" | "deny" | "cleanup" | "materialize" | "export";
 
 export interface RunnerArguments {
   command: RunnerCommand;
@@ -47,6 +47,7 @@ export interface RunnerArguments {
   approvalScope?: "once" | "job";
   notificationId?: string;
   discard?: boolean;
+  audit?: boolean;
   target?: string;
   continuationId?: string;
   smokeTest?: boolean;
@@ -184,6 +185,9 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--discard":
         parsed.discard = true;
         break;
+      case "--audit":
+        parsed.audit = true;
+        break;
       case "--base":
         parsed.base = readValue(argv, ++index, argument);
         break;
@@ -235,6 +239,7 @@ export function parseArguments(argv: string[]): RunnerArguments {
     throw new Error("scaffold requires --spec-file and --target");
   }
   if (command === "resume" && !parsed.continuationId) throw new Error("resume requires --continuation");
+  if (parsed.audit && command !== "jobs") throw new Error("--audit is only supported by jobs export");
   if (parsed.adoptExisting && command !== "scaffold") throw new Error("--adopt-existing is only supported by scaffold");
   if (parsed.smokeTest && command !== "doctor") throw new Error("--smoke-test is only supported by doctor");
   if ((parsed.executionMode || parsed.timeoutMs || parsed.role || parsed.thinkingLevel || parsed.approvalMode || parsed.specFile) && !isTaskCommand(command)) {
@@ -256,7 +261,7 @@ function isTaskCommand(command: RunnerCommand): command is TaskKind {
 function parseJobsAction(value: string | undefined): JobsAction {
   if (value === "list" || value === "status" || value === "wait" ||
       value === "cancel" || value === "acknowledge" || value === "approvals" ||
-      value === "approve" || value === "deny" || value === "cleanup") return value;
+      value === "approve" || value === "deny" || value === "cleanup" || value === "export") return value;
   if (value === "materialize") return value;
   throw new Error(`Unknown or missing jobs action: ${value ?? "<none>"}`);
 }
@@ -272,6 +277,12 @@ function parseRolesAction(value: string | undefined): "list" {
 }
 
 function validateJobsArguments(args: RunnerArguments): void {
+  if (args.audit && args.jobsAction !== "export") {
+    throw new Error("--audit is only supported by jobs export");
+  }
+  if (args.jobsAction === "export" && !args.audit) {
+    throw new Error("jobs export requires --audit");
+  }
   if (args.jobsAction !== "list" && !args.jobId) {
     throw new Error(`jobs ${args.jobsAction} requires --job`);
   }

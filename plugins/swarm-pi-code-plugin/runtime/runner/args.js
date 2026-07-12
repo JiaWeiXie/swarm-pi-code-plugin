@@ -126,6 +126,9 @@ export function parseArguments(argv) {
             case "--discard":
                 parsed.discard = true;
                 break;
+            case "--audit":
+                parsed.audit = true;
+                break;
             case "--base":
                 parsed.base = readValue(argv, ++index, argument);
                 break;
@@ -173,6 +176,8 @@ export function parseArguments(argv) {
     }
     if (command === "resume" && !parsed.continuationId)
         throw new Error("resume requires --continuation");
+    if (parsed.audit && command !== "jobs")
+        throw new Error("--audit is only supported by jobs export");
     if (parsed.adoptExisting && command !== "scaffold")
         throw new Error("--adopt-existing is only supported by scaffold");
     if (parsed.smokeTest && command !== "doctor")
@@ -194,7 +199,7 @@ function isTaskCommand(command) {
 function parseJobsAction(value) {
     if (value === "list" || value === "status" || value === "wait" ||
         value === "cancel" || value === "acknowledge" || value === "approvals" ||
-        value === "approve" || value === "deny" || value === "cleanup")
+        value === "approve" || value === "deny" || value === "cleanup" || value === "export")
         return value;
     if (value === "materialize")
         return value;
@@ -211,6 +216,12 @@ function parseRolesAction(value) {
     throw new Error(`Unknown or missing roles action: ${value ?? "<none>"}`);
 }
 function validateJobsArguments(args) {
+    if (args.audit && args.jobsAction !== "export") {
+        throw new Error("--audit is only supported by jobs export");
+    }
+    if (args.jobsAction === "export" && !args.audit) {
+        throw new Error("jobs export requires --audit");
+    }
     if (args.jobsAction !== "list" && !args.jobId) {
         throw new Error(`jobs ${args.jobsAction} requires --job`);
     }

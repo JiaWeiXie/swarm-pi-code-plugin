@@ -107,6 +107,9 @@ export function providerEnvironmentOverlays(
       if (!destination?.key || (destination.kind !== "profile" && destination.kind !== "credential-env")) {
         continue;
       }
+      if (field.visibleWhen?.field === "authMethod" && field.visibleWhen.equals !== profile.auth.method) {
+        continue;
+      }
       const value = profile.settings[field.id];
       if (value) overlay[destination.key] = value;
     }

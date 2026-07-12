@@ -21,6 +21,7 @@ export type ProviderAuthMethod = "api-key" | "oauth" | "ambient" | "none" | "cus
 export type ProviderCategory = "common" | "subscription" | "cloud" | "local" | "custom";
 export type ProviderProtocolMode = "fixed" | "managed-per-model" | "selectable";
 export type ConnectionReadiness = "configured" | "discovered" | "verified" | "blocked";
+export type PromptCacheSupport = "native-explicit" | "native-automatic" | "implicit-only" | "protocol-dependent";
 
 export interface ProviderFieldCondition {
   field: string;
@@ -46,6 +47,16 @@ export interface ProviderFieldDefinition {
   destination?: { kind: "credential-key" | "credential-env" | "profile" | "header-literal"; key?: string };
 }
 
+export interface ProviderPromptCaching {
+  support: PromptCacheSupport;
+  defaultRetention: "short" | "provider-managed";
+  extendedRetention?: {
+    value: "long";
+    duration: "1h" | "24h";
+    authMethods: ["api-key"];
+  };
+}
+
 export interface ProviderDefinition {
   id: string;
   name: string;
@@ -56,6 +67,7 @@ export interface ProviderDefinition {
   authMethods: ProviderAuthMethod[];
   defaultAuthMethod: ProviderAuthMethod;
   fields: ProviderFieldDefinition[];
+  promptCaching?: ProviderPromptCaching;
   modelSource: "pi-catalog" | "openai-models" | "anthropic-models" | "google-models" | "manual";
   configurable: boolean;
   oauthProvider?: string;
@@ -129,7 +141,27 @@ const DEFINITIONS: ProviderDefinition[] = [
         placeholder: "proj_...",
         destination: { kind: "profile", key: "OPENAI_PROJECT" },
       },
+      {
+        id: "promptCacheRetention",
+        label: "Prompt cache retention",
+        type: "select",
+        required: false,
+        secret: false,
+        advanced: true,
+        help: "Automatic uses Pi's short retention; Extended keeps supported direct API prompts cached for 24 hours.",
+        options: [
+          { value: "", label: "Automatic (short)" },
+          { value: "long", label: "Extended (24 hours)" },
+        ],
+        visibleWhen: { field: "authMethod", equals: "api-key" },
+        destination: { kind: "profile", key: "PI_CACHE_RETENTION" },
+      },
     ],
+    promptCaching: {
+      support: "native-automatic",
+      defaultRetention: "short",
+      extendedRetention: { value: "long", duration: "24h", authMethods: ["api-key"] },
+    },
   },
   {
     id: "anthropic",
@@ -152,12 +184,35 @@ const DEFINITIONS: ProviderDefinition[] = [
         placeholder: "feature-name-YYYY-MM-DD",
         destination: { kind: "header-literal", key: "Anthropic-Beta" },
       },
+      {
+        id: "promptCacheRetention",
+        label: "Prompt cache retention",
+        type: "select",
+        required: false,
+        secret: false,
+        advanced: true,
+        help: "Automatic uses Pi's short retention; Extended keeps direct API prompts cached for 1 hour.",
+        options: [
+          { value: "", label: "Automatic (short)" },
+          { value: "long", label: "Extended (1 hour)" },
+        ],
+        visibleWhen: { field: "authMethod", equals: "api-key" },
+        destination: { kind: "profile", key: "PI_CACHE_RETENTION" },
+      },
     ],
+    promptCaching: {
+      support: "native-explicit",
+      defaultRetention: "short",
+      extendedRetention: { value: "long", duration: "1h", authMethods: ["api-key"] },
+    },
     modelSource: "pi-catalog",
     configurable: true,
     oauthProvider: "anthropic",
   },
-  apiKeyProvider("google", "Google Gemini", "google-generative-ai"),
+  {
+    ...apiKeyProvider("google", "Google Gemini", "google-generative-ai"),
+    promptCaching: { support: "implicit-only", defaultRetention: "provider-managed" },
+  },
   {
     ...apiKeyProvider("openrouter", "OpenRouter", "openai-completions", { wireProtocol: "openai-chat-completions" }),
     fields: [
@@ -216,6 +271,7 @@ const DEFINITIONS: ProviderDefinition[] = [
     modelSource: "pi-catalog",
     configurable: true,
     oauthProvider: "openai-codex",
+    promptCaching: { support: "native-automatic", defaultRetention: "short" },
   },
   {
     id: "github-copilot",
@@ -310,6 +366,7 @@ const DEFINITIONS: ProviderDefinition[] = [
     ],
     modelSource: "pi-catalog",
     configurable: true,
+    promptCaching: { support: "implicit-only", defaultRetention: "provider-managed" },
   },
   ...["fireworks", "opencode", "opencode-go"].map((id): ProviderDefinition => ({
     ...apiKeyProvider(id, id === "fireworks" ? "Fireworks AI" : id === "opencode" ? "OpenCode Zen" : "OpenCode Go", "openai-completions"),
@@ -331,6 +388,7 @@ const CUSTOM_DEFINITION: ProviderDefinition = {
   fields: [],
   modelSource: "manual",
   configurable: true,
+  promptCaching: { support: "protocol-dependent", defaultRetention: "provider-managed" },
 };
 
 const BY_ID = new Map(DEFINITIONS.map((definition) => [definition.id, definition]));

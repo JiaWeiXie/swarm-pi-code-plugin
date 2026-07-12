@@ -864,16 +864,24 @@ function normalizeProviderFields(
   for (const field of definition.fields) {
     const visible = (!field.visibleWhen || field.visibleWhen.field !== "authMethod" || field.visibleWhen.equals === authMethod) &&
       (!field.secret || authMethod === "api-key");
-    if (!visible) continue;
     const raw = value[field.id];
     if (raw !== undefined && typeof raw !== "string") throw new Error(`${field.label} must be text`);
     const normalized = raw?.trim() ?? "";
+    if (field.type === "select" && normalized && !field.options?.some((option) => option.value === normalized)) {
+      throw new Error(`${field.label} has an invalid option`);
+    }
+    if (!visible) {
+      if (field.type === "select" && normalized) throw new Error(`${field.label} is unavailable for ${authMethod}`);
+      continue;
+    }
     if (normalized.length > 16_384) throw new Error(`${field.label} is too long`);
     if (field.required && !field.secret && !normalized) throw new Error(`${field.label} is required`);
     if (!normalized) continue;
     if (field.secret) secret = normalized;
     else if (field.type === "url") settings[field.id] = normalizeProviderUrl(normalized, field.label, authMethod);
-    else settings[field.id] = normalized;
+    else {
+      settings[field.id] = normalized;
+    }
   }
   if (definition.id === "azure-openai-responses" && !settings.baseUrl && !settings.resourceName) {
     throw new Error("Azure OpenAI requires an endpoint or resource name");

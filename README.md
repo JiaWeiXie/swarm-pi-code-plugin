@@ -299,10 +299,32 @@ For a verified isolated implementation artifact, omit `--target` to apply its
 patch to the original workspace. Materialization validates the original HEAD
 and preserved paths, does not create a commit, and rolls back a failed apply.
 
-`jobs wait` does not change the worker deadline. Wait timeout exits with 3;
-`awaiting-approval` exits with 4 and leaves the live worker waiting. Approval
-and terminal notifications are acknowledged independently. A lease is bound to
-the job generation, policy hash, action fingerprint, and expiry.
+Job status and `jobs wait` exit codes describe different things. Status is the
+durable job lifecycle; an exit code may instead tell the Host that user action
+is required while the job remains live.
+
+| Job status | Terminal | Meaning | Host action |
+| --- | --- | --- | --- |
+| `queued` | No | The job is durably recorded and waiting for a worker. | Continue bounded polling. |
+| `running` | No | The worker is active. Inspect `phase` and progress timestamps. | Continue bounded polling; offer cancellation for long-running work. |
+| `awaiting-approval` | No | The worker is paused on a policy approval request. | Present the approval and obtain an explicit approve or deny decision. |
+| `succeeded` | Yes | Execution completed successfully. | Inspect verification and any deliverable artifact. |
+| `failed` | Yes | Execution or verification failed. | Read `errorCode`, `error`, and verification details. |
+| `cancelled` | Yes | Cancellation completed. | Preserve any reported side effects or recovery instructions. |
+| `timed-out` | Yes | The worker deadline expired. | Inspect the result; submit a new job only if retry is appropriate. |
+| `orphaned` | Yes | The worker or its lease disappeared before completion. | Inspect heartbeat and lease diagnostics; do not reuse stale approvals. |
+
+| Exit code | Result/event | Meaning |
+| --- | --- | --- |
+| `0` | Successful command/result | The command completed successfully. |
+| `1` | Result with `success: false` | The job or requested operation reached a real failure result. |
+| `2` | `system-error` or argument error | The CLI could not execute the request. |
+| `3` | `wait-timed-out` | Only this bounded wait ended; the worker deadline and job are unchanged. |
+| `4` | `approval-required` | Not a terminal failure. The live worker is waiting for explicit approval or denial. |
+| `5` | `setup-required` or `workspace-action-required` | Setup or a workspace decision is required before execution can continue. |
+
+Approval and terminal notifications are acknowledged independently. A lease is
+bound to the job generation, policy hash, action fingerprint, and expiry.
 
 ### New projects and development setup
 

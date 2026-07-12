@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createPolicySnapshot, defaultRoleForTask, resolveRolePolicy } from "../src/orchestration/roles.js";
-import { PolicyEngine, actionFingerprint } from "../src/policy/engine.js";
+import { ClassifierDecisionCache, PolicyEngine, actionFingerprint } from "../src/policy/engine.js";
 import { loadRepositoryDenyRules } from "../src/policy/project-policy.js";
 
 test("role registry keeps task compatibility and requested thinking defaults", () => {
@@ -99,4 +99,68 @@ test("policy fingerprints are stable and repository policy can only deny", async
     rules: [{ effect: "allow", capability: "network.connect" }],
   }));
   await assert.rejects(loadRepositoryDenyRules(workspace), /only add deny/);
+});
+
+test("classifier cache reuses validated approvals but never caches denies", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-classifier-cache-"));
+  const snapshot = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    adaptivePolicy: { classifierModels: ["test/model"] },
+  });
+  const cache = new ClassifierDecisionCache();
+  let calls = 0;
+  const engine = new PolicyEngine({
+    snapshot,
+    classifierCache: cache,
+    classifier: {
+      async classify(action) {
+        calls += 1;
+        return {
+          decision: action.input.command === "deny" ? "deny" : "allow",
+          risk: action.input.command === "deny" ? "critical" : "high",
+          capabilities: ["shell.execute"],
+          reason: "classified",
+          constraints: [],
+          policyHash: snapshot.hash,
+        };
+      },
+    },
+  });
+  const bounded = { toolName: "bash", input: { command: "npm test" }, cwd: workspace };
+  assert.equal((await engine.authorize(bounded)).decision, "require-approval");
+  assert.equal((await engine.authorize(bounded)).decision, "require-approval");
+  assert.equal(calls, 1);
+
+  const denied = { toolName: "bash", input: { command: "deny" }, cwd: workspace };
+  assert.equal((await engine.authorize(denied)).decision, "deny");
+  assert.equal((await engine.authorize(denied)).decision, "deny");
+  assert.equal(calls, 3);
+});
+
+test("classifier cache coalesces concurrent calls and expires entries", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-classifier-singleflight-"));
+  const snapshot = createPolicySnapshot({ sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("executor") });
+  let now = 1_000;
+  const cache = new ClassifierDecisionCache(100, 256, () => now);
+  let calls = 0;
+  const engine = new PolicyEngine({
+    snapshot,
+    classifierCache: cache,
+    classifier: {
+      async classify() {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return { decision: "allow", risk: "high", capabilities: ["shell.execute"], reason: "classified", constraints: [], policyHash: snapshot.hash };
+      },
+    },
+  });
+  const action = { toolName: "bash", input: { command: "npm test" }, cwd: workspace };
+  const results = await Promise.all([engine.authorize(action), engine.authorize(action)]);
+  assert.deepEqual(results.map((result) => result.decision), ["require-approval", "require-approval"]);
+  assert.equal(calls, 1);
+  now += 101;
+  await engine.authorize(action);
+  assert.equal(calls, 2);
 });

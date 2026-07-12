@@ -170,7 +170,7 @@ export interface BackgroundRolePolicy {
   mechanicalExecutor: boolean;
 }
 
-export interface PolicySnapshot {
+export interface LegacyPolicySnapshot {
   version: 1;
   hash: string;
   sandboxMode: SandboxMode;
@@ -181,6 +181,56 @@ export interface PolicySnapshot {
   createdAt: string;
 }
 
+export interface PolicySnapshotV2 {
+  version: 2;
+  hash: string;
+  sandboxMode: SandboxMode;
+  approvalMode: ApprovalMode;
+  rolePolicy: RolePolicy;
+  escalationPolicy?: RolePolicy;
+  adaptivePolicy: AdaptivePolicyConfig;
+  effectiveProjectPolicy: EffectiveProjectPolicy;
+  scopeHash: string;
+  createdAt: string;
+}
+
+export type PolicySnapshot = LegacyPolicySnapshot | PolicySnapshotV2;
+
+export type ProjectOperation = "read" | "search" | "write" | "shell";
+
+export interface EffectiveProjectPolicy {
+  version: 1;
+  workspaceRoot: ".";
+  allowedTaskKinds: TaskKind[];
+  roots: Record<ProjectOperation, string[]>;
+  repositoryDenyRules: PolicyRule[];
+  scopeHash: string;
+  hash: string;
+}
+
+export interface BoundProjectPolicy {
+  effective: EffectiveProjectPolicy;
+  executionRoot: string;
+  roots: Record<ProjectOperation, string[]>;
+}
+
+export interface ProjectPolicyRejection {
+  event: "policy-rejected";
+  errorCode:
+    | "task-kind-not-allowed"
+    | "project-scope-invalid"
+    | "project-scope-violation"
+    | "policy-snapshot-invalid";
+  stage: "admission" | "preflight" | "postflight" | "materialization";
+  recoverable: boolean;
+  message: string;
+  preserved: string[];
+  nextActions: Array<{ action: string; label: string }>;
+  policyHash?: string;
+  scopeHash?: string;
+  violatingPaths?: string[];
+}
+
 export interface PolicyDecision {
   decision: PolicyDecisionKind;
   risk: RiskLevel;
@@ -188,6 +238,7 @@ export interface PolicyDecision {
   reason: string;
   constraints: string[];
   policyHash: string;
+  scopeHash?: string;
   model?: string;
 }
 
@@ -196,6 +247,7 @@ export interface ApprovalRequest {
   jobId: string;
   generation: number;
   actionFingerprint: string;
+  scopeHash?: string;
   toolName: string;
   actionSummary: string;
   decision: PolicyDecision;
@@ -213,6 +265,7 @@ export interface CapabilityLease {
   jobId: string;
   generation: number;
   policyHash: string;
+  scopeHash?: string;
   role: RoleId;
   actionFingerprint: string;
   scope: "once" | "job";
@@ -298,6 +351,139 @@ export interface WorkerResult {
     targetFingerprint?: string;
     materializedAt?: string;
   };
+}
+
+export interface AuditJobSummary {
+  id: string;
+  status: string;
+  host?: Host;
+  kind?: TaskKind;
+  executionMode?: ExecutionMode;
+  sandboxMode?: SandboxMode;
+  timeoutMs?: number;
+  model?: string;
+  role?: WorkerRoleId;
+  generation?: number;
+  phase?: JobPhase;
+  createdAt?: string;
+  startedAt?: string;
+  updatedAt?: string;
+  finishedAt?: string;
+  lastProgressAt?: string;
+}
+
+export interface AuditRequestSummary {
+  requestVersion?: 1 | 2 | 3;
+  id: string;
+  host: Host;
+  kind: TaskKind;
+  executionMode: ExecutionMode;
+  sandboxMode?: SandboxMode;
+  timeoutMs: number;
+  model?: string;
+  role?: WorkerRoleId;
+  thinkingLevel?: ThinkingLevel;
+  approvalMode?: ApprovalMode;
+  workspaceStrategy?: WorkspaceStrategy;
+  target?: string;
+  adoptExisting?: boolean;
+  providerSnapshotHash?: string;
+  createdAt: string;
+}
+
+export interface AuditPolicyEvent {
+  timestamp?: string;
+  tool?: string;
+  fingerprint?: string;
+  decision?: PolicyDecisionKind;
+  risk?: RiskLevel;
+  reason?: string;
+  action?: Record<string, unknown>;
+  classifierCache?: "miss" | "hit" | "coalesced";
+  model?: string;
+  policyHash?: string;
+}
+
+export interface AuditApproval {
+  id: string;
+  jobId: string;
+  generation: number;
+  actionFingerprint: string;
+  scopeHash?: string;
+  toolName: string;
+  actionSummary: string;
+  decision: PolicyDecision;
+  status: ApprovalRequest["status"];
+  requestedAt: string;
+  expiresAt: string;
+  resolvedAt?: string;
+  scope?: "once" | "job";
+}
+
+export interface AuditLease {
+  id: string;
+  jobId: string;
+  generation: number;
+  policyHash: string;
+  scopeHash?: string;
+  role: RoleId;
+  actionFingerprint: string;
+  scope: "once" | "job";
+  capabilities: Capability[];
+  createdAt: string;
+  expiresAt: string;
+  consumedAt?: string;
+}
+
+export interface AuditResultSummary {
+  kind: TaskKind;
+  status: WorkerStatus;
+  success: boolean;
+  model: string | null;
+  changedFiles: string[];
+  diffStat: string;
+  runtimeSideEffects?: string[];
+  verification: WorkerResult["verification"];
+  host?: Host;
+  jobId?: string;
+  attempts?: number;
+  fallbackUsed?: boolean;
+  error?: string | null;
+  errorCode?: string | null;
+  role?: WorkerRoleId;
+  requestedThinkingLevel?: ThinkingLevel;
+  effectiveThinkingLevel?: ThinkingLevel;
+  orchestrationTrace?: WorkerResult["orchestrationTrace"];
+  policySummary?: WorkerResult["policySummary"];
+  agentVerification?: { status: NonNullable<WorkerResult["agentVerification"]>["status"]; output: string; model: string | null };
+  artifact?: WorkerResult["artifact"];
+}
+
+export interface JobAuditExportV1 {
+  schema: "swarm-pi-code-plugin/job-audit";
+  version: 1;
+  exportedAt: string;
+  job: AuditJobSummary;
+  request: AuditRequestSummary;
+  policy: {
+    snapshot: PolicySnapshot | null;
+    events: AuditPolicyEvent[];
+  };
+  approvals: AuditApproval[];
+  leases: AuditLease[];
+  result: AuditResultSummary;
+  changes: { patch: string | null; sourceSha256: string | null };
+  integrity: {
+    policySnapshot: { hash: string; verified: true } | null;
+    providerSnapshot: { hash: string; verified: true } | null;
+    sourceSha256: {
+      request: string;
+      result: string;
+      prompt: string;
+      policyEvents: string | null;
+    };
+  };
+  redactions: { secrets: number; paths: number };
 }
 
 export interface AvailableModel {
