@@ -147,7 +147,15 @@ export type RunnerOutput =
   | WorkerResult
   | JobAuditExportV1
   | { event: "accepted"; jobId: string; status: "queued"; executionMode: "background" }
-  | { event: "wait-timed-out"; jobId: string; status: string }
+  | {
+      event: "wait-timed-out";
+      jobId: string;
+      status: string;
+      phase?: import("../core/contracts.js").JobPhase;
+      progressMessage?: string;
+      lastProgressAt?: string;
+      updatedAt?: string;
+    }
   | { event: "approval-required"; jobId: string; status: "awaiting-approval"; approval: ApprovalRequest }
   | { event: "setup-required"; continuationId: string; readiness: ReadinessReport }
   | {
@@ -188,6 +196,7 @@ export interface RunCommandOptions {
   spawnWorker?: (options: SpawnBackgroundWorkerOptions) => Promise<number>;
   requestOverride?: WorkerRequest;
   continuationId?: string;
+  relayWaitTimeoutMs?: number;
 }
 
 type PublicJobRecord = Omit<JobRecord, "workerToken">;
@@ -456,6 +465,28 @@ export async function runCommand(
       return failed;
     }
   }
+  if (executionMode === "supervised" && approvalMode === "wait") {
+    try {
+      const spawnWorker = options.spawnWorker ?? spawnBackgroundWorker;
+      const pid = await spawnWorker({ cwd, jobId: job.id, workerToken: job.workerToken });
+      await attachJobProcess(cwd, job.id, job.workerToken, pid);
+      return waitForManagedRelay(
+        cwd,
+        job.id,
+        options.relayWaitTimeoutMs ?? 15_000,
+        options.signal,
+      );
+    } catch (error) {
+      const failed = withMetadata(
+        failure(args.command, error instanceof Error ? error.message : String(error)),
+        host,
+        job.id,
+        0,
+      );
+      await finishJob(cwd, job.id, failed);
+      return failed;
+    }
+  }
   return runStartedJobSafely({
     args,
     cwd: executionCwd,
@@ -473,6 +504,35 @@ export async function runCommand(
     executionMode,
     ...(options.signal ? { signal: options.signal } : {}),
   });
+}
+
+async function waitForManagedRelay(
+  cwd: string,
+  jobId: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<Awaited<ReturnType<typeof waitForJob>>> {
+  if (!signal) return waitForJob(cwd, jobId, timeoutMs);
+  if (signal.aborted) {
+    await cancelJob(cwd, jobId);
+    return waitForJob(cwd, jobId, 5_000);
+  }
+  let abort!: () => void;
+  const aborted = new Promise<"aborted">((resolve) => {
+    abort = () => resolve("aborted");
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    const result = await Promise.race([
+      waitForJob(cwd, jobId, timeoutMs),
+      aborted,
+    ]);
+    if (result !== "aborted") return result;
+    await cancelJob(cwd, jobId);
+    return waitForJob(cwd, jobId, 5_000);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
 }
 
 async function handleJobs(args: RunnerArguments, cwd: string): Promise<RunnerOutput> {

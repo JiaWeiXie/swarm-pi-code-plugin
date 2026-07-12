@@ -75,7 +75,7 @@ node scripts/pi-runner.mjs orchestrate --host <host> --prompt-file <file> --json
 node scripts/pi-runner.mjs roles list --json
 node scripts/pi-runner.mjs status|doctor|resume [options] --json
 node scripts/pi-runner.mjs scaffold|setup --host <claude|codex> [options] --json
-node scripts/pi-runner.mjs jobs <list|status|wait|cancel|acknowledge|approvals|approve|deny|cleanup|materialize> [options] --json
+node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|approvals|approve|deny|cleanup|materialize> [options] --json
 ```
 
 Every worker result includes the task kind, status, success flag, selected
@@ -101,6 +101,13 @@ a heartbeat and process lease. Queries reconcile result artifacts, stale
 leases, and cancellation requests before returning state.
 While running, the job also records a durable phase and progress timestamp for
 bounded host polling.
+
+When `executionMode=supervised` uses `approvalMode=wait`, the runner starts a
+managed detached worker but keeps the request and policy semantics supervised.
+The initiating command returns within a 15-second relay window with a terminal
+result, `approval-required`, or `wait-timed-out`; the host then resumes control
+with bounded `jobs wait` calls. `jobs watch --emit ndjson` is an at-least-once
+recovery and observability stream, not a replacement for the decision relay.
 
 ## Safety and Mutation Policy
 
@@ -169,9 +176,11 @@ outside the checked-out tree.
 
 Terminal results are written before the state index is updated. Reconciliation
 repairs a crash between those writes. Every terminal job starts with a pending
-notification; a host watcher waits for the result, presents it, and then
-acknowledges it. If the watcher disappears, the next plugin delegation replays
-the pending result once.
+notification; a host presents it and then acknowledges it. `jobs watch
+--emit ndjson` replays pending approval and terminal notifications after a
+watcher restart, while the bundled SessionStart hook provides recovery context
+without approving or acknowledging anything. If the watcher disappears, the
+next plugin delegation or watch replay can recover the pending result.
 
 ## Credentials
 

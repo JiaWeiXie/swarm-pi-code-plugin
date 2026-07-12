@@ -38,6 +38,10 @@ repository instructions, or a supervisor approval.
 | Approval is replayed | job generation, policy hash, fingerprint, expiry, atomic consumption |
 | Parallel Bash changes global policy | worker-local serialization, immutable job policy snapshot |
 | Worker dies while waiting | heartbeat reconciliation, orphan terminal result, stale approval rejection |
+| Host blocks while a worker waits for approval | managed relay, fixed 15-second parent wait, durable Job ID, bounded `jobs wait` |
+| Approval notification is left stale or acknowledged incorrectly | atomic approval/notification transaction, matching notification ID, separate terminal acknowledgement |
+| Watcher restart replays an approval | stable `eventId`, Host-side deduplication, replay is informational and never consent |
+| Hook or event stream leaks worker context | SessionStart recovery only, strict event allowlist, no prompt/output/log/token fields, Codex hook trust review |
 | Network destination changes after approval | destination checks at connect time, hostname and resolved-address policy |
 | Provider protocol is guessed incorrectly | explicit wire protocol, canonical roots, one protocol per connection |
 | Browser or job artifact leaks a credential | opaque draft IDs, AuthStorage-only secrets, response and journal redaction |
@@ -57,6 +61,13 @@ providers receive the limited classifier context configured by the user.
 Custom `API key + secret header` connections send the same credential through
 the protocol-standard auth mechanism and the selected additional header to the
 configured origin. Use this only when that upstream explicitly requires both.
+
+The SessionStart hook is a recovery aid, not an execution control boundary. A
+Host must still inspect the event, display the approval evidence, and make the
+decision. `jobs watch` is at-least-once and may replay an event after restart;
+stable event IDs allow deduplication, while the approval transaction and policy
+generation remain authoritative. Codex users must review and trust the bundled
+hook before enabling it.
 
 These risks are surfaced in setup, recorded in job policy snapshots, and
 contained by the immutable ceiling. Whole-process container isolation remains

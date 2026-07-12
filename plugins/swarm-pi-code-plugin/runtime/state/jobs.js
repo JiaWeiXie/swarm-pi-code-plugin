@@ -154,6 +154,14 @@ export async function finishJob(cwd, jobId, result, diff) {
 async function applyResultToState(cwd, jobId, finalResult, finishedAt = new Date().toISOString()) {
     await updateState(cwd, (state) => {
         const existing = state.jobs.find((job) => job.id === jobId);
+        if (existing?.pendingApprovalId) {
+            const pending = existing.approvals?.find((approval) => approval.id === existing.pendingApprovalId);
+            if (pending?.status === "pending") {
+                pending.status = "expired";
+                pending.resolvedAt = finishedAt;
+            }
+            delete existing.pendingApprovalId;
+        }
         const summary = {
             ...(existing ?? { id: jobId }),
             id: jobId,
@@ -227,7 +235,15 @@ export async function waitForJob(cwd, jobId, waitTimeoutMs) {
             return terminalResult(snapshot.job, snapshot.job.status, `Job ${jobId} reached ${snapshot.job.status} without a result artifact.`);
         }
         if (deadline !== undefined && Date.now() >= deadline) {
-            return { event: "wait-timed-out", jobId, status: snapshot.job.status };
+            return {
+                event: "wait-timed-out",
+                jobId,
+                status: snapshot.job.status,
+                ...(snapshot.job.phase ? { phase: snapshot.job.phase } : {}),
+                ...(snapshot.job.progressMessage ? { progressMessage: snapshot.job.progressMessage } : {}),
+                ...(snapshot.job.lastProgressAt ? { lastProgressAt: snapshot.job.lastProgressAt } : {}),
+                ...(snapshot.job.updatedAt ? { updatedAt: snapshot.job.updatedAt } : {}),
+            };
         }
         await new Promise((resolve) => setTimeout(resolve, 500));
     }
@@ -339,6 +355,7 @@ export async function approveJob(cwd, jobId, approvalId, scope = "once") {
         };
         job.leases ??= [];
         job.leases.push(lease);
+        acknowledgeApprovalNotification(job, approval, now.toISOString());
         delete job.pendingApprovalId;
         job.status = "running";
         job.updatedAt = now.toISOString();
@@ -359,6 +376,7 @@ export async function denyJobApproval(cwd, jobId, approvalId) {
         assertApprovalPending(job, approval, now);
         approval.status = "denied";
         approval.resolvedAt = now.toISOString();
+        acknowledgeApprovalNotification(job, approval, approval.resolvedAt);
         delete job.pendingApprovalId;
         job.status = "running";
         job.updatedAt = now.toISOString();
@@ -540,6 +558,15 @@ async function expireApproval(cwd, jobId, approvalId) {
         job.status = "running";
         job.updatedAt = approval.resolvedAt;
     });
+}
+function acknowledgeApprovalNotification(job, approval, acknowledgedAt) {
+    const notification = job.notifications?.find((item) => item.kind === "approval" &&
+        (item.approvalId === approval.id || item.id === approval.notificationId));
+    if (notification) {
+        notification.status = "acknowledged";
+        notification.acknowledgedAt = acknowledgedAt;
+    }
+    approval.notification = "acknowledged";
 }
 function requireJob(jobs, jobId) {
     const job = jobs.find((candidate) => candidate.id === jobId);

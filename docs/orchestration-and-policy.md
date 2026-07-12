@@ -112,10 +112,12 @@ terminal-job approval is rejected. If a waiting worker disappears, the job is
 orphaned and its approval cannot be applied to another worker generation.
 
 `jobs wait` returns an approval-required event when intervention is needed. A
-host with a relay or watcher submits jobs with approval mode `wait`; a host
-without a usable notification channel uses `deny` so execution cannot deadlock.
-Hosts use bounded waits and inspect the durable job phase; a detached Host relay
-is not reported as Pi background execution.
+`supervised + wait` request uses the managed relay: its durable Job remains
+supervised even though the worker is detached from the initiating process, and
+the Host regains control within 15 seconds. Hosts use bounded waits and inspect
+the durable job phase; a detached Host relay is not reported as Pi background
+execution. `jobs watch --emit ndjson` replays allowlisted events for recovery,
+but it never auto-approves or acknowledges a notification.
 
 ## Delivery
 

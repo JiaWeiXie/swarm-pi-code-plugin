@@ -6,7 +6,6 @@ import test from "node:test";
 
 import { createPolicySnapshot, resolveRolePolicy } from "../src/orchestration/roles.js";
 import {
-  acknowledgeJob,
   approveJob,
   createJobLeaseProvider,
   denyJobApproval,
@@ -52,7 +51,8 @@ test("approval transitions remain non-terminal and create a single-use lease", a
   await assert.rejects(approveJob(cwd, job.id, approval.id), /already consumed|already approved/);
   const approvalNotification = approved.job.notifications?.find((item) => item.kind === "approval");
   assert.ok(approvalNotification);
-  await acknowledgeJob(cwd, job.id, approvalNotification.id);
+  assert.equal(approvalNotification.status, "acknowledged");
+  assert.equal(approved.approval.notification, "acknowledged");
 });
 
 test("denied approvals resume the worker without issuing a lease", async () => {
@@ -66,5 +66,6 @@ test("denied approvals resume the worker without issuing a lease", async () => {
   assert.equal(denied.approval.status, "denied");
   assert.equal(denied.job.status, "running");
   assert.equal(await createJobLeaseProvider(cwd, job.id).find("deny-me", snapshot), null);
-  assert.equal((await listJobs(cwd, true)).length, 1);
+  assert.equal(denied.approval.notification, "acknowledged");
+  assert.equal((await listJobs(cwd, true)).length, 0);
 });

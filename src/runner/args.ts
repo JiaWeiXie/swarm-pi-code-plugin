@@ -11,7 +11,7 @@ import { isThinkingLevel, isWorkerRole } from "../orchestration/roles.js";
 
 export type RunnerCommand = "init" | "status" | "doctor" | "resume" | "models" | "providers" | "configure" | "roles" | "jobs" | "__worker" | TaskKind;
 export type ReviewScope = "auto" | "working-tree" | "branch";
-export type JobsAction = "list" | "status" | "wait" | "cancel" | "acknowledge" | "approvals" | "approve" | "deny" | "cleanup" | "materialize" | "export";
+export type JobsAction = "list" | "status" | "wait" | "watch" | "cancel" | "acknowledge" | "approvals" | "approve" | "deny" | "cleanup" | "materialize" | "export";
 
 export interface RunnerArguments {
   command: RunnerCommand;
@@ -48,6 +48,8 @@ export interface RunnerArguments {
   notificationId?: string;
   discard?: boolean;
   audit?: boolean;
+  emit?: "ndjson";
+  once?: boolean;
   target?: string;
   continuationId?: string;
   smokeTest?: boolean;
@@ -188,6 +190,15 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--audit":
         parsed.audit = true;
         break;
+      case "--emit": {
+        const emit = readValue(argv, ++index, argument);
+        if (emit !== "ndjson") throw new Error(`Invalid event format: ${emit}`);
+        parsed.emit = emit;
+        break;
+      }
+      case "--once":
+        parsed.once = true;
+        break;
       case "--base":
         parsed.base = readValue(argv, ++index, argument);
         break;
@@ -259,7 +270,7 @@ function isTaskCommand(command: RunnerCommand): command is TaskKind {
 }
 
 function parseJobsAction(value: string | undefined): JobsAction {
-  if (value === "list" || value === "status" || value === "wait" ||
+  if (value === "list" || value === "status" || value === "wait" || value === "watch" ||
       value === "cancel" || value === "acknowledge" || value === "approvals" ||
       value === "approve" || value === "deny" || value === "cleanup" || value === "export") return value;
   if (value === "materialize") return value;
@@ -283,7 +294,7 @@ function validateJobsArguments(args: RunnerArguments): void {
   if (args.jobsAction === "export" && !args.audit) {
     throw new Error("jobs export requires --audit");
   }
-  if (args.jobsAction !== "list" && !args.jobId) {
+  if (args.jobsAction !== "list" && args.jobsAction !== "watch" && !args.jobId) {
     throw new Error(`jobs ${args.jobsAction} requires --job`);
   }
   if (args.pendingNotifications && args.jobsAction !== "list") {
@@ -291,6 +302,15 @@ function validateJobsArguments(args: RunnerArguments): void {
   }
   if (args.waitTimeoutMs && args.jobsAction !== "wait") {
     throw new Error("--wait-timeout-ms is only supported by jobs wait");
+  }
+  if (args.emit && args.jobsAction !== "watch") {
+    throw new Error("--emit is only supported by jobs watch");
+  }
+  if (args.jobsAction === "watch" && args.emit !== "ndjson") {
+    throw new Error("jobs watch requires --emit ndjson");
+  }
+  if (args.once && args.jobsAction !== "watch") {
+    throw new Error("--once is only supported by jobs watch");
   }
   if ((args.jobsAction === "approve" || args.jobsAction === "deny") && !args.approvalId) {
     throw new Error(`jobs ${args.jobsAction} requires --approval`);

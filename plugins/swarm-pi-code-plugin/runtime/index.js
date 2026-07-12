@@ -15,6 +15,7 @@ export * from "./policy/engine.js";
 export * from "./policy/classifier.js";
 export * from "./policy/project-policy.js";
 export * from "./state/jobs.js";
+export * from "./state/job-events.js";
 export * from "./state/state.js";
 export * from "./state/model-config.js";
 export * from "./audit/export.js";

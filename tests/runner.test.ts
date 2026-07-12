@@ -9,7 +9,7 @@ import { executeSession, type RunnableSession } from "../src/pi/execute.js";
 import { describeModels, describeProviders, selectModel, type PiModel } from "../src/pi/models.js";
 import { parseArguments } from "../src/runner/args.js";
 import { runCommand, type RunnerDependencies } from "../src/runner/run.js";
-import { getJob, readJobRequest, startJob } from "../src/state/jobs.js";
+import { approveJob, cancelJob, finishJob, getJob, readJobRequest, requestJobApproval, startJob } from "../src/state/jobs.js";
 import { defaultModelConfiguration } from "../src/state/model-config.js";
 import { detectSandboxAvailability } from "../src/sandbox/availability.js";
 import { resolveStateDir, setSandboxMode, updateState } from "../src/state/state.js";
@@ -152,6 +152,8 @@ test("argument parsing requires host and prompt file for ask", () => {
     reset: false,
     json: true,
   });
+  assert.equal(parseArguments(["jobs", "watch", "--emit", "ndjson", "--once"]).once, true);
+  assert.throws(() => parseArguments(["jobs", "watch"]), /--emit ndjson/);
 });
 
 test("model helpers expose stable provider/model identifiers", () => {
@@ -1197,4 +1199,79 @@ test("jobs commands expose list, status, wait timeout, and acknowledge", async (
     json: true,
   }, workspace);
   assert.equal("event" in waited && waited.event, "wait-timed-out");
+});
+
+test("supervised wait uses a managed relay and returns approval without blocking the Host", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-managed-relay-"));
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Inspect this workspace",
+    createSession: async () => { throw new Error("managed relay must not run the worker in the Host process"); },
+  };
+  const result = await runCommand({
+    command: "ask",
+    host: "codex",
+    promptFile: "prompt.md",
+    approvalMode: "wait",
+    reconfigure: false,
+    reset: false,
+    json: true,
+  }, workspace, dependencies, {
+    relayWaitTimeoutMs: 2_000,
+    spawnWorker: async ({ cwd, jobId, workerToken }) => {
+      setTimeout(() => {
+        void requestJobApproval(cwd, jobId, workerToken, {
+          actionFingerprint: "managed-relay-fingerprint",
+          toolName: "shell",
+          actionSummary: "run a supervised command",
+          decision: {
+            decision: "require-approval",
+            risk: "high",
+            capabilities: ["shell.execute"],
+            reason: "The worker requested a supervised shell action.",
+            constraints: [],
+            policyHash: "relay-policy",
+          },
+          expiresAt: new Date(Date.now() + 30_000).toISOString(),
+        });
+      }, 20);
+      return 999_999;
+    },
+  });
+
+  assert.equal("event" in result && result.event, "approval-required");
+  assert.equal("status" in result && result.status, "awaiting-approval");
+  const jobId = "jobId" in result ? result.jobId : "";
+  const snapshot = await getJob(workspace, jobId);
+  assert.equal(snapshot.job.executionMode, "supervised");
+  assert.equal(snapshot.job.status, "awaiting-approval");
+  await cancelJob(workspace, jobId);
+});
+
+test("managed relay timeout returns progress context and leaves the Job durable", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-managed-timeout-"));
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Wait for the worker",
+    createSession: async () => { throw new Error("worker should be detached"); },
+  };
+  const result = await runCommand({
+    command: "ask",
+    host: "codex",
+    promptFile: "prompt.md",
+    approvalMode: "wait",
+    reconfigure: false,
+    reset: false,
+    json: true,
+  }, workspace, dependencies, {
+    relayWaitTimeoutMs: 1_000,
+    spawnWorker: async () => 999_998,
+  });
+
+  assert.equal("event" in result && result.event, "wait-timed-out");
+  assert.equal("phase" in result && result.phase, "queued");
+  assert.equal("progressMessage" in result && typeof result.progressMessage, "string");
+  const jobId = "jobId" in result ? result.jobId : "";
+  assert.equal((await getJob(workspace, jobId)).job.status, "queued");
+  await cancelJob(workspace, jobId);
 });

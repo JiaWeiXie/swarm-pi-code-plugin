@@ -252,14 +252,17 @@ lease. The host must inspect the result and run verification before delivery.
 Timeouts, cancellation, and failures may leave partial changes; they are
 reported and are never silently rolled back.
 
-Delegated commands default to supervised execution. The host relay owns the Pi
-process until a terminal result is recorded, while the main session can keep
-working. Read-only commands also accept durable background execution:
+Delegated commands default to supervised execution. With
+`--approval-mode wait`, the managed host relay starts a durable worker and
+returns within 15 seconds with a terminal result, `approval-required`, or
+`wait-timed-out`; the Host then keeps control with bounded `jobs wait` calls.
+This keeps approval decisions visible instead of leaving one blocked shell
+command. Read-only commands also accept durable background execution:
 
 ```bash
 node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/question.md \
   --execution-mode background --json
-node scripts/pi-runner.mjs jobs wait --job <job-id> --json
+node scripts/pi-runner.mjs jobs wait --job <job-id> --wait-timeout-ms 15000 --json
 ```
 
 The host relay uses bounded waits and reports the durable job phase, elapsed
@@ -285,7 +288,9 @@ Durable job inspection and control are available through:
 node scripts/pi-runner.mjs jobs list --json
 node scripts/pi-runner.mjs jobs list --pending-notifications --json
 node scripts/pi-runner.mjs jobs status --job <job-id> --json
-node scripts/pi-runner.mjs jobs wait --job <job-id> --wait-timeout-ms 5000 --json
+node scripts/pi-runner.mjs jobs wait --job <job-id> --wait-timeout-ms 15000 --json
+node scripts/pi-runner.mjs jobs watch --emit ndjson --once
+node scripts/pi-runner.mjs jobs watch --emit ndjson --job <job-id>
 node scripts/pi-runner.mjs jobs cancel --job <job-id> --json
 node scripts/pi-runner.mjs jobs acknowledge --job <job-id> --json
 node scripts/pi-runner.mjs jobs approvals --job <job-id> --json
@@ -324,7 +329,18 @@ is required while the job remains live.
 | `5` | `setup-required` or `workspace-action-required` | Setup or a workspace decision is required before execution can continue. |
 
 Approval and terminal notifications are acknowledged independently. A lease is
-bound to the job generation, policy hash, action fingerprint, and expiry.
+bound to the job generation, policy hash, action fingerprint, and expiry. An
+approve or deny operation atomically resolves that approval and acknowledges
+only its matching approval notification. Terminal notifications remain pending
+until the Host has shown and explicitly acknowledged the terminal result.
+
+`jobs watch --emit ndjson` polls canonical state and replays pending events so a
+Host can recover after a restart. Events are allowlisted and exclude worker
+tokens, provider credentials, raw prompts, complete agent output, and logs.
+`--once` is used by the optional SessionStart recovery hook; it does not make
+approval decisions or acknowledge notifications. Hosts must deduplicate replayed
+events by `eventId` and must never auto-approve because a timeout, hook, or
+replay occurred.
 
 ### New projects and development setup
 
@@ -397,11 +413,13 @@ content, then run `resume --continuation <id>` to continue the preserved task.
 
 ### A delegated job stopped without a notification
 
-Run `jobs list --pending-notifications --json`. Terminal results are durable and
+Run `jobs watch --emit ndjson --once` (or
+`jobs list --pending-notifications --json`). Terminal results are durable and
 remain pending until acknowledged. A stale job whose process disappeared is
 reconciled to `orphaned`; a worker stopped after cancellation is reconciled to
 `cancelled`. Host adapters check this pending queue before starting another
-delegation.
+delegation. A recovered approval still requires the user to see the risk and
+choose approve or deny; replay is never consent.
 
 ### A linked worktree cannot see the configuration
 

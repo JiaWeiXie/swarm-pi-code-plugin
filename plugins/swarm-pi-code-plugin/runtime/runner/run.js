@@ -267,6 +267,19 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
             return failed;
         }
     }
+    if (executionMode === "supervised" && approvalMode === "wait") {
+        try {
+            const spawnWorker = options.spawnWorker ?? spawnBackgroundWorker;
+            const pid = await spawnWorker({ cwd, jobId: job.id, workerToken: job.workerToken });
+            await attachJobProcess(cwd, job.id, job.workerToken, pid);
+            return waitForManagedRelay(cwd, job.id, options.relayWaitTimeoutMs ?? 15_000, options.signal);
+        }
+        catch (error) {
+            const failed = withMetadata(failure(args.command, error instanceof Error ? error.message : String(error)), host, job.id, 0);
+            await finishJob(cwd, job.id, failed);
+            return failed;
+        }
+    }
     return runStartedJobSafely({
         args,
         cwd: executionCwd,
@@ -284,6 +297,32 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         executionMode,
         ...(options.signal ? { signal: options.signal } : {}),
     });
+}
+async function waitForManagedRelay(cwd, jobId, timeoutMs, signal) {
+    if (!signal)
+        return waitForJob(cwd, jobId, timeoutMs);
+    if (signal.aborted) {
+        await cancelJob(cwd, jobId);
+        return waitForJob(cwd, jobId, 5_000);
+    }
+    let abort;
+    const aborted = new Promise((resolve) => {
+        abort = () => resolve("aborted");
+        signal.addEventListener("abort", abort, { once: true });
+    });
+    try {
+        const result = await Promise.race([
+            waitForJob(cwd, jobId, timeoutMs),
+            aborted,
+        ]);
+        if (result !== "aborted")
+            return result;
+        await cancelJob(cwd, jobId);
+        return waitForJob(cwd, jobId, 5_000);
+    }
+    finally {
+        signal.removeEventListener("abort", abort);
+    }
 }
 async function handleJobs(args, cwd) {
     switch (args.jobsAction) {
