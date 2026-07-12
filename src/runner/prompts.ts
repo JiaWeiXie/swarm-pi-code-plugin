@@ -1,5 +1,4 @@
 import type { Host, TaskKind } from "../core/contracts.js";
-import type { SwarmProfile } from "../state/state.js";
 
 const HOST_CONTEXT: Record<Host, string> = {
   claude: "You are a delegated Pi worker running under Claude Code.",
@@ -22,19 +21,20 @@ export function buildWorkerPrompt(options: {
   host: Host;
   kind: TaskKind;
   prompt: string;
-  profile?: SwarmProfile | undefined;
+  projectGoal?: string | undefined;
+  renderedProjectPolicy?: string | undefined;
   perspective?: string | undefined;
 }): string {
-  const profileLines = [
-    options.profile?.goal ? `Project goal: ${options.profile.goal}` : "",
-    options.profile?.dirs?.length ? `Directories in scope: ${options.profile.dirs.join(", ")}` : "",
+  const projectLines = [
+    options.projectGoal ? `Project goal: ${options.projectGoal}` : "",
+    options.renderedProjectPolicy ? options.renderedProjectPolicy : "",
   ].filter(Boolean);
   return [
     `[PROMPT]\nversion=${WORKER_PROMPT_VERSION}`,
     `[HOST]\n${HOST_CONTEXT[options.host]}`,
     `[TASK]\n${TASK_CONTEXT[options.kind]}`,
     options.perspective ? `[PERSPECTIVE]\n${options.perspective}` : "",
-    profileLines.length ? `[PROJECT]\n${profileLines.join("\n")}` : "",
+    projectLines.length ? `[PROJECT]\n${projectLines.join("\n")}` : "",
     `[REQUEST]\n${options.prompt}`,
   ]
     .filter(Boolean)

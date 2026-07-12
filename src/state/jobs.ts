@@ -45,13 +45,14 @@ export interface JobStart {
   policySnapshot?: PolicySnapshot;
   workspaceStrategy?: WorkspaceStrategy;
   target?: string;
+  projectGoal?: string;
   scaffoldSpec?: ScaffoldSpec;
   adoptExisting?: boolean;
   modelConfiguration?: ModelConfiguration;
 }
 
 export interface JobRequest {
-  requestVersion?: 1 | 2 | 3;
+  requestVersion?: 1 | 2 | 3 | 4;
   id: string;
   host: Host;
   kind: TaskKind;
@@ -67,6 +68,7 @@ export interface JobRequest {
   policySnapshot?: PolicySnapshot;
   workspaceStrategy?: WorkspaceStrategy;
   target?: string;
+  projectGoal?: string;
   scaffoldSpec?: ScaffoldSpec;
   adoptExisting?: boolean;
   modelConfiguration?: ModelConfiguration;
@@ -112,8 +114,11 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
   const providerSnapshotHash = input.modelConfiguration
     ? modelConfigurationSnapshotHash(input.modelConfiguration)
     : undefined;
+  if (input.policySnapshot?.version === 2 && !input.modelConfiguration) {
+    throw new Error("Policy snapshot version 2 requires modelConfiguration");
+  }
   const request: JobRequest = {
-    requestVersion: input.modelConfiguration ? 3 : 2,
+    requestVersion: input.policySnapshot?.version === 2 ? 4 : input.modelConfiguration ? 3 : 2,
     id,
     host: input.host,
     kind: input.kind,
@@ -129,6 +134,7 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
     ...(input.policySnapshot ? { policySnapshot: input.policySnapshot } : {}),
     ...(input.workspaceStrategy ? { workspaceStrategy: input.workspaceStrategy } : {}),
     ...(input.target ? { target: input.target } : {}),
+    ...(input.projectGoal !== undefined ? { projectGoal: input.projectGoal } : {}),
     ...(input.scaffoldSpec ? { scaffoldSpec: input.scaffoldSpec } : {}),
     ...(input.adoptExisting ? { adoptExisting: true } : {}),
     ...(input.modelConfiguration ? { modelConfiguration: structuredClone(input.modelConfiguration) } : {}),
@@ -151,6 +157,8 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       timeoutMs: input.timeoutMs,
       ...(input.model ? { model: input.model } : {}),
       ...(input.role ? { role: input.role } : {}),
+      ...(input.policySnapshot ? { policyHash: input.policySnapshot.hash } : {}),
+      ...(input.policySnapshot?.version === 2 ? { scopeHash: input.policySnapshot.scopeHash } : {}),
       ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
       generation: 1,
       approvals: [],

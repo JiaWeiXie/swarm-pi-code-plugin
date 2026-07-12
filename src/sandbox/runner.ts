@@ -15,6 +15,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { SandboxMode, WorkerMode } from "../core/contracts.js";
+import type { BoundProjectPolicy } from "../core/contracts.js";
 import { resolveStateDir, resolveWorkspaceRoot } from "../state/state.js";
 import { detectSandboxAvailability } from "./availability.js";
 
@@ -33,6 +34,7 @@ export async function createSandboxRunner(options: {
   mode: WorkerMode;
   sandboxMode?: Extract<SandboxMode, "adaptive" | "lenient">;
   trustedDomains?: string[];
+  boundProjectPolicy?: BoundProjectPolicy;
   authorizeNetwork?: (host: string, port?: number) => Promise<boolean>;
   env?: NodeJS.ProcessEnv;
 }): Promise<SandboxRunner> {
@@ -54,6 +56,7 @@ export async function createSandboxRunner(options: {
       env,
       options.sandboxMode ?? "lenient",
       options.trustedDomains ?? [],
+      options.boundProjectPolicy,
     );
   } catch (error) {
     await fs.rm(tempRoot, { recursive: true, force: true });
@@ -107,7 +110,11 @@ export async function sandboxConfiguration(
   env: NodeJS.ProcessEnv = process.env,
   sandboxMode: Extract<SandboxMode, "adaptive" | "lenient"> = "lenient",
   trustedDomains: string[] = [],
+  boundProjectPolicy?: BoundProjectPolicy,
 ): Promise<SandboxRuntimeConfig> {
+  if (boundProjectPolicy && boundProjectPolicy.executionRoot !== cwd) {
+    throw new Error("Bound project policy execution root does not match sandbox workspace");
+  }
   const stateDir = await resolveStateDir(cwd, env);
   const gitPaths = await resolveGitMetadataPaths(cwd);
   const denyRead = [
@@ -140,7 +147,11 @@ export async function sandboxConfiguration(
     filesystem: {
       denyRead: uniquePaths(denyRead),
       allowRead: executableReadPaths(cwd),
-      allowWrite: uniquePaths(mode === "implement" ? [cwd, tempRoot] : [tempRoot]),
+      allowWrite: uniquePaths(mode === "implement"
+        ? boundProjectPolicy
+          ? [...boundProjectPolicy.roots.write, ...boundProjectPolicy.roots.shell, tempRoot]
+          : [cwd, tempRoot]
+        : [tempRoot]),
       denyWrite: uniquePaths(denyWrite),
       allowGitConfig: false,
     },

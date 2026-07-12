@@ -301,6 +301,7 @@ export interface WorkerRequest {
   policySnapshot?: PolicySnapshot;
   workspaceStrategy?: WorkspaceStrategy;
   target?: string;
+  projectGoal?: string;
   scaffoldSpec?: ScaffoldSpec;
   adoptExisting?: boolean;
 }
@@ -373,7 +374,7 @@ export interface AuditJobSummary {
 }
 
 export interface AuditRequestSummary {
-  requestVersion?: 1 | 2 | 3;
+  requestVersion?: 1 | 2 | 3 | 4;
   id: string;
   host: Host;
   kind: TaskKind;

@@ -70,6 +70,100 @@ An approval creates a capability lease scoped to one matching action or to the
 same normalized action family for the current job. Leases include the job
 generation, policy hash, role, action fingerprint, expiry, and consumption
 state. They are checked and consumed atomically immediately before execution.
+The policy hash commits to the effective project policy and its scope hash, so
+a project-scope change invalidates outstanding leases.
+
+## Enforced Project Policy
+
+### Policy compilation and defaults
+
+Project-profile task categories compile to the admitted `TaskKind` allowlist:
+`analysis` maps to `ask` and `orchestrate`, `planning` to `plan`, `code-review`
+to `review`, and `implementation` to `implement`. Project-profile `dirs`
+compile to relative roots for `read`, `search`, `write`, and `shell` operations.
+Roots use directory-segment prefix semantics, not globs. An omitted task or
+directory restriction permits all task kinds or the whole execution workspace
+(`.`), respectively. An explicit empty task or directory list fails closed.
+Repository-supplied policy may add deny rules but never broadens the effective
+project policy.
+
+### Durable per-job snapshot
+
+A new job persists a non-secret v2 policy snapshot in its request. The snapshot
+contains the effective project policy, its `scopeHash`, and the complete
+`policyHash`. Queued, running, and resumed jobs use that snapshot; profile
+edits affect only subsequently submitted jobs. The worker prompt includes the
+project goal and canonical rendered policy text, but enforcement never depends
+on model compliance with that prompt.
+
+### Enforcement layers
+
+Enforcement runs in this order:
+
+1. The admission gate rejects a disallowed task kind before any job or model
+   side effect.
+2. The scoped Pi filesystem tools (`read`, `grep`, `find`, `ls`, `write`, and
+   `edit`) validate every path against the bound policy before the underlying
+   operation runs.
+3. In adaptive and lenient sandbox modes, the Bash write allowlist limits
+   writes to the bound write and shell roots plus the sandbox temporary
+   directory.
+4. The postflight backstop requires every changed path to be under the write
+   roots before checkpointing, verification, artifact delivery, or
+   materialization eligibility.
+
+The three write-enforcement layers are the tool boundary, sandbox write
+allowlist, and postflight backstop. Admission is a separate, earlier gate.
+
+### Isolated worktrees
+
+For an isolated-worktree job, relative roots are rebound against the worktree
+execution root. Changed paths remain relative to that same root, so no
+original-workspace path translation is performed or needed.
+
+### Rejections
+
+Policy rejections use event `policy-rejected`, error codes
+`task-kind-not-allowed`, `project-scope-invalid`,
+`project-scope-violation`, and `policy-snapshot-invalid`, and stages
+`admission`, `preflight`, `postflight`, and `materialization`. A postflight
+scope violation fails the job with `errorCode: "project-scope-violation"` and
+prevents checkpointing, verification, and delivery. The rejection can include
+violating paths, `policyHash`, `scopeHash`, and safe next actions.
+
+### Audit trail
+
+Policy-engine decisions are appended to the job's `policy-events.jsonl`.
+Scoped-tool `ProjectPolicyError` denials are also recorded there and increment
+`policySummary.denied`. The audit export includes `policy-events.jsonl`.
+Postflight failure is reported in the terminal result and is not necessarily a
+separate policy event.
+
+### Capability leases and legacy
+
+Leases remain bound to the job, generation, action fingerprint, expiry, and
+complete policy hash. Because the v2 hash includes the effective policy and
+`scopeHash`, a scope edit invalidates outstanding leases. `scopeHash` on a
+lease record is optional audit metadata; authorization relies on the exact
+`policyHash`. Existing leases are not migrated or rehashed.
+
+Legacy v1 requests and an unrestricted v2 policy materialize
+whole-execution-workspace behavior. Scoped Pi read and search tools enforce
+read and search roots. Raw Bash reads in adaptive and lenient modes are not
+folder-scoped: they can read the workspace outside configured directories,
+subject only to the existing sensitive read deny paths. This is an accepted
+boundary, not an oversight: pinned `@carderne/sandbox-runtime@0.0.49` reads
+are allow-by-default (deny-then-allow, with `allowRead` overriding `denyRead`).
+Scoping Bash reads would require denying the workspace and re-allowing the
+policy roots plus a complete, ecosystem-specific tooling read closure (such as
+project metadata, dependencies, project references, temporary roots, and
+runtime libraries) that cannot be derived from the project directories; this
+would break normal tooling, and a broad re-allow could reopen already-denied
+sensitive paths. Shell writes remain constrained to the write/shell roots;
+Strict mode, which exposes no Bash, is the option when folder-level read
+confidentiality is required. Reconsider this boundary only if the sandbox
+runtime gains a true allow-only read model, or the project supplies an
+explicit, testable tooling-read dependency manifest.
 
 ## Sandbox Modes
 

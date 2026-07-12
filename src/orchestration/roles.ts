@@ -5,8 +5,11 @@ import type {
   ApprovalMode,
   BackgroundRolePolicy,
   Capability,
+  EffectiveProjectPolicy,
   ExecutionMode,
+  LegacyPolicySnapshot,
   PolicySnapshot,
+  PolicySnapshotV2,
   RoleId,
   RolePolicy,
   SandboxMode,
@@ -14,6 +17,7 @@ import type {
   ThinkingLevel,
   WorkerRoleId,
 } from "../core/contracts.js";
+import { ProjectPolicyError } from "../policy/project-policy.js";
 
 export type RolePolicyOverrides = Partial<Record<WorkerRoleId, {
   models?: string[];
@@ -116,9 +120,42 @@ export function createPolicySnapshot(input: {
   rolePolicy: RolePolicy;
   escalationPolicy?: RolePolicy;
   adaptivePolicy?: Partial<AdaptivePolicyConfig>;
+}): LegacyPolicySnapshot;
+export function createPolicySnapshot(input: {
+  sandboxMode: SandboxMode;
+  approvalMode: ApprovalMode;
+  rolePolicy: RolePolicy;
+  escalationPolicy?: RolePolicy;
+  adaptivePolicy?: Partial<AdaptivePolicyConfig>;
+  effectiveProjectPolicy: EffectiveProjectPolicy;
+}): PolicySnapshotV2;
+export function createPolicySnapshot(input: {
+  sandboxMode: SandboxMode;
+  approvalMode: ApprovalMode;
+  rolePolicy: RolePolicy;
+  escalationPolicy?: RolePolicy;
+  adaptivePolicy?: Partial<AdaptivePolicyConfig>;
+  effectiveProjectPolicy?: EffectiveProjectPolicy;
 }): PolicySnapshot {
   const adaptivePolicy = normalizeAdaptivePolicy(input.adaptivePolicy);
   const createdAt = new Date().toISOString();
+  if (input.effectiveProjectPolicy) {
+    const canonical = {
+      version: 2 as const,
+      sandboxMode: input.sandboxMode,
+      approvalMode: input.approvalMode,
+      rolePolicy: input.rolePolicy,
+      ...(input.escalationPolicy ? { escalationPolicy: input.escalationPolicy } : {}),
+      adaptivePolicy,
+      effectiveProjectPolicy: input.effectiveProjectPolicy,
+      scopeHash: input.effectiveProjectPolicy.scopeHash,
+    };
+    return {
+      ...canonical,
+      hash: policySnapshotHash(canonical),
+      createdAt,
+    };
+  }
   const canonical = {
     version: 1 as const,
     sandboxMode: input.sandboxMode,
@@ -146,6 +183,26 @@ export function policySnapshotHash(snapshot: Pick<PolicySnapshot, "version" | "s
     ...("scopeHash" in snapshot ? { scopeHash: snapshot.scopeHash } : {}),
   };
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+export function assertPolicySnapshotValid(snapshot: PolicySnapshot): asserts snapshot is PolicySnapshotV2 {
+  if (snapshot.version !== 2) throw invalidSnapshot("Policy snapshot must use version 2");
+  if (snapshot.scopeHash !== snapshot.effectiveProjectPolicy.scopeHash) {
+    throw invalidSnapshot("Policy snapshot scope hash does not match its effective project policy");
+  }
+  if (snapshot.hash !== policySnapshotHash(snapshot)) throw invalidSnapshot("Policy snapshot hash is invalid");
+}
+
+function invalidSnapshot(message: string): ProjectPolicyError {
+  return new ProjectPolicyError({
+    event: "policy-rejected",
+    errorCode: "policy-snapshot-invalid",
+    stage: "materialization",
+    recoverable: false,
+    message,
+    preserved: [],
+    nextActions: [],
+  });
 }
 
 export function normalizeAdaptivePolicy(

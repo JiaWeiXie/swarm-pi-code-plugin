@@ -7,6 +7,8 @@ import type {
   ApprovalRequest,
   JobAuditExportV1,
   DelegationSpec,
+  BoundProjectPolicy,
+  EffectiveProjectPolicy,
   Host,
   PolicyDecision,
   PolicySnapshot,
@@ -53,7 +55,15 @@ import {
   type PolicyAction,
   type PolicyClassifier,
 } from "../policy/engine.js";
-import { loadRepositoryDenyRules } from "../policy/project-policy.js";
+import {
+  assertTaskAdmitted,
+  assertChangedPathsAllowed,
+  bindProjectPolicy,
+  compileEffectiveProjectPolicy,
+  loadRepositoryDenyRules,
+  ProjectPolicyError,
+  renderProjectPolicy,
+} from "../policy/project-policy.js";
 import { exportJobAudit } from "../audit/export.js";
 import {
   acknowledgeJob,
@@ -110,6 +120,7 @@ import type { RunnerArguments } from "./args.js";
 import { spawnBackgroundWorker, type SpawnBackgroundWorkerOptions } from "./background.js";
 import { buildWorkerPrompt } from "./prompts.js";
 import {
+  assertPolicySnapshotValid,
   assertRoleCompatible,
   createPolicySnapshot,
   defaultRoleForTask,
@@ -126,6 +137,8 @@ export interface RunnerDependencies {
     cwd: string;
     mode: "readonly" | "implement";
     model: PiModel;
+    boundProjectPolicy?: BoundProjectPolicy;
+    onPolicyViolation?: (error: ProjectPolicyError) => void;
     sandboxRunner?: SandboxRunner;
     thinkingLevel?: ThinkingLevel;
     policyEngine?: PolicyEngine;
@@ -145,6 +158,7 @@ export interface RunnerDependencies {
 
 export type RunnerOutput =
   | WorkerResult
+  | import("../core/contracts.js").ProjectPolicyRejection
   | JobAuditExportV1
   | { event: "accepted"; jobId: string; status: "queued"; executionMode: "background" }
   | {
@@ -279,6 +293,35 @@ export async function runCommand(
       modelConfiguration,
     );
   }
+  // A continuation carries its own (possibly absent) goal; only a fresh submission reads the live profile,
+  // so a later profile edit never changes a resumed job's snapshotted goal.
+  const projectGoal = options.requestOverride ? options.requestOverride.projectGoal : state.config.profile?.goal;
+  const persistedSnapshot = options.requestOverride?.policySnapshot;
+  let effectiveProjectPolicy: EffectiveProjectPolicy | undefined;
+  if (options.requestOverride === undefined) {
+    try {
+      const repositoryDenyRules = await loadRepositoryDenyRules(cwd);
+      effectiveProjectPolicy = await compileEffectiveProjectPolicy({
+        cwd,
+        ...(state.config.profile ? { profile: state.config.profile } : {}),
+        repositoryDenyRules,
+      });
+      assertTaskAdmitted(effectiveProjectPolicy, args.command);
+    } catch (error) {
+      if (error instanceof ProjectPolicyError) return error.rejection;
+      throw error;
+    }
+  } else if (persistedSnapshot?.version === 2) {
+    assertPolicySnapshotValid(persistedSnapshot);
+    effectiveProjectPolicy = persistedSnapshot.effectiveProjectPolicy;
+    // Re-run the admission gate on the resumed snapshot so the task kind is checked on the durable path too.
+    try {
+      assertTaskAdmitted(effectiveProjectPolicy, args.command);
+    } catch (error) {
+      if (error instanceof ProjectPolicyError) return error.rejection;
+      throw error;
+    }
+  }
   const host = args.host!;
   const scaffoldSpec: ScaffoldSpec | undefined = options.requestOverride?.scaffoldSpec ?? (args.command === "scaffold"
     ? parseScaffoldSpec(await activeDependencies.readFile(args.specFile!))
@@ -290,35 +333,50 @@ export async function runCommand(
       ? await buildReviewRequest(cwd, { base: args.base, scope: args.scope })
       : await activeDependencies.readFile(args.promptFile!));
   const executionMode = args.executionMode ?? "supervised";
-  const sandboxMode = state.config.sandboxMode ?? "strict";
+  const sandboxMode = persistedSnapshot?.sandboxMode ?? state.config.sandboxMode ?? "strict";
   const roleId = args.role ?? defaultRoleForTask(args.command);
-  let rolePolicy = resolveRolePolicy(
-    roleId,
-    state.config.rolePolicies,
-    modelPriority(modelConfiguration),
-    state.config.backgroundRolePolicy,
-  );
-  if (args.thinkingLevel) rolePolicy = { ...rolePolicy, thinkingLevel: args.thinkingLevel };
-  if (roleId === "scaffolder" && executionMode === "background") {
+  let rolePolicy = persistedSnapshot
+    ? persistedSnapshot.rolePolicy
+    : resolveRolePolicy(
+      roleId,
+      state.config.rolePolicies,
+      modelPriority(modelConfiguration),
+      state.config.backgroundRolePolicy,
+    );
+  if (args.thinkingLevel && !persistedSnapshot) rolePolicy = { ...rolePolicy, thinkingLevel: args.thinkingLevel };
+  if (roleId === "scaffolder" && executionMode === "background" && !persistedSnapshot) {
     rolePolicy = {
       ...rolePolicy,
       capabilities: rolePolicy.capabilities.filter((capability) => capability !== "shell.execute" && capability !== "network.connect"),
     };
   }
   assertRoleCompatible(rolePolicy, args.command, executionMode);
-  const adaptivePolicy = normalizeAdaptivePolicy(state.config.adaptivePolicy);
-  adaptivePolicy.rules.push(...await loadRepositoryDenyRules(cwd));
-  const approvalMode = args.approvalMode ?? adaptivePolicy.approvalPolicy;
-  const escalationPolicy = roleId === "mechanical-executor"
+  const adaptivePolicy = persistedSnapshot
+    ? normalizeAdaptivePolicy(persistedSnapshot.adaptivePolicy)
+    : normalizeAdaptivePolicy(state.config.adaptivePolicy);
+  if (effectiveProjectPolicy && options.requestOverride === undefined) {
+    adaptivePolicy.rules.push(...effectiveProjectPolicy.repositoryDenyRules);
+  }
+  const approvalMode = persistedSnapshot?.approvalMode ?? args.approvalMode ?? adaptivePolicy.approvalPolicy;
+  const escalationPolicy = persistedSnapshot?.escalationPolicy ?? (roleId === "mechanical-executor"
     ? resolveRolePolicy("executor", state.config.rolePolicies, modelPriority(modelConfiguration), state.config.backgroundRolePolicy)
-    : undefined;
-  const policySnapshot = createPolicySnapshot({
-    sandboxMode,
-    approvalMode,
-    rolePolicy,
-    adaptivePolicy,
-    ...(escalationPolicy ? { escalationPolicy } : {}),
-  });
+    : undefined);
+  const policySnapshot = persistedSnapshot ?? (effectiveProjectPolicy
+    ? createPolicySnapshot({
+      sandboxMode,
+      approvalMode,
+      rolePolicy,
+      adaptivePolicy,
+      ...(escalationPolicy ? { escalationPolicy } : {}),
+      effectiveProjectPolicy,
+    })
+    : createPolicySnapshot({
+      sandboxMode,
+      approvalMode,
+      rolePolicy,
+      adaptivePolicy,
+      ...(escalationPolicy ? { escalationPolicy } : {}),
+    }));
   const candidates = orderModels(available, {
     requested: args.model,
     priority: rolePolicy.models.length ? rolePolicy.models : modelPriority(modelConfiguration),
@@ -357,6 +415,7 @@ export async function runCommand(
     policySnapshot,
     workspaceStrategy,
     ...(target ? { target } : {}),
+    ...(projectGoal !== undefined ? { projectGoal } : {}),
     ...(scaffoldSpec ? { scaffoldSpec } : {}),
     ...(adoptExisting ? { adoptExisting: true } : {}),
   };
@@ -426,6 +485,7 @@ export async function runCommand(
     policySnapshot,
     workspaceStrategy,
     ...(target ? { target } : {}),
+    ...(projectGoal !== undefined ? { projectGoal } : {}),
     ...(scaffoldSpec ? { scaffoldSpec } : {}),
     ...(adoptExisting ? { adoptExisting: true } : {}),
     modelConfiguration,
@@ -494,6 +554,7 @@ export async function runCommand(
     host,
     rawPrompt,
     ...(state.config.profile ? { profile: state.config.profile } : {}),
+    ...(projectGoal !== undefined ? { projectGoal } : {}),
     candidates,
     dependencies: activeDependencies,
     job,
@@ -672,17 +733,28 @@ async function runBackgroundJob(
   try {
     const snapshot = await getJob(cwd, request.id);
     if (snapshot.job.cancelRequestedAt) controller.abort();
-    const state = await loadState(cwd);
+    const state = request.modelConfiguration ? undefined : await loadState(cwd);
     const modelConfiguration = request.modelConfiguration
       ? parseModelConfiguration(request.modelConfiguration)
-      : await loadModelConfiguration(cwd, state.config.modelPriority);
-    if (request.requestVersion === 3) {
+      : await loadModelConfiguration(cwd, state!.config.modelPriority);
+    if (request.requestVersion === 3 || request.requestVersion === 4) {
       if (!request.modelConfiguration || !request.providerSnapshotHash) {
         throw new Error("Background job is missing its provider configuration snapshot");
       }
       if (modelConfigurationSnapshotHash(modelConfiguration) !== request.providerSnapshotHash) {
         throw new Error("Background job provider configuration snapshot failed integrity validation");
       }
+    }
+    if (request.requestVersion === 4) {
+      if (!request.policySnapshot || request.policySnapshot.version !== 2) {
+        throw new ProjectPolicyError({
+          event: "policy-rejected", errorCode: "policy-snapshot-invalid", stage: "materialization",
+          recoverable: false, message: "Background job is missing its version 2 policy snapshot", preserved: [], nextActions: [],
+        });
+      }
+      assertPolicySnapshotValid(request.policySnapshot);
+      // Admission gate on the durable background path, not only on fresh submission.
+      assertTaskAdmitted(request.policySnapshot.effectiveProjectPolicy, request.kind);
     }
     const activeDependencies = dependencies ?? defaultDependencies(modelConfiguration);
     const candidates = orderModels(activeDependencies.catalog.available(), {
@@ -698,7 +770,10 @@ async function runBackgroundJob(
       stateCwd: cwd,
       host: request.host,
       rawPrompt: prompt,
-      ...(state.config.profile ? { profile: state.config.profile } : {}),
+      ...(request.requestVersion !== 4 && state?.config.profile ? { profile: state.config.profile } : {}),
+      ...(request.requestVersion === 4
+        ? (request.projectGoal !== undefined ? { projectGoal: request.projectGoal } : {})
+        : (state?.config.profile?.goal !== undefined ? { projectGoal: state.config.profile.goal } : {})),
       candidates,
       dependencies: activeDependencies,
       job: { id: request.id, workerToken: request.workerToken },
@@ -716,6 +791,7 @@ async function runBackgroundJob(
       request.id,
       0,
     );
+    if (error instanceof ProjectPolicyError) failed.errorCode = error.rejection.errorCode;
     await finishJob(cwd, request.id, failed);
     return failed;
   } finally {
@@ -758,6 +834,7 @@ async function runStartedJobSafely(
       0,
     );
     if (error instanceof WorktreeBaselineError) failed.errorCode = error.code;
+    if (error instanceof ProjectPolicyError) failed.errorCode = error.rejection.errorCode;
     await finishJob(options.stateCwd, options.job.id, failed);
     return failed;
   }
@@ -770,6 +847,7 @@ async function runStartedJob(options: {
   host: Host;
   rawPrompt: string;
   profile?: SwarmProfile;
+  projectGoal?: string;
   candidates: PiModel[];
   dependencies: RunnerDependencies;
   job: JobHandle;
@@ -780,6 +858,8 @@ async function runStartedJob(options: {
   executionMode: import("../core/contracts.js").ExecutionMode;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
+  const boundProjectPolicy = await materializeBoundProjectPolicy(options.policySnapshot, options.cwd);
+  const renderedProjectPolicy = renderProjectPolicy(boundProjectPolicy.effective);
   const kind = options.args.command as TaskKind;
   const jobId = options.job.id;
   let actualRole = options.policySnapshot.rolePolicy.role;
@@ -834,6 +914,24 @@ async function runStartedJob(options: {
         })
       : undefined;
     const metrics = { allowed: 0, denied: 0, approvals: 0 };
+    // Scoped filesystem tools throw ProjectPolicyError directly and never reach
+    // the PolicyEngine, so record their rejections here to keep the denial
+    // metrics and policy-event audit trail accurate.
+    const recordPolicyViolation = (error: ProjectPolicyError) => {
+      metrics.denied += 1;
+      void appendPolicyEvent(options.stateCwd, jobId, {
+        timestamp: new Date().toISOString(),
+        tool: "filesystem",
+        fingerprint: `project-scope:${error.rejection.errorCode}`,
+        decision: "deny",
+        risk: "high",
+        reason: error.rejection.message.slice(0, 500),
+        stage: error.rejection.stage,
+        ...(error.rejection.violatingPaths?.length ? { paths: error.rejection.violatingPaths } : {}),
+        policyHash: error.rejection.policyHash ?? options.policySnapshot.hash,
+        ...(error.rejection.scopeHash ? { scopeHash: error.rejection.scopeHash } : {}),
+      }).catch(() => {});
+    };
     let sideEffectsObserved = false;
     const engine = new PolicyEngine({
       snapshot: options.policySnapshot,
@@ -883,6 +981,7 @@ async function runStartedJob(options: {
         mode: workerMode,
         sandboxMode: options.sandboxMode,
         trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
+        boundProjectPolicy,
         ...(options.sandboxMode === "adaptive" ? {
           authorizeNetwork: async (host: string, port?: number) => {
             if (!await publicNetworkTarget(host)) return false;
@@ -903,11 +1002,14 @@ async function runStartedJob(options: {
         cwd: options.cwd,
         host: options.host,
         prompt: options.rawPrompt,
-        profile: options.profile,
+        projectGoal: options.projectGoal,
+        renderedProjectPolicy,
         candidates: options.candidates,
         dependencies: options.dependencies,
         deadline,
         ...(sandboxRunner ? { sandboxRunner } : {}),
+        boundProjectPolicy,
+        onPolicyViolation: recordPolicyViolation,
         policyEngine: engine,
         onApproval,
         thinkingLevel: options.policySnapshot.rolePolicy.thinkingLevel,
@@ -933,7 +1035,8 @@ async function runStartedJob(options: {
       host: options.host,
       kind,
       prompt: options.rawPrompt,
-      profile: options.profile,
+      projectGoal: options.projectGoal,
+      renderedProjectPolicy,
     });
     let result = await runWithFallback({
       kind,
@@ -944,6 +1047,8 @@ async function runStartedJob(options: {
       dependencies: options.dependencies,
       deadline,
       ...(sandboxRunner ? { sandboxRunner } : {}),
+      boundProjectPolicy,
+      onPolicyViolation: recordPolicyViolation,
       policyEngine: engine,
       onApproval,
       thinkingLevel: options.policySnapshot.rolePolicy.thinkingLevel,
@@ -980,6 +1085,8 @@ async function runStartedJob(options: {
             dependencies: options.dependencies,
             deadline,
             ...(sandboxRunner ? { sandboxRunner } : {}),
+            boundProjectPolicy,
+            onPolicyViolation: recordPolicyViolation,
             policyEngine: engine,
             onApproval,
             thinkingLevel: policy.thinkingLevel,
@@ -1008,6 +1115,7 @@ async function runStartedJob(options: {
       const runtimeSideEffects = [...new Set([...ignored, ...preserved])].sort();
       try {
         await validateChangedPaths(options.cwd, changes.changedFiles);
+        await assertChangedPathsAllowed(boundProjectPolicy, changes.changedFiles);
         result = {
           ...result,
           changedFiles: changes.changedFiles,
@@ -1022,7 +1130,9 @@ async function runStartedJob(options: {
           success: false,
           output: `${result.output}\n\nSandbox postflight failed: ${message}`.trim(),
           error: message,
-          errorCode: error instanceof WorktreeBaselineError ? error.code : "sandbox-postflight-failed",
+          errorCode: error instanceof ProjectPolicyError ? error.rejection.errorCode
+            : error instanceof WorktreeBaselineError ? error.code
+            : "sandbox-postflight-failed",
           changedFiles: changes.changedFiles,
           diffStat: changes.diffStat,
           ...(runtimeSideEffects.length > 0 ? { runtimeSideEffects } : {}),
@@ -1064,6 +1174,7 @@ async function runStartedJob(options: {
             dependencies: options.dependencies,
             deadline,
             ...(options.signal ? { signal: options.signal } : {}),
+            boundProjectPolicy,
           });
           result = { ...result, agentVerification: verification, ...(artifact ? { artifact: { ...artifact, deliverable: verification.status === "passed" } } : {}) };
           if (artifact && verification.status === "passed") {
@@ -1111,6 +1222,7 @@ async function runAgentVerifier(options: {
   dependencies: RunnerDependencies;
   deadline: number;
   signal?: AbortSignal;
+  boundProjectPolicy?: BoundProjectPolicy;
 }): Promise<NonNullable<WorkerResult["agentVerification"]>> {
   const verifierPolicy = resolveRolePolicy("verifier", {}, options.candidates.map(modelId));
   const verifierSnapshot = createPolicySnapshot({
@@ -1118,6 +1230,7 @@ async function runAgentVerifier(options: {
     approvalMode: "deny",
     rolePolicy: verifierPolicy,
     adaptivePolicy: normalizeAdaptivePolicy(undefined),
+    ...(options.boundProjectPolicy ? { effectiveProjectPolicy: options.boundProjectPolicy.effective } : {}),
   });
   const verifierEngine = new PolicyEngine({ snapshot: verifierSnapshot });
   const prompt = [
@@ -1134,6 +1247,7 @@ async function runAgentVerifier(options: {
     mode: "readonly",
     candidates: options.candidates.slice(0, 2),
     dependencies: options.dependencies,
+    ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
     policyEngine: verifierEngine,
     thinkingLevel: "medium",
     deadline: options.deadline,
@@ -1328,6 +1442,8 @@ async function runWithFallback(options: {
   mode: "readonly" | "implement";
   candidates: PiModel[];
   dependencies: RunnerDependencies;
+  boundProjectPolicy?: BoundProjectPolicy;
+  onPolicyViolation?: (error: ProjectPolicyError) => void;
   sandboxRunner?: SandboxRunner;
   policyEngine?: PolicyEngine;
   onApproval?: RunnerDependencies["createSession"] extends (options: infer T) => unknown
@@ -1347,6 +1463,8 @@ async function runWithFallback(options: {
         cwd: options.cwd,
         mode: options.mode,
         model,
+        ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+        ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
         ...(options.sandboxRunner ? { sandboxRunner: options.sandboxRunner } : {}),
         ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
         ...(options.onApproval ? { onApproval: options.onApproval } : {}),
@@ -1382,9 +1500,12 @@ async function runOrchestration(options: {
   cwd: string;
   host: Host;
   prompt: string;
-  profile?: SwarmProfile | undefined;
+  projectGoal?: string | undefined;
+  renderedProjectPolicy?: string | undefined;
   candidates: PiModel[];
   dependencies: RunnerDependencies;
+  boundProjectPolicy?: BoundProjectPolicy;
+  onPolicyViolation?: (error: ProjectPolicyError) => void;
   sandboxRunner?: SandboxRunner;
   policyEngine?: PolicyEngine;
   onApproval?: RunnerDependencies["createSession"] extends (options: infer T) => unknown
@@ -1407,6 +1528,8 @@ async function runOrchestration(options: {
         mode: "readonly",
         candidates: options.candidates,
         dependencies: options.dependencies,
+        ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+        ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
         ...(options.sandboxRunner ? { sandboxRunner: options.sandboxRunner } : {}),
         ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
         ...(options.onApproval ? { onApproval: options.onApproval } : {}),
@@ -1417,7 +1540,8 @@ async function runOrchestration(options: {
           host: options.host,
           kind: "orchestrate",
           prompt: options.prompt,
-          profile: options.profile,
+          projectGoal: options.projectGoal,
+          renderedProjectPolicy: options.renderedProjectPolicy,
           perspective,
         }),
       }),
@@ -1567,6 +1691,18 @@ function parseDelegationSpec(value: string): DelegationSpec {
     ...(strings(parsed.doneCriteria) ? { doneCriteria: strings(parsed.doneCriteria)! } : {}),
     ...(strings(parsed.relevantPaths) ? { relevantPaths: strings(parsed.relevantPaths)! } : {}),
   };
+}
+
+async function materializeBoundProjectPolicy(
+  snapshot: PolicySnapshot,
+  executionCwd: string,
+): Promise<BoundProjectPolicy> {
+  if (snapshot.version === 2) {
+    assertPolicySnapshotValid(snapshot);
+    return bindProjectPolicy(snapshot.effectiveProjectPolicy, executionCwd);
+  }
+  const effective = await compileEffectiveProjectPolicy({ cwd: executionCwd, repositoryDenyRules: [] });
+  return bindProjectPolicy(effective, executionCwd);
 }
 
 function legacyPolicySnapshot(request: JobRequest, models: string[]): PolicySnapshot {

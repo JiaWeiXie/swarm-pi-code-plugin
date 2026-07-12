@@ -1,17 +1,20 @@
 import { createAgentSession, SessionManager, SettingsManager, type AuthStorage, type ModelRegistry, type CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
 
-import type { PolicyDecision, ThinkingLevel, WorkerMode } from "../core/contracts.js";
+import type { BoundProjectPolicy, PolicyDecision, ThinkingLevel, WorkerMode } from "../core/contracts.js";
 import type { PolicyAction, PolicyEngine } from "../policy/engine.js";
+import type { ProjectPolicyError } from "../policy/project-policy.js";
 import { createTrustedResourceLoader } from "../policy/extension.js";
 import type { SandboxRunner } from "../sandbox/runner.js";
 import type { ModelConfiguration } from "../state/model-config.js";
 import { createPiEnvironment } from "./environment.js";
-import { createScopedMutationTools } from "./scoped-tools.js";
+import { createScopedFilesystemTools, createScopedMutationTools } from "./scoped-tools.js";
 import { toolsForMode } from "./tool-profiles.js";
 
 export interface CreateWorkerSessionOptions {
   cwd: string;
   mode: WorkerMode;
+  boundProjectPolicy?: BoundProjectPolicy;
+  onPolicyViolation?: (error: ProjectPolicyError) => void;
   model?: CreateAgentSessionOptions["model"];
   modelConfiguration: ModelConfiguration;
   sandboxRunner?: SandboxRunner;
@@ -49,7 +52,14 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
     resourceLoader,
     tools: toolsForMode(options.mode),
     customTools: [
-      ...(options.mode === "implement" ? createScopedMutationTools(options.cwd) : []),
+      ...(options.boundProjectPolicy
+        ? createScopedFilesystemTools({
+          cwd: options.cwd,
+          mode: options.mode,
+          boundProjectPolicy: options.boundProjectPolicy,
+          ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+        })
+        : options.mode === "implement" ? createScopedMutationTools(options.cwd) : []),
       ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
     ],
     ...(options.model ? { model: options.model } : {}),

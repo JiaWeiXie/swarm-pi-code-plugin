@@ -87,7 +87,8 @@ test("worker prompt has a versioned stable prefix and request last", () => {
     host: "codex",
     kind: "review",
     perspective: "security",
-    profile: { goal: "ship", dirs: ["src"] },
+    projectGoal: "ship",
+    renderedProjectPolicy: "Project policy abc123: tasks [review]; roots [read: src; search: src; write: src; shell: src]",
     prompt: "Inspect the request.",
   });
   assert.match(prompt, new RegExp(`^\\[PROMPT\\]\\nversion=${WORKER_PROMPT_VERSION}`));
@@ -96,4 +97,8 @@ test("worker prompt has a versioned stable prefix and request last", () => {
   assert.ok(prompt.indexOf("[PERSPECTIVE]") < prompt.indexOf("[PROJECT]"));
   assert.ok(prompt.indexOf("[PROJECT]") < prompt.indexOf("[REQUEST]"));
   assert.equal(prompt.slice(prompt.indexOf("[REQUEST]")).includes("Inspect the request."), true);
+  const projectSection = prompt.slice(prompt.indexOf("[PROJECT]"), prompt.indexOf("[REQUEST]"));
+  assert.ok(projectSection.includes("Project goal: ship"));
+  assert.ok(projectSection.includes("Project policy abc123:"));
+  assert.equal(projectSection.includes("Directories in scope:"), false);
 });

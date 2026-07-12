@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 
 import { executeSession, type RunnableSession } from "../src/pi/execute.js";
+import { createPolicySnapshot, resolveRolePolicy } from "../src/orchestration/roles.js";
+import { compileEffectiveProjectPolicy, ProjectPolicyError } from "../src/policy/project-policy.js";
 import { describeModels, describeProviders, selectModel, type PiModel } from "../src/pi/models.js";
 import { parseArguments } from "../src/runner/args.js";
 import { runCommand, type RunnerDependencies } from "../src/runner/run.js";
@@ -976,7 +978,7 @@ test("background submission returns an accepted job without creating a Pi sessio
   assert.equal(snapshot.job.timeoutMs, 30 * 60_000);
   assert.equal(snapshot.job.sandboxMode, "lenient");
   const request = await readJobRequest(workspace, "jobId" in result ? result.jobId : "");
-  assert.equal(request.requestVersion, 3);
+  assert.equal(request.requestVersion, 4);
   assert.equal(request.modelConfiguration?.version, 1);
   assert.match(request.providerSnapshotHash ?? "", /^[a-f0-9]{64}$/);
   assert.doesNotMatch(JSON.stringify(request.modelConfiguration), /apiKey|access-token|refresh-token/);
@@ -1199,6 +1201,322 @@ test("jobs commands expose list, status, wait timeout, and acknowledge", async (
     json: true,
   }, workspace);
   assert.equal("event" in waited && waited.event, "wait-timed-out");
+});
+
+function throwingDeps(marker: { sessions: number; reads: number }): RunnerDependencies {
+  return {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => { marker.reads += 1; throw new Error("input must not be read before admission"); },
+    createSession: async () => { marker.sessions += 1; throw new Error("session must not start for a rejected task"); },
+  };
+}
+
+async function jobCount(workspace: string): Promise<number> {
+  const stateDir = await resolveStateDir(workspace);
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
+    return Array.isArray(state.jobs) ? state.jobs.length : 0;
+  } catch { return 0; }
+}
+
+test("admission rejects every task kind that the project policy disallows", async () => {
+  for (const command of ["ask", "plan", "review", "orchestrate", "implement", "scaffold", "setup"] as const) {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `swarm-pi-admit-${command}-`));
+    await updateState(workspace, (state) => { state.config.profile = { tasks: [] }; });
+    const marker = { sessions: 0, reads: 0 };
+    const result = await runCommand(
+      { command, host: "claude", promptFile: "p.md", specFile: "s.json", target: "app", reconfigure: false, reset: false, json: true },
+      workspace,
+      throwingDeps(marker),
+      { spawnWorker: async () => { throw new Error("must not spawn a worker for a rejected task"); } },
+    );
+    assert.equal("event" in result && result.event, "policy-rejected", command);
+    assert.equal("errorCode" in result && result.errorCode, "task-kind-not-allowed", command);
+    assert.equal("stage" in result && result.stage, "admission", command);
+    assert.equal("recoverable" in result && result.recoverable, false, command);
+    assert.ok("policyHash" in result && typeof result.policyHash === "string", command);
+    assert.ok("scopeHash" in result && typeof result.scopeHash === "string", command);
+    assert.equal(marker.sessions, 0, command);
+    assert.equal(marker.reads, 0, command);
+    assert.equal(await jobCount(workspace), 0, command);
+  }
+});
+
+test("admission maps profile task categories to the allowed task kinds", async () => {
+  // analysis -> ask + orchestrate
+  const analysis = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-admit-analysis-"));
+  await updateState(analysis, (state) => { state.config.profile = { tasks: ["analysis"] }; });
+  const askMarker = { sessions: 0, reads: 0 };
+  const askAllowed = await runCommand(
+    { command: "ask", host: "codex", promptFile: "p.md", executionMode: "background", reconfigure: false, reset: false, json: true },
+    analysis, { catalog: { available: () => [fakeModel] }, readFile: async () => "q", createSession: async () => { askMarker.sessions += 1; throw new Error("no session on submit"); } },
+    { spawnWorker: async () => 1 },
+  );
+  assert.equal("event" in askAllowed && askAllowed.event, "accepted");
+  const planMarker = { sessions: 0, reads: 0 };
+  const planRejected = await runCommand(
+    { command: "plan", host: "codex", promptFile: "p.md", reconfigure: false, reset: false, json: true },
+    analysis, throwingDeps(planMarker),
+  );
+  assert.equal("errorCode" in planRejected && planRejected.errorCode, "task-kind-not-allowed");
+
+  // implementation -> implement only
+  const impl = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-admit-impl-"));
+  await updateState(impl, (state) => { state.config.profile = { tasks: ["implementation"] }; });
+  const askRej = await runCommand(
+    { command: "ask", host: "codex", promptFile: "p.md", reconfigure: false, reset: false, json: true },
+    impl, throwingDeps({ sessions: 0, reads: 0 }),
+  );
+  assert.equal("errorCode" in askRej && askRej.errorCode, "task-kind-not-allowed");
+});
+
+test("admission never blocks non-task commands even when tasks is empty", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-admit-nontask-"));
+  await updateState(workspace, (state) => { state.config.profile = { tasks: [] }; });
+  const deps: RunnerDependencies = { catalog: { available: () => [fakeModel] }, readFile: async () => "unused", createSession: async () => { throw new Error("no session"); } };
+  for (const command of ["roles", "models", "providers", "status"] as const) {
+    const result = await runCommand({ command, host: "claude", reconfigure: false, reset: false, json: true }, workspace, deps);
+    assert.equal("event" in result && result.event === "policy-rejected", false, command);
+  }
+});
+
+test("background durable replay ignores a later profile change", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-replay-"));
+  await updateState(workspace, (state) => { state.config.profile = { tasks: ["analysis"] }; });
+  const submit = await runCommand(
+    { command: "ask", host: "codex", promptFile: "p.md", executionMode: "background", reconfigure: false, reset: false, json: true },
+    workspace, { catalog: { available: () => [fakeModel] }, readFile: async () => "Durable question", createSession: async () => { throw new Error("no session on submit"); } },
+    { spawnWorker: async () => 555 },
+  );
+  const jobId = "jobId" in submit ? submit.jobId : "";
+  assert.equal((await readJobRequest(workspace, jobId)).requestVersion, 4);
+  // Tighten the live profile so the original task kind would now be rejected.
+  await updateState(workspace, (state) => { state.config.profile = { tasks: [] }; });
+  const worker = await runCommand(
+    { command: "__worker", jobId, workerToken: (await getJob(workspace, jobId)).job.workerToken!, reconfigure: false, reset: false, json: true },
+    workspace,
+    { catalog: { available: () => [fakeModel] }, readFile: async () => "unused", createSession: async () => ({
+      subscribe(listener) { listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "replayed" } }); listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } }); return () => {}; },
+      async prompt() {}, dispose() {},
+    }) },
+  );
+  assert.equal("status" in worker && worker.status, "succeeded");
+});
+
+test("background worker rejects a tampered policy snapshot before any session", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-policy-tamper-"));
+  const submit = await runCommand(
+    { command: "ask", host: "codex", promptFile: "p.md", executionMode: "background", reconfigure: false, reset: false, json: true },
+    workspace, { catalog: { available: () => [fakeModel] }, readFile: async () => "q", createSession: async () => { throw new Error("no session on submit"); } },
+    { spawnWorker: async () => 556 },
+  );
+  const jobId = "jobId" in submit ? submit.jobId : "";
+  const requestFile = path.join(await resolveStateDir(workspace), "jobs", jobId, "request.json");
+  const request = JSON.parse(fs.readFileSync(requestFile, "utf8"));
+  request.policySnapshot.effectiveProjectPolicy.allowedTaskKinds = ["implement"];
+  fs.writeFileSync(requestFile, JSON.stringify(request));
+  let sessions = 0;
+  const worker = await runCommand(
+    { command: "__worker", jobId, workerToken: request.workerToken, reconfigure: false, reset: false, json: true },
+    workspace,
+    { catalog: { available: () => [fakeModel] }, readFile: async () => "unused", createSession: async () => { sessions += 1; throw new Error("tampered snapshot must not start a session"); } },
+  );
+  assert.equal("status" in worker && worker.status, "failed");
+  assert.equal("errorCode" in worker && worker.errorCode, "policy-snapshot-invalid");
+  assert.equal(sessions, 0);
+});
+
+async function scopedImplementFixture(mutate: (workspace: string) => void) {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-postflight-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
+  execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
+  fs.mkdirSync(path.join(workspace, "src"));
+  fs.writeFileSync(path.join(workspace, "src", "a.ts"), "export const a = 1;\n");
+  fs.writeFileSync(path.join(workspace, "package.json"), "{}\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "fixture"], { stdio: "ignore" });
+  await updateState(workspace, (state) => { state.config.profile = { dirs: ["src"], tasks: ["implementation"] }; });
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Make the change",
+    createSession: async (options) => ({
+      subscribe(listener) {
+        if (options.mode === "readonly") {
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED: changes match the task" } });
+        }
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        return () => {};
+      },
+      async prompt() {
+        if (options.mode === "implement") mutate(workspace);
+      },
+      dispose() {},
+    }),
+  };
+  return runCommand(
+    { command: "implement", host: "codex", promptFile: "prompt.md", reconfigure: false, reset: false, json: true },
+    workspace,
+    dependencies,
+  );
+}
+
+test("postflight rejects a changed path outside the project write roots", async () => {
+  const result = await scopedImplementFixture((workspace) => {
+    fs.writeFileSync(path.join(workspace, "package.json"), "changed\n");
+  });
+
+  assert.equal("status" in result && result.status, "failed");
+  assert.equal("errorCode" in result && result.errorCode, "project-scope-violation");
+  // The verifier and artifact steps run only on success, so neither should have executed.
+  assert.equal("agentVerification" in result && result.agentVerification, false);
+  assert.equal("artifact" in result && result.artifact, false);
+});
+
+test("postflight accepts a changed path inside the project write roots", async () => {
+  const result = await scopedImplementFixture((workspace) => {
+    fs.writeFileSync(path.join(workspace, "src", "a.ts"), "export const a = 2;\n");
+  });
+
+  assert.equal("status" in result && result.status, "succeeded");
+  assert.deepEqual("changedFiles" in result && result.changedFiles, ["src/a.ts"]);
+});
+
+test("scoped-tool policy violations are recorded in the job denial metrics and audit trail", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-violation-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
+  execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
+  fs.mkdirSync(path.join(workspace, "src"));
+  fs.writeFileSync(path.join(workspace, "src", "a.ts"), "export const a = 1;\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "fixture"], { stdio: "ignore" });
+  await updateState(workspace, (state) => { state.config.profile = { dirs: ["src"], tasks: ["implementation"] }; });
+
+  const violation = new ProjectPolicyError({
+    event: "policy-rejected",
+    errorCode: "project-scope-violation",
+    stage: "preflight",
+    recoverable: false,
+    message: "Path escapes an allowed read root: package.json",
+    preserved: [],
+    violatingPaths: ["package.json"],
+    nextActions: [],
+  });
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Make the change",
+    createSession: async (options) => ({
+      subscribe(listener) {
+        if (options.mode === "readonly") {
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED: ok" } });
+        }
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        return () => {};
+      },
+      async prompt() {
+        if (options.mode === "implement") {
+          // Simulate a scoped filesystem tool rejecting an out-of-scope read.
+          options.onPolicyViolation?.(violation);
+          // Recover with an in-scope change so the job itself still succeeds.
+          fs.writeFileSync(path.join(workspace, "src", "a.ts"), "export const a = 2;\n");
+        }
+      },
+      dispose() {},
+    }),
+  };
+  const result = await runCommand(
+    { command: "implement", host: "codex", promptFile: "prompt.md", reconfigure: false, reset: false, json: true },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal("status" in result && result.status, "succeeded");
+  assert.ok("policySummary" in result && result.policySummary && result.policySummary.denied >= 1);
+  const jobId = "jobId" in result && typeof result.jobId === "string" ? result.jobId : "";
+  const events = await fs.promises.readFile(
+    path.join(await resolveStateDir(workspace), "jobs", jobId, "policy-events.jsonl"),
+    "utf8",
+  );
+  assert.match(events, /project-scope-violation/);
+  // The audit event must record the actual violating path in its `paths` field, not just in the
+  // human-readable reason. This fails if the recorder reads the always-empty `preserved` array.
+  assert.match(events, /"paths":\["package\.json"\]/);
+});
+
+test("the durable background path re-checks task-kind admission on a valid snapshot", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-bg-admission-"));
+  const submit = await runCommand(
+    { command: "ask", host: "codex", promptFile: "p.md", executionMode: "background", reconfigure: false, reset: false, json: true },
+    workspace, { catalog: { available: () => [fakeModel] }, readFile: async () => "q", createSession: async () => { throw new Error("no session on submit"); } },
+    { spawnWorker: async () => 777 },
+  );
+  const jobId = "jobId" in submit ? submit.jobId : "";
+  // Replace the snapshot with a VALID (self-consistent) v2 snapshot whose allowed kinds exclude the request kind.
+  const planOnly = await compileEffectiveProjectPolicy({ cwd: workspace, profile: { tasks: ["planning"] } });
+  const mismatched = createPolicySnapshot({
+    sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("scout"), effectiveProjectPolicy: planOnly,
+  });
+  const requestFile = path.join(await resolveStateDir(workspace), "jobs", jobId, "request.json");
+  const request = JSON.parse(fs.readFileSync(requestFile, "utf8"));
+  request.policySnapshot = mismatched;
+  fs.writeFileSync(requestFile, JSON.stringify(request));
+
+  let sessions = 0;
+  const worker = await runCommand(
+    { command: "__worker", jobId, workerToken: request.workerToken, reconfigure: false, reset: false, json: true },
+    workspace,
+    { catalog: { available: () => [fakeModel] }, readFile: async () => "unused", createSession: async () => { sessions += 1; throw new Error("admission must reject before a session"); } },
+  );
+  assert.equal("status" in worker && worker.status, "failed");
+  assert.equal("errorCode" in worker && worker.errorCode, "task-kind-not-allowed");
+  assert.equal(sessions, 0);
+});
+
+test("a resumed job keeps its absent project goal despite a later profile edit", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-resume-goal-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
+  execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Make the change",
+    createSession: async (options) => ({
+      subscribe(listener) {
+        if (options.mode === "readonly") {
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED: ok" } });
+        }
+        listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        return () => {};
+      },
+      async prompt() {
+        if (options.mode === "implement") fs.writeFileSync(path.join(workspace, "note.txt"), "done\n");
+      },
+      dispose() {},
+    }),
+  };
+  // An unborn workspace blocks implementation and returns a continuation whose request carries no project goal.
+  const blocked = await runCommand(
+    { command: "implement", host: "codex", promptFile: "prompt.md", reconfigure: false, reset: false, json: true },
+    workspace, dependencies,
+  );
+  const continuationId = "continuationId" in blocked ? blocked.continuationId : "";
+  assert.ok(continuationId);
+
+  // Repair the workspace and add a project goal to the live profile AFTER the continuation was captured.
+  fs.writeFileSync(path.join(workspace, "note.txt"), "base\n");
+  execFileSync("git", ["-C", workspace, "add", "note.txt"]);
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "initial"], { stdio: "ignore" });
+  await updateState(workspace, (state) => { state.config.profile = { goal: "added after submission" }; });
+
+  const resumed = await runCommand(
+    { command: "resume", continuationId, reconfigure: false, reset: false, json: true },
+    workspace, dependencies,
+  );
+  const resumedId = "jobId" in resumed && typeof resumed.jobId === "string" ? resumed.jobId : "";
+  assert.ok(resumedId);
+  // The resumed job must not adopt the newly added profile goal.
+  assert.equal("projectGoal" in (await readJobRequest(workspace, resumedId)), false);
 });
 
 test("supervised wait uses a managed relay and returns approval without blocking the Host", async () => {

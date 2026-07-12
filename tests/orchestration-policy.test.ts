@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { createPolicySnapshot, defaultRoleForTask, resolveRolePolicy } from "../src/orchestration/roles.js";
+import { assertPolicySnapshotValid, createPolicySnapshot, defaultRoleForTask, resolveRolePolicy } from "../src/orchestration/roles.js";
 import { ClassifierDecisionCache, PolicyEngine, actionFingerprint } from "../src/policy/engine.js";
-import { loadRepositoryDenyRules } from "../src/policy/project-policy.js";
+import { compileEffectiveProjectPolicy, loadRepositoryDenyRules } from "../src/policy/project-policy.js";
 
 test("role registry keeps task compatibility and requested thinking defaults", () => {
   assert.equal(defaultRoleForTask("plan"), "planner");
@@ -84,6 +84,64 @@ test("deny rules override ask and allow rules regardless of declaration order", 
   const result = await new PolicyEngine({ snapshot }).authorize({ toolName: "network", input: {}, cwd: workspace, domain: "example.com", port: 443 });
   assert.equal(result.decision, "deny");
   assert.match(result.reason, /deny/);
+});
+
+test("v2 policy snapshot embeds the effective project policy and its scope hash", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-snapshot-v2-"));
+  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({ cwd: workspace, profile: { dirs: ["src"], tasks: ["implementation"] } });
+  const snapshot = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    effectiveProjectPolicy,
+  });
+  assert.equal(snapshot.version, 2);
+  assert.deepEqual(snapshot.effectiveProjectPolicy, effectiveProjectPolicy);
+  assert.equal(snapshot.scopeHash, effectiveProjectPolicy.scopeHash);
+  assert.doesNotThrow(() => assertPolicySnapshotValid(snapshot));
+});
+
+test("a snapshot without an effective project policy stays version 1", () => {
+  const snapshot = createPolicySnapshot({ sandboxMode: "strict", approvalMode: "deny", rolePolicy: resolveRolePolicy("executor") });
+  assert.equal(snapshot.version, 1);
+  assert.throws(() => assertPolicySnapshotValid(snapshot), /version 2/);
+});
+
+test("snapshot validation rejects tampered fields", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-snapshot-tamper-"));
+  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({ cwd: workspace, profile: { dirs: ["src"], tasks: ["implementation"] } });
+  const base = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    effectiveProjectPolicy,
+  });
+  const clone = () => structuredClone(base);
+
+  const tamperedTaskKinds = clone();
+  tamperedTaskKinds.effectiveProjectPolicy.allowedTaskKinds = ["ask"];
+  assert.throws(() => assertPolicySnapshotValid(tamperedTaskKinds), /policy-rejected|hash/i);
+
+  const tamperedScope = clone();
+  tamperedScope.scopeHash = "0".repeat(64);
+  assert.throws(() => assertPolicySnapshotValid(tamperedScope), /scope hash|hash/i);
+
+  const tamperedRole = clone();
+  tamperedRole.rolePolicy = resolveRolePolicy("scout");
+  assert.throws(() => assertPolicySnapshotValid(tamperedRole), /hash/i);
+
+  const tamperedHash = clone();
+  tamperedHash.hash = "0".repeat(64);
+  assert.throws(() => assertPolicySnapshotValid(tamperedHash), /hash/i);
+});
+
+test("v2 snapshot hash ignores object key insertion order", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-snapshot-order-"));
+  const forward = await compileEffectiveProjectPolicy({ cwd: workspace, profile: { dirs: ["lib", "src"], tasks: ["planning", "implementation"] } });
+  const reordered = await compileEffectiveProjectPolicy({ cwd: workspace, profile: { dirs: ["src", "lib"], tasks: ["implementation", "planning"] } });
+  const left = createPolicySnapshot({ sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("executor"), effectiveProjectPolicy: forward });
+  const right = createPolicySnapshot({ sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("executor"), effectiveProjectPolicy: reordered });
+  assert.equal(left.hash, right.hash);
 });
 
 test("policy fingerprints are stable and repository policy can only deny", async () => {

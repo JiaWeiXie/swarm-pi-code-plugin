@@ -60,6 +60,8 @@ export interface JobRecord {
   pid?: number;
   workerToken?: string;
   role?: WorkerRoleId;
+  policyHash?: string;
+  scopeHash?: string;
   generation?: number;
   pendingApprovalId?: string;
   approvals?: ApprovalRequest[];

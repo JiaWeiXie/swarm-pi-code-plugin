@@ -114,3 +114,35 @@ test("OS sandbox writes only when the worker mode permits it", {
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
+
+test("sandbox write allowlist follows bound project policy roots", async () => {
+  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-bound-policy-")));
+  const tempRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-bound-home-")));
+  fs.mkdirSync(path.join(cwd, "src"));
+
+  const { bindProjectPolicy, compileEffectiveProjectPolicy } = await import("../src/policy/project-policy.js");
+  const scoped = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["src"] } }),
+    cwd,
+  );
+  const unrestricted = await bindProjectPolicy(await compileEffectiveProjectPolicy({ cwd }), cwd);
+  const scopedImplement = await sandboxConfiguration(cwd, tempRoot, "implement", process.env, "lenient", [], scoped);
+  const fallbackImplement = await sandboxConfiguration(cwd, tempRoot, "implement");
+  const unrestrictedImplement = await sandboxConfiguration(cwd, tempRoot, "implement", process.env, "lenient", [], unrestricted);
+  const scopedReadonly = await sandboxConfiguration(cwd, tempRoot, "readonly", process.env, "lenient", [], scoped);
+
+  assert.deepEqual(scopedImplement.filesystem.allowWrite, [path.join(cwd, "src"), tempRoot]);
+  assert.equal(scopedImplement.filesystem.allowWrite.includes(cwd), false);
+  assert.deepEqual(fallbackImplement.filesystem.allowWrite, [cwd, tempRoot]);
+  assert.deepEqual(unrestrictedImplement.filesystem.allowWrite, [cwd, tempRoot]);
+  assert.deepEqual(scopedReadonly.filesystem.allowWrite, [tempRoot]);
+
+  const { resolveStateDir } = await import("../src/state/state.js");
+  const stateDir = await resolveStateDir(cwd);
+  for (const configuration of [scopedImplement, fallbackImplement, unrestrictedImplement, scopedReadonly]) {
+    assert.equal(configuration.filesystem.denyWrite.includes(stateDir), true);
+    assert.equal(configuration.filesystem.denyWrite.includes(path.join(cwd, ".git")), true);
+    assert.equal(configuration.filesystem.denyWrite.includes(path.join(cwd, ".env")), true);
+    assert.equal(configuration.filesystem.denyWrite.includes(path.join(cwd, ".swarm-pi-policy.json")), true);
+  }
+});

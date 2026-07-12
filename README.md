@@ -226,6 +226,21 @@ use an isolated demo workspace and contain no real credentials.
 
 ![Configuration saved](docs/assets/setup/05-saved.png)
 
+### Enforced project policy
+
+Configured allowed task kinds are an admission gate: a disallowed kind is rejected
+before the job runs, rather than being a prompt suggestion. Configured allowed
+folders constrain the scoped filesystem tools, and implementation writes are
+enforced at three layers: the tool boundary, the sandbox write allowlist in
+adaptive and lenient Bash modes, and a postflight changed-path check. Omitting
+these restrictions preserves whole-workspace behavior for backward
+compatibility. Reads and writes differ: while the scoped Pi filesystem tools
+enforce read scope and the three layers above enforce implementation writes,
+raw Bash reads in adaptive and lenient modes are not folder-scoped and can read
+within the workspace subject to the sensitive deny paths; use Strict mode when
+folder-level read confidentiality is required. See [Enforced Project Policy](docs/orchestration-and-policy.md#enforced-project-policy)
+for the technical contract.
+
 ### Non-interactive runner
 
 The shared runner is useful for automation and host integration:
@@ -275,8 +290,10 @@ the control plane creates a job-owned branch and worktree. Executor and
 security-executor implementation remain supervised.
 
 Each new durable job stores a non-secret provider/model snapshot and integrity
-hash. Settings changed later affect only new jobs; credentials are resolved at
-execution time, so sign-out or rotation still takes effect for queued work.
+hash, along with the effective project policy and project goal. Later profile
+edits apply only to newly submitted jobs; queued, running, and resumed jobs
+keep their original snapshot. Credentials are resolved at execution time, so
+sign-out or rotation still takes effect for queued work.
 
 Worker commands use a 30-minute default timeout for `ask`, `plan`, and `review`,
 and a 60-minute default for `orchestrate` and `implement`. Override the job
@@ -329,10 +346,12 @@ is required while the job remains live.
 | `5` | `setup-required` or `workspace-action-required` | Setup or a workspace decision is required before execution can continue. |
 
 Approval and terminal notifications are acknowledged independently. A lease is
-bound to the job generation, policy hash, action fingerprint, and expiry. An
-approve or deny operation atomically resolves that approval and acknowledges
-only its matching approval notification. Terminal notifications remain pending
-until the Host has shown and explicitly acknowledged the terminal result.
+bound to the job generation, policy hash, action fingerprint, and expiry. The
+policy hash includes the project scope, so changing allowed folders prevents an
+old lease from being reused. An approve or deny operation atomically resolves
+that approval and acknowledges only its matching approval notification. Terminal
+notifications remain pending until the Host has shown and explicitly
+acknowledged the terminal result.
 
 `jobs watch --emit ndjson` polls canonical state and replays pending events so a
 Host can recover after a restart. Events are allowlisted and exclude worker
@@ -404,6 +423,15 @@ verified artifact requires explicit materialization. Tracked, staged,
 conflicted, secret-like, or unknown files require an explicit isolated HEAD or
 isolated snapshot strategy. Swarm Pi never deletes, stashes, hides, or commits
 the user's existing changes.
+
+### A job failed with `project-scope-violation`
+
+The job changed or tried to touch a path outside the configured allowed folders.
+Review the project's configured allowed folders. A postflight scope violation
+prevents checkpointing, verification, and delivery, so nothing is applied. To
+widen the scope, edit the profile and submit a **new** job; a queued, running,
+or resumed job keeps its original snapshot and will not adopt the edit. Policy
+decisions and scoped-tool denials appear in the job audit trail.
 
 ### Git is initialized but has no commit
 
