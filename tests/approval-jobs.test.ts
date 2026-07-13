@@ -27,9 +27,16 @@ async function fixture() {
     rolePolicy: resolveRolePolicy("scout"),
   });
   const job = await startJob(cwd, {
-    host: "codex", kind: "ask", prompt: "inspect", cwd,
-    executionMode: "supervised", sandboxMode: "adaptive", timeoutMs: 60_000,
-    role: "scout", approvalMode: "wait", policySnapshot: snapshot,
+    host: "codex",
+    kind: "ask",
+    prompt: "inspect",
+    cwd,
+    executionMode: "supervised",
+    sandboxMode: "adaptive",
+    timeoutMs: 60_000,
+    role: "scout",
+    approvalMode: "wait",
+    policySnapshot: snapshot,
   });
   return { cwd, snapshot, job };
 }
@@ -37,8 +44,17 @@ async function fixture() {
 test("approval transitions remain non-terminal and create a single-use lease", async () => {
   const { cwd, snapshot, job } = await fixture();
   const approval = await requestJobApproval(cwd, job.id, job.workerToken, {
-    actionFingerprint: "fingerprint", toolName: "bash", actionSummary: "bash npm test",
-    decision: { decision: "require-approval", risk: "high", capabilities: ["shell.execute"], reason: "review", constraints: [], policyHash: snapshot.hash },
+    actionFingerprint: "fingerprint",
+    toolName: "bash",
+    actionSummary: "bash npm test",
+    decision: {
+      decision: "require-approval",
+      risk: "high",
+      capabilities: ["shell.execute"],
+      reason: "review",
+      constraints: [],
+      policyHash: snapshot.hash,
+    },
     expiresAt: new Date(Date.now() + 30_000).toISOString(),
   });
   assert.equal((await getJob(cwd, job.id)).job.status, "awaiting-approval");
@@ -61,8 +77,17 @@ test("approval transitions remain non-terminal and create a single-use lease", a
 test("denied approvals resume the worker without issuing a lease", async () => {
   const { cwd, snapshot, job } = await fixture();
   const approval = await requestJobApproval(cwd, job.id, job.workerToken, {
-    actionFingerprint: "deny-me", toolName: "network", actionSummary: "network example.com:443",
-    decision: { decision: "require-approval", risk: "high", capabilities: ["network.connect"], reason: "review", constraints: [], policyHash: snapshot.hash },
+    actionFingerprint: "deny-me",
+    toolName: "network",
+    actionSummary: "network example.com:443",
+    decision: {
+      decision: "require-approval",
+      risk: "high",
+      capabilities: ["network.connect"],
+      reason: "review",
+      constraints: [],
+      policyHash: snapshot.hash,
+    },
     expiresAt: new Date(Date.now() + 30_000).toISOString(),
   });
   const denied = await denyJobApproval(cwd, job.id, approval.id);
@@ -75,14 +100,26 @@ test("denied approvals resume the worker without issuing a lease", async () => {
 
 test("startJob selects request version 4 for a v2 policy snapshot with model configuration", async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-request-v4-"));
-  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["src"], tasks: ["implementation"] } });
+  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({
+    cwd,
+    profile: { dirs: ["src"], tasks: ["implementation"] },
+  });
   const snapshot = createPolicySnapshot({
-    sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("executor"), effectiveProjectPolicy,
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    effectiveProjectPolicy,
   });
   const job = await startJob(cwd, {
-    host: "codex", kind: "implement", prompt: "apply", cwd,
-    executionMode: "supervised", sandboxMode: "adaptive", timeoutMs: 60_000,
-    role: "executor", policySnapshot: snapshot,
+    host: "codex",
+    kind: "implement",
+    prompt: "apply",
+    cwd,
+    executionMode: "supervised",
+    sandboxMode: "adaptive",
+    timeoutMs: 60_000,
+    role: "executor",
+    policySnapshot: snapshot,
     modelConfiguration: defaultModelConfiguration(["test-provider/test-model"]),
   });
   const request = await readJobRequest(cwd, job.id);
@@ -95,28 +132,61 @@ test("startJob selects request version 4 for a v2 policy snapshot with model con
 
 test("startJob refuses a v2 policy snapshot without model configuration", async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-request-v4-guard-"));
-  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["src"], tasks: ["implementation"] } });
-  const snapshot = createPolicySnapshot({
-    sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("executor"), effectiveProjectPolicy,
+  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({
+    cwd,
+    profile: { dirs: ["src"], tasks: ["implementation"] },
   });
-  await assert.rejects(startJob(cwd, {
-    host: "codex", kind: "implement", prompt: "apply", cwd,
-    executionMode: "supervised", sandboxMode: "adaptive", timeoutMs: 60_000,
-    role: "executor", policySnapshot: snapshot,
-  }), /version 2 requires modelConfiguration/);
+  const snapshot = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    effectiveProjectPolicy,
+  });
+  await assert.rejects(
+    startJob(cwd, {
+      host: "codex",
+      kind: "implement",
+      prompt: "apply",
+      cwd,
+      executionMode: "supervised",
+      sandboxMode: "adaptive",
+      timeoutMs: 60_000,
+      role: "executor",
+      policySnapshot: snapshot,
+    }),
+    /version 2 requires modelConfiguration/,
+  );
 });
 
 test("startJob keeps legacy request versions for v1 snapshots", async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-request-legacy-"));
-  const snapshot = createPolicySnapshot({ sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("scout") });
+  const snapshot = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("scout"),
+  });
   const withoutModel = await startJob(cwd, {
-    host: "codex", kind: "ask", prompt: "inspect", cwd,
-    executionMode: "supervised", sandboxMode: "adaptive", timeoutMs: 60_000, role: "scout", policySnapshot: snapshot,
+    host: "codex",
+    kind: "ask",
+    prompt: "inspect",
+    cwd,
+    executionMode: "supervised",
+    sandboxMode: "adaptive",
+    timeoutMs: 60_000,
+    role: "scout",
+    policySnapshot: snapshot,
   });
   assert.equal((await readJobRequest(cwd, withoutModel.id)).requestVersion, 2);
   const withModel = await startJob(cwd, {
-    host: "codex", kind: "ask", prompt: "inspect", cwd,
-    executionMode: "supervised", sandboxMode: "adaptive", timeoutMs: 60_000, role: "scout", policySnapshot: snapshot,
+    host: "codex",
+    kind: "ask",
+    prompt: "inspect",
+    cwd,
+    executionMode: "supervised",
+    sandboxMode: "adaptive",
+    timeoutMs: 60_000,
+    role: "scout",
+    policySnapshot: snapshot,
     modelConfiguration: defaultModelConfiguration(["test-provider/test-model"]),
   });
   const request = await readJobRequest(cwd, withModel.id);
@@ -127,10 +197,21 @@ test("startJob keeps legacy request versions for v1 snapshots", async () => {
 
 test("startJob persists an optional projectGoal in the durable request", async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-request-goal-"));
-  const snapshot = createPolicySnapshot({ sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("scout") });
+  const snapshot = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("scout"),
+  });
   const common = {
-    host: "codex" as const, kind: "ask" as const, prompt: "inspect", cwd,
-    executionMode: "supervised" as const, sandboxMode: "adaptive" as const, timeoutMs: 60_000, role: "scout" as const, policySnapshot: snapshot,
+    host: "codex" as const,
+    kind: "ask" as const,
+    prompt: "inspect",
+    cwd,
+    executionMode: "supervised" as const,
+    sandboxMode: "adaptive" as const,
+    timeoutMs: 60_000,
+    role: "scout" as const,
+    policySnapshot: snapshot,
   };
 
   const withGoal = await startJob(cwd, { ...common, projectGoal: "ship the widget" });
@@ -142,29 +223,60 @@ test("startJob persists an optional projectGoal in the durable request", async (
 
 test("a capability lease is bound to the exact policy snapshot, so a scope change invalidates it", async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-lease-binding-"));
-  const effectiveA = await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["src"], tasks: ["implementation"] } });
+  const effectiveA = await compileEffectiveProjectPolicy({
+    cwd,
+    profile: { dirs: ["src"], tasks: ["implementation"] },
+  });
   const snapshotA = createPolicySnapshot({
-    sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("executor"), effectiveProjectPolicy: effectiveA,
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    effectiveProjectPolicy: effectiveA,
   });
   // Same project scope, different snapshot-affecting setting (sandbox mode): scopeHash equal, snapshot hash differs.
   const snapshotSameScope = createPolicySnapshot({
-    sandboxMode: "lenient", approvalMode: "wait", rolePolicy: resolveRolePolicy("executor"), effectiveProjectPolicy: effectiveA,
+    sandboxMode: "lenient",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    effectiveProjectPolicy: effectiveA,
   });
   // Different project scope: both scopeHash and snapshot hash differ.
-  const effectiveB = await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["lib"], tasks: ["implementation"] } });
+  const effectiveB = await compileEffectiveProjectPolicy({
+    cwd,
+    profile: { dirs: ["lib"], tasks: ["implementation"] },
+  });
   const snapshotB = createPolicySnapshot({
-    sandboxMode: "adaptive", approvalMode: "wait", rolePolicy: resolveRolePolicy("executor"), effectiveProjectPolicy: effectiveB,
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    effectiveProjectPolicy: effectiveB,
   });
 
   const job = await startJob(cwd, {
-    host: "codex", kind: "implement", prompt: "apply", cwd,
-    executionMode: "supervised", sandboxMode: "adaptive", timeoutMs: 60_000,
-    role: "executor", approvalMode: "wait", policySnapshot: snapshotA,
+    host: "codex",
+    kind: "implement",
+    prompt: "apply",
+    cwd,
+    executionMode: "supervised",
+    sandboxMode: "adaptive",
+    timeoutMs: 60_000,
+    role: "executor",
+    approvalMode: "wait",
+    policySnapshot: snapshotA,
     modelConfiguration: defaultModelConfiguration(["test-provider/test-model"]),
   });
   const approval = await requestJobApproval(cwd, job.id, job.workerToken, {
-    actionFingerprint: "write-src", toolName: "write", actionSummary: "write src/new.ts",
-    decision: { decision: "require-approval", risk: "high", capabilities: ["filesystem.write-workspace"], reason: "review", constraints: [], policyHash: snapshotA.hash },
+    actionFingerprint: "write-src",
+    toolName: "write",
+    actionSummary: "write src/new.ts",
+    decision: {
+      decision: "require-approval",
+      risk: "high",
+      capabilities: ["filesystem.write-workspace"],
+      reason: "review",
+      constraints: [],
+      policyHash: snapshotA.hash,
+    },
     expiresAt: new Date(Date.now() + 30_000).toISOString(),
   });
   // A job-scoped lease so a later rejection cannot be explained by one-shot consumption.

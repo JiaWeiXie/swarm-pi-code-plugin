@@ -163,7 +163,10 @@ export async function setAvailableModels(cwd, models) {
 }
 export async function saveProfile(cwd, profile) {
     return updateState(cwd, (state) => {
-        state.config.profile = { ...profile, configuredAt: profile.configuredAt ?? new Date().toISOString() };
+        state.config.profile = {
+            ...profile,
+            configuredAt: profile.configuredAt ?? new Date().toISOString(),
+        };
     });
 }
 export async function saveProjectSettings(cwd, profile, sandboxMode, execution) {
@@ -298,9 +301,12 @@ function normalizeState(value) {
     state.config.rolePolicies = rolePolicyOverrides(config.rolePolicies);
     state.config.adaptivePolicy = normalizeAdaptivePolicy(asRecord(config.adaptivePolicy));
     const background = asRecord(config.backgroundRolePolicy);
-    state.config.backgroundRolePolicy = { mechanicalExecutor: background.mechanicalExecutor === true };
+    state.config.backgroundRolePolicy = {
+        mechanicalExecutor: background.mechanicalExecutor === true,
+    };
     const decisionMode = config.decisionMode;
-    state.config.decisionMode = decisionMode === "cost" || decisionMode === "power" ? decisionMode : "balance";
+    state.config.decisionMode =
+        decisionMode === "cost" || decisionMode === "power" ? decisionMode : "balance";
     state.config.hostAssistance = normalizeHostAssistancePolicy(config.hostAssistance);
     state.config.contextBudget = Number.isInteger(config.contextBudget)
         ? Math.min(64, Math.max(0, config.contextBudget))
@@ -321,7 +327,9 @@ function normalizeState(value) {
         ? value.jobs.filter((job) => typeof job === "object" && job !== null && typeof job.id === "string")
         : [];
     const migration = asRecord(value.migration);
-    if ((migration.source === ".swarm-pi-code-plugin" || migration.source === ".swarm-pi-code" || migration.source === ".swarm-code") &&
+    if ((migration.source === ".swarm-pi-code-plugin" ||
+        migration.source === ".swarm-pi-code" ||
+        migration.source === ".swarm-code") &&
         typeof migration.migratedAt === "string") {
         state.migration = { source: migration.source, migratedAt: migration.migratedAt };
     }
@@ -336,10 +344,16 @@ function normalizeHostAssistancePolicy(value) {
     return {
         enabled: mode === "off" ? false : candidate.enabled !== false,
         mode,
-        contextClasses: Array.isArray(candidate.contextClasses) ? candidate.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item)) : defaults.contextClasses,
+        contextClasses: Array.isArray(candidate.contextClasses)
+            ? candidate.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item))
+            : defaults.contextClasses,
         privateConnector: candidate.privateConnector === "deny" ? "deny" : "ask",
-        maxRequests: Number.isInteger(candidate.maxRequests) ? Math.min(MAX_HOST_ASSISTANCE_REQUESTS, Math.max(0, candidate.maxRequests)) : defaults.maxRequests,
-        maxFanOut: Number.isInteger(candidate.maxFanOut) ? Math.min(MAX_HOST_ASSISTANCE_FAN_OUT, Math.max(0, candidate.maxFanOut)) : defaults.maxFanOut,
+        maxRequests: Number.isInteger(candidate.maxRequests)
+            ? Math.min(MAX_HOST_ASSISTANCE_REQUESTS, Math.max(0, candidate.maxRequests))
+            : defaults.maxRequests,
+        maxFanOut: Number.isInteger(candidate.maxFanOut)
+            ? Math.min(MAX_HOST_ASSISTANCE_FAN_OUT, Math.max(0, candidate.maxFanOut))
+            : defaults.maxFanOut,
     };
 }
 function normalizeAdvisorPolicy(value) {
@@ -349,9 +363,24 @@ function normalizeAdvisorPolicy(value) {
     const candidate = value;
     return {
         enabled: candidate.enabled === true,
-        targets: Array.isArray(candidate.targets) ? candidate.targets.filter((item) => ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"].includes(item)) : defaults.targets,
-        maxRequests: Number.isInteger(candidate.maxRequests) ? Math.min(MAX_ADVISOR_REQUESTS, Math.max(0, candidate.maxRequests)) : defaults.maxRequests,
-        maxPerspectives: Number.isInteger(candidate.maxPerspectives) ? Math.min(MAX_ADVISOR_PERSPECTIVES, Math.max(0, candidate.maxPerspectives)) : defaults.maxPerspectives,
+        targets: Array.isArray(candidate.targets)
+            ? candidate.targets.filter((item) => [
+                "ask",
+                "review",
+                "plan",
+                "implement",
+                "orchestrate",
+                "scaffold",
+                "setup",
+                "discover",
+            ].includes(item))
+            : defaults.targets,
+        maxRequests: Number.isInteger(candidate.maxRequests)
+            ? Math.min(MAX_ADVISOR_REQUESTS, Math.max(0, candidate.maxRequests))
+            : defaults.maxRequests,
+        maxPerspectives: Number.isInteger(candidate.maxPerspectives)
+            ? Math.min(MAX_ADVISOR_PERSPECTIVES, Math.max(0, candidate.maxPerspectives))
+            : defaults.maxPerspectives,
     };
 }
 export function defaultHostActionPolicy() {
@@ -376,9 +405,15 @@ function normalizeHostActionPolicy(value) {
         enabled: candidate.enabled !== false,
         allowedActionClasses: classes,
         remoteActionsEnabled: candidate.remoteActionsEnabled === true,
-        maxUses: Number.isInteger(candidate.maxUses) ? Math.min(100, Math.max(1, candidate.maxUses)) : defaults.maxUses,
-        maxCost: typeof candidate.maxCost === "number" && Number.isFinite(candidate.maxCost) ? Math.max(0, candidate.maxCost) : defaults.maxCost,
-        ttlMs: Number.isInteger(candidate.ttlMs) ? Math.min(24 * 60 * 60_000, Math.max(60_000, candidate.ttlMs)) : defaults.ttlMs,
+        maxUses: Number.isInteger(candidate.maxUses)
+            ? Math.min(100, Math.max(1, candidate.maxUses))
+            : defaults.maxUses,
+        maxCost: typeof candidate.maxCost === "number" && Number.isFinite(candidate.maxCost)
+            ? Math.max(0, candidate.maxCost)
+            : defaults.maxCost,
+        ttlMs: Number.isInteger(candidate.ttlMs)
+            ? Math.min(24 * 60 * 60_000, Math.max(60_000, candidate.ttlMs))
+            : defaults.ttlMs,
     };
 }
 async function resolveGitCommonDir(cwd) {
@@ -435,7 +470,9 @@ function asRecord(value) {
         : {};
 }
 function stringArray(value) {
-    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+    return Array.isArray(value)
+        ? value.filter((item) => typeof item === "string")
+        : [];
 }
 function stringValue(value) {
     return typeof value === "string" ? value : undefined;
@@ -452,7 +489,9 @@ function rolePolicyOverrides(value) {
         const candidate = asRecord(raw);
         result[key] = {
             ...(stringArray(candidate.models).length ? { models: stringArray(candidate.models) } : {}),
-            ...(typeof candidate.thinkingLevel === "string" ? { thinkingLevel: candidate.thinkingLevel } : {}),
+            ...(typeof candidate.thinkingLevel === "string"
+                ? { thinkingLevel: candidate.thinkingLevel }
+                : {}),
             ...(typeof candidate.maxAttempts === "number" ? { maxAttempts: candidate.maxAttempts } : {}),
         };
     }

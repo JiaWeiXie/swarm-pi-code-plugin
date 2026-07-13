@@ -27,21 +27,31 @@ test("Claude and Codex manifests use the swarm-pi-code-plugin identity", () => {
 
 test("plugin package contains both host adapters and a self-contained runner", () => {
   const pluginRoot = path.join(repoRoot, "plugins/swarm-pi-code-plugin");
-  const skills = ["configure", "project", "ask", "review", "plan", "implement", "orchestrate", "discover", "scaffold", "setup"];
+  const skills = [
+    "configure",
+    "project",
+    "ask",
+    "review",
+    "plan",
+    "implement",
+    "orchestrate",
+    "discover",
+    "scaffold",
+    "setup",
+  ];
   for (const skill of skills) {
-    const file = path.join(
-      pluginRoot,
-      "skills",
-      `swarm-pi-code-plugin-${skill}`,
-      "SKILL.md",
-    );
+    const file = path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md");
     assert.equal(fs.existsSync(file), true, `missing Codex skill: ${skill}`);
     const source = fs.readFileSync(file, "utf8");
     assert.match(source, /cross-host control protocol/i);
-    assert.equal(fs.existsSync(path.join(path.dirname(file), "agents/openai.yaml")), true, `missing Codex metadata: ${skill}`);
+    assert.equal(
+      fs.existsSync(path.join(path.dirname(file), "agents/openai.yaml")),
+      true,
+      `missing Codex metadata: ${skill}`,
+    );
     const metadata = fs.readFileSync(path.join(path.dirname(file), "agents/openai.yaml"), "utf8");
     assert.match(metadata, /display_name:/);
-    assert.match(metadata, new RegExp(`\\$swarm-pi-code-plugin-${skill}`));
+    assert.match(metadata, new RegExp(`\\$swarm-pi-${skill}`));
   }
 
   for (const relative of [
@@ -57,11 +67,15 @@ test("plugin package contains both host adapters and a self-contained runner", (
     "package.json",
     "package-lock.json",
   ]) {
-    assert.equal(fs.existsSync(path.join(pluginRoot, relative)), true, `missing plugin file: ${relative}`);
+    assert.equal(
+      fs.existsSync(path.join(pluginRoot, relative)),
+      true,
+      `missing plugin file: ${relative}`,
+    );
   }
 
   const implementation = fs.readFileSync(
-    path.join(pluginRoot, "skills/swarm-pi-code-plugin-implement/SKILL.md"),
+    path.join(pluginRoot, "skills/swarm-pi-implement/SKILL.md"),
     "utf8",
   );
   assert.match(implementation, /explicit mutation intent/i);
@@ -76,7 +90,7 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(implementation, /jobs materialize/);
 
   const orchestration = fs.readFileSync(
-    path.join(pluginRoot, "skills/swarm-pi-code-plugin-orchestrate/SKILL.md"),
+    path.join(pluginRoot, "skills/swarm-pi-orchestrate/SKILL.md"),
     "utf8",
   );
   assert.match(orchestration, /EvidencePack/);
@@ -84,22 +98,27 @@ test("plugin package contains both host adapters and a self-contained runner", (
 
   for (const skill of ["ask", "review", "plan", "implement", "orchestrate"]) {
     const source = fs.readFileSync(
-      path.join(pluginRoot, "skills", `swarm-pi-code-plugin-${skill}`, "SKILL.md"),
+      path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
       "utf8",
     );
     assert.match(source, /cross-host control protocol/i);
     assert.match(source, /--execution-mode/);
   }
   for (const skill of ["scaffold", "setup"]) {
-    const source = fs.readFileSync(path.join(pluginRoot, "skills", `swarm-pi-code-plugin-${skill}`, "SKILL.md"), "utf8");
+    const source = fs.readFileSync(
+      path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
+      "utf8",
+    );
     assert.match(source, /cross-host control protocol/i);
     assert.match(source, /--execution-mode/);
   }
-  for (const command of ["init", "project", "ask", "review", "plan", "implement", "orchestrate", "discover", "scaffold", "setup"]) {
-    const commandPath = path.join(pluginRoot, "commands", `${command}.md`);
-    assert.equal(fs.existsSync(commandPath), true, `missing Claude command: ${command}`);
-    assert.match(fs.readFileSync(commandPath, "utf8"), /swarm-pi-code-plugin-/);
-  }
+  // The wrapper commands were removed: each capability is a single short-named
+  // skill, invoked in Claude Code as /swarm-pi-code-plugin:swarm-pi-<name>.
+  assert.equal(
+    fs.existsSync(path.join(pluginRoot, "commands")),
+    false,
+    "commands/ should be removed",
+  );
   const protocolPath = path.join(pluginRoot, "references/host-protocol.md");
   assert.equal(fs.existsSync(protocolPath), true);
   const protocol = fs.readFileSync(protocolPath, "utf8");
@@ -110,11 +129,11 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(protocol, /UNTRUSTED_HOST_CONTEXT/);
 
   const workerAgent = fs.readFileSync(path.join(pluginRoot, "agents/pi-worker.md"), "utf8");
-  assert.match(workerAgent, /swarm-pi-code-plugin-orchestrate/);
+  assert.match(workerAgent, /swarm-pi-orchestrate/);
   assert.match(workerAgent, /host-protocol/);
 
   const configure = fs.readFileSync(
-    path.join(pluginRoot, "skills/swarm-pi-code-plugin-configure/SKILL.md"),
+    path.join(pluginRoot, "skills/swarm-pi-configure/SKILL.md"),
     "utf8",
   );
   assert.match(configure, /\$RUNNER configure --host "\$HOST"/);
@@ -123,13 +142,14 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.doesNotMatch(configure, /Ask for a replacement project goal/i);
 
   const project = fs.readFileSync(
-    path.join(pluginRoot, "skills/swarm-pi-code-plugin-project/SKILL.md"),
+    path.join(pluginRoot, "skills/swarm-pi-project/SKILL.md"),
     "utf8",
   );
   assert.match(project, /\$RUNNER configure --host "\$HOST" --section project/);
   assert.match(project, /workflow is repeatable/i);
-  const initCommand = fs.readFileSync(path.join(pluginRoot, "commands/init.md"), "utf8");
-  assert.doesNotMatch(initCommand, /Ask for replacement project goal/i);
+  // The init command's --reset/--json routing folded into the configure skill.
+  assert.match(configure, /--reset/);
+  assert.match(configure, /exactly `--json`/);
 
   const pluginPackage = readJson("plugins/swarm-pi-code-plugin/package.json") as {
     dependencies: Record<string, string>;
@@ -155,8 +175,8 @@ test("repo marketplaces point at the shared plugin root", () => {
   assert.equal(claude.name, "swarm-pi-code-plugin");
   assert.equal(claude.plugins[0]?.name, "swarm-pi-code-plugin");
   assert.equal(claude.plugins[0]?.source, "./plugins/swarm-pi-code-plugin");
-  assert.equal(claude.metadata.version, "0.5.1");
-  assert.equal(claude.plugins[0]?.version, "0.5.1");
+  assert.equal(claude.metadata.version, "0.6.0");
+  assert.equal(claude.plugins[0]?.version, "0.6.0");
   assert.equal(codex.name, "swarm-pi-code-plugin-local");
   assert.equal(codex.plugins[0]?.name, "swarm-pi-code-plugin");
   assert.equal(codex.plugins[0]?.source.path, "./plugins/swarm-pi-code-plugin");

@@ -11,7 +11,10 @@ import type {
 } from "../core/contracts.js";
 
 const REMOTE_ACTIONS = new Set<ActionRecommendation["actionClass"]>([
-  "remote-write", "message", "deploy", "transaction",
+  "remote-write",
+  "message",
+  "deploy",
+  "transaction",
 ]);
 
 export function assertHostActionAllowed(options: {
@@ -22,7 +25,9 @@ export function assertHostActionAllowed(options: {
 }): void {
   if (!options.policy.enabled) throw new Error("Host Actions are disabled by workspace policy");
   if (options.parentKind !== "implement" && options.parentKind !== "setup") {
-    throw new Error(`Host Action requires original mutation intent; parent task is ${options.parentKind}`);
+    throw new Error(
+      `Host Action requires original mutation intent; parent task is ${options.parentKind}`,
+    );
   }
   if (options.parentRole === "advisor" || options.parentRole === "review-coordinator") {
     throw new Error(`Role cannot create Host Actions: ${options.parentRole}`);
@@ -30,7 +35,10 @@ export function assertHostActionAllowed(options: {
   if (!options.policy.allowedActionClasses.includes(options.recommendation.actionClass)) {
     throw new Error(`Host Action class is disabled: ${options.recommendation.actionClass}`);
   }
-  if (REMOTE_ACTIONS.has(options.recommendation.actionClass) && !options.policy.remoteActionsEnabled) {
+  if (
+    REMOTE_ACTIONS.has(options.recommendation.actionClass) &&
+    !options.policy.remoteActionsEnabled
+  ) {
     throw new Error(`Remote Host Actions are disabled: ${options.recommendation.actionClass}`);
   }
 }
@@ -45,12 +53,16 @@ export function createActionFamilyLease(options: {
   now?: Date;
 }): CapabilityLease {
   const now = options.now ?? new Date();
-  const scopeKey = createHash("sha256").update(JSON.stringify({
-    actionClass: options.recommendation.actionClass,
-    target: options.recommendation.target ?? null,
-    policyHash: options.snapshot.hash,
-    scopeHash: options.snapshot.version === 1 ? null : options.snapshot.scopeHash,
-  })).digest("hex");
+  const scopeKey = createHash("sha256")
+    .update(
+      JSON.stringify({
+        actionClass: options.recommendation.actionClass,
+        target: options.recommendation.target ?? null,
+        policyHash: options.snapshot.hash,
+        scopeHash: options.snapshot.version === 1 ? null : options.snapshot.scopeHash,
+      }),
+    )
+    .digest("hex");
   return {
     id: randomUUID(),
     jobId: options.jobId,
@@ -60,9 +72,11 @@ export function createActionFamilyLease(options: {
     role: options.role,
     actionFingerprint: scopeKey,
     scope: "once",
-    capabilities: options.recommendation.actionClass === "local-mutation" || options.recommendation.actionClass === "draft"
-      ? ["filesystem.write-workspace"]
-      : ["network.connect"],
+    capabilities:
+      options.recommendation.actionClass === "local-mutation" ||
+      options.recommendation.actionClass === "draft"
+        ? ["filesystem.write-workspace"]
+        : ["network.connect"],
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + options.policy.ttlMs).toISOString(),
     principal: "host-broker",

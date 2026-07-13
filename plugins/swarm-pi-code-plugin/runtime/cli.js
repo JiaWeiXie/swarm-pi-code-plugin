@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { parseArguments } from "./runner/args.js";
 import { runCommand } from "./runner/run.js";
-import { createJobEventSnapshot, createWatchReadyEvent, dedupeJobEvents } from "./state/job-events.js";
+import { createJobEventSnapshot, createWatchReadyEvent, dedupeJobEvents, } from "./state/job-events.js";
 import { isTerminalJobStatus, reconcileJobs } from "./state/jobs.js";
 import { loadState } from "./state/state.js";
 import { startConfigurationServer } from "./web/configuration-server.js";
@@ -43,7 +43,9 @@ export async function main(argv = process.argv.slice(2)) {
             process.once("SIGINT", abort);
             process.once("SIGTERM", abort);
         }
-        const result = await runCommand(args, process.cwd(), undefined, { signal: controller.signal }).finally(() => {
+        const result = await runCommand(args, process.cwd(), undefined, {
+            signal: controller.signal,
+        }).finally(() => {
             process.removeListener("SIGINT", abort);
             process.removeListener("SIGTERM", abort);
         });
@@ -53,7 +55,8 @@ export async function main(argv = process.argv.slice(2)) {
             return 3;
         if ("event" in result && result.event === "approval-required")
             return 4;
-        if ("event" in result && (result.event === "setup-required" || result.event === "workspace-action-required"))
+        if ("event" in result &&
+            (result.event === "setup-required" || result.event === "workspace-action-required"))
             return 5;
         return "success" in result && !result.success ? 1 : 0;
     }
@@ -72,8 +75,14 @@ export async function main(argv = process.argv.slice(2)) {
     }
 }
 export function isDelegatedCommand(command) {
-    return command === "ask" || command === "review" || command === "plan" || command === "implement" ||
-        command === "orchestrate" || command === "discover" || command === "scaffold" || command === "setup";
+    return (command === "ask" ||
+        command === "review" ||
+        command === "plan" ||
+        command === "implement" ||
+        command === "orchestrate" ||
+        command === "discover" ||
+        command === "scaffold" ||
+        command === "setup");
 }
 async function streamJobWatch(args, cwd, signal) {
     const watcherId = randomUUID();
@@ -85,7 +94,9 @@ async function streamJobWatch(args, cwd, signal) {
             return 0;
         await reconcileJobs(cwd);
         const state = await loadState(cwd);
-        const projectionOptions = { includeProgress: true };
+        const projectionOptions = {
+            includeProgress: true,
+        };
         if (args.jobId)
             projectionOptions.jobId = args.jobId;
         if (!first) {

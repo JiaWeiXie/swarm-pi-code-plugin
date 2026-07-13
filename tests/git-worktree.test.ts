@@ -22,11 +22,9 @@ function repositoryFixture(): string {
   execFileSync("git", ["-C", repository, "config", "user.email", "test@example.com"]);
   fs.writeFileSync(path.join(repository, "tracked.txt"), "before\n");
   execFileSync("git", ["-C", repository, "add", "."]);
-  execFileSync(
-    "git",
-    ["-c", "commit.gpgsign=false", "-C", repository, "commit", "-m", "fixture"],
-    { stdio: "ignore" },
-  );
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", repository, "commit", "-m", "fixture"], {
+    stdio: "ignore",
+  });
   return repository;
 }
 

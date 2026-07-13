@@ -12,7 +12,11 @@ import { getProviderDefinition } from "../src/providers/capabilities.js";
 import { CredentialDraftVault } from "../src/providers/credentials.js";
 import { compileEffectiveProjectPolicy } from "../src/policy/project-policy.js";
 import { loadState, resolveStateFile } from "../src/state/state.js";
-import { defaultModelConfiguration, resolveModelConfigurationFile, saveModelConfiguration } from "../src/state/model-config.js";
+import {
+  defaultModelConfiguration,
+  resolveModelConfigurationFile,
+  saveModelConfiguration,
+} from "../src/state/model-config.js";
 import {
   configureBuiltInProvider,
   loadConfigurationView,
@@ -57,32 +61,54 @@ function fixture() {
 }
 
 test("configuration page starts from connections and uses the original Swarm Pi mark", () => {
-  const html = renderConfigurationPage({
-    configuration: defaultModelConfiguration(),
-    profile: null,
-    directoryOptions: [],
-    providers: [],
-    providerCatalog: ["openai", "openai-codex"].map((id) => ({
-      ...getProviderDefinition(id)!,
-      auth: { configured: false, source: null, label: null },
-    })),
-    models: [],
-    registryError: null,
-    sandboxMode: "strict",
-    decisionMode: "balance",
-    hostAssistance: { enabled: true, mode: "on", contextClasses: ["workspace", "web", "docs"], privateConnector: "ask", maxRequests: 4, maxFanOut: 2 },
-    contextBudget: 4,
-    advisor: { enabled: false, targets: ["discover", "plan", "review", "orchestrate"], maxRequests: 2, maxPerspectives: 2 },
-    doctrine: null,
-    hostActions: { enabled: true, allowedActionClasses: ["local-mutation", "draft"], remoteActionsEnabled: false, maxUses: 1, maxCost: 1, ttlMs: 1_800_000 },
-    sandboxAvailability: {
-      available: true,
-      backend: "macos-seatbelt",
-      label: "macOS Seatbelt",
-      reason: null,
-      warnings: [],
+  const html = renderConfigurationPage(
+    {
+      configuration: defaultModelConfiguration(),
+      profile: null,
+      directoryOptions: [],
+      providers: [],
+      providerCatalog: ["openai", "openai-codex"].map((id) => ({
+        ...getProviderDefinition(id)!,
+        auth: { configured: false, source: null, label: null },
+      })),
+      models: [],
+      registryError: null,
+      sandboxMode: "strict",
+      decisionMode: "balance",
+      hostAssistance: {
+        enabled: true,
+        mode: "on",
+        contextClasses: ["workspace", "web", "docs"],
+        privateConnector: "ask",
+        maxRequests: 4,
+        maxFanOut: 2,
+      },
+      contextBudget: 4,
+      advisor: {
+        enabled: false,
+        targets: ["discover", "plan", "review", "orchestrate"],
+        maxRequests: 2,
+        maxPerspectives: 2,
+      },
+      doctrine: null,
+      hostActions: {
+        enabled: true,
+        allowedActionClasses: ["local-mutation", "draft"],
+        remoteActionsEnabled: false,
+        maxUses: 1,
+        maxCost: 1,
+        ttlMs: 1_800_000,
+      },
+      sandboxAvailability: {
+        available: true,
+        backend: "macos-seatbelt",
+        label: "macOS Seatbelt",
+        reason: null,
+        warnings: [],
+      },
     },
-  }, "test-nonce");
+    "test-nonce",
+  );
 
   assert.match(html, /Connect an AI service/);
   assert.match(html, /Worker roles/);
@@ -116,29 +142,52 @@ test("configuration page starts from connections and uses the original Swarm Pi 
 });
 
 test("project-only page starts from the guided project setup", () => {
-  const html = renderConfigurationPage({
-    configuration: defaultModelConfiguration(),
-    profile: { goal: "Maintain the product", dirs: ["src"], tasks: ["implementation"] },
-    directoryOptions: ["docs", "src"],
-    providers: [],
-    providerCatalog: [],
-    models: [],
-    registryError: null,
-    sandboxMode: "lenient",
-    decisionMode: "balance",
-    hostAssistance: { enabled: true, mode: "on", contextClasses: ["workspace", "web", "docs"], privateConnector: "ask", maxRequests: 4, maxFanOut: 2 },
-    contextBudget: 4,
-    advisor: { enabled: false, targets: ["discover", "plan", "review", "orchestrate"], maxRequests: 2, maxPerspectives: 2 },
-    doctrine: null,
-    hostActions: { enabled: true, allowedActionClasses: ["local-mutation", "draft"], remoteActionsEnabled: false, maxUses: 1, maxCost: 1, ttlMs: 1_800_000 },
-    sandboxAvailability: {
-      available: true,
-      backend: "macos-seatbelt",
-      label: "macOS Seatbelt",
-      reason: null,
-      warnings: [],
+  const html = renderConfigurationPage(
+    {
+      configuration: defaultModelConfiguration(),
+      profile: { goal: "Maintain the product", dirs: ["src"], tasks: ["implementation"] },
+      directoryOptions: ["docs", "src"],
+      providers: [],
+      providerCatalog: [],
+      models: [],
+      registryError: null,
+      sandboxMode: "lenient",
+      decisionMode: "balance",
+      hostAssistance: {
+        enabled: true,
+        mode: "on",
+        contextClasses: ["workspace", "web", "docs"],
+        privateConnector: "ask",
+        maxRequests: 4,
+        maxFanOut: 2,
+      },
+      contextBudget: 4,
+      advisor: {
+        enabled: false,
+        targets: ["discover", "plan", "review", "orchestrate"],
+        maxRequests: 2,
+        maxPerspectives: 2,
+      },
+      doctrine: null,
+      hostActions: {
+        enabled: true,
+        allowedActionClasses: ["local-mutation", "draft"],
+        remoteActionsEnabled: false,
+        maxUses: 1,
+        maxCost: 1,
+        ttlMs: 1_800_000,
+      },
+      sandboxAvailability: {
+        available: true,
+        backend: "macos-seatbelt",
+        label: "macOS Seatbelt",
+        reason: null,
+        warnings: [],
+      },
     },
-  }, "test-nonce", "project");
+    "test-nonce",
+    "project",
+  );
 
   assert.match(html, /"setupMode":"project"/);
   assert.match(html, /What should this project accomplish/);
@@ -149,7 +198,10 @@ test("project-only page starts from the guided project setup", () => {
   assert.match(html, /data-step="6"/);
   assert.match(html, /sandboxed shell and outbound network enabled/);
   assert.match(html, /\/api\/save-profile/);
-  assert.match(html, /\.\.\.\(state\.profile\.scope === "selected" \? \{dirs:\[\.\.\.state\.profile\.dirs\]\} : \{\}\)/);
+  assert.match(
+    html,
+    /\.\.\.\(state\.profile\.scope === "selected" \? \{dirs:\[\.\.\.state\.profile\.dirs\]\} : \{\}\)/,
+  );
 });
 
 test("project profile save validates scope and does not create model configuration", async () => {
@@ -163,11 +215,25 @@ test("project profile save validates scope and does not create model configurati
     },
     sandboxMode: "strict",
     decisionMode: "power",
-    hostAssistance: { enabled: true, mode: "on", contextClasses: ["workspace", "docs", "web"], privateConnector: "deny", maxRequests: 6, maxFanOut: 3 },
+    hostAssistance: {
+      enabled: true,
+      mode: "on",
+      contextClasses: ["workspace", "docs", "web"],
+      privateConnector: "deny",
+      maxRequests: 6,
+      maxFanOut: 3,
+    },
     contextBudget: 6,
     advisor: { enabled: true, targets: ["discover", "plan"], maxRequests: 3, maxPerspectives: 3 },
     doctrine: "first-principles-qds-v1",
-    hostActions: { enabled: true, allowedActionClasses: ["local-mutation", "draft"], remoteActionsEnabled: false, maxUses: 1, maxCost: 2, ttlMs: 900_000 },
+    hostActions: {
+      enabled: true,
+      allowedActionClasses: ["local-mutation", "draft"],
+      remoteActionsEnabled: false,
+      maxUses: 1,
+      maxCost: 2,
+      ttlMs: 900_000,
+    },
   });
 
   assert.equal(profile.goal, "Ship a dependable project setup flow");
@@ -183,7 +249,12 @@ test("project profile save validates scope and does not create model configurati
   assert.equal(saved.config.hostActions?.remoteActionsEnabled, false);
   assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
   await assert.rejects(
-    () => saveProjectProfileSubmission(workspace, { goal: "Invalid", dirs: ["../outside"], tasks: ["analysis"] }),
+    () =>
+      saveProjectProfileSubmission(workspace, {
+        goal: "Invalid",
+        dirs: ["../outside"],
+        tasks: ["analysis"],
+      }),
     /outside/,
   );
   await assert.rejects(
@@ -225,15 +296,20 @@ test("built-in provider forms stage credentials and return protocol-specific pro
   const { workspace, env } = fixture();
   const vault = new CredentialDraftVault();
   const secret = "openai-draft-secret";
-  const preview = await configureBuiltInProvider(workspace, {
-    provider: "openai",
-    authMethod: "api-key",
-    fields: {
-      apiKey: secret,
-      organization: "org_example",
-      project: "proj_example",
+  const preview = await configureBuiltInProvider(
+    workspace,
+    {
+      provider: "openai",
+      authMethod: "api-key",
+      fields: {
+        apiKey: secret,
+        organization: "org_example",
+        project: "proj_example",
+      },
     },
-  }, vault, env);
+    vault,
+    env,
+  );
 
   assert.equal(preview.profile.protocol, "openai-responses");
   assert.equal(preview.profile.runtimeApi, "openai-responses");
@@ -242,7 +318,10 @@ test("built-in provider forms stage credentials and return protocol-specific pro
     project: "proj_example",
   });
   assert.equal(preview.credentialDraft?.masked, true);
-  assert.equal(preview.models.every((model) => model.provider === "openai"), true);
+  assert.equal(
+    preview.models.every((model) => model.provider === "openai"),
+    true,
+  );
   assert.doesNotMatch(JSON.stringify(preview), new RegExp(secret));
 });
 
@@ -280,7 +359,10 @@ test("configuration service stores credentials outside model and state files", a
   assert.doesNotMatch(JSON.stringify(view), new RegExp(secret));
   assert.equal(fs.statSync(authFile).mode & 0o777, 0o600);
   assert.deepEqual((await loadState(workspace)).config.modelPriority, ["local-test/test-model"]);
-  assert.equal((await loadState(workspace)).config.profile?.goal, "Maintain a guided setup experience");
+  assert.equal(
+    (await loadState(workspace)).config.profile?.goal,
+    "Maintain a guided setup experience",
+  );
   assert.deepEqual(view.directoryOptions, ["src"]);
 });
 
@@ -302,7 +384,10 @@ test("sign out removes credentials for built-in and configured custom providers 
   const reloadedAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
   assert.equal(reloadedAuth.hasAuth("local-test"), false);
   assert.equal(reloadedAuth.hasAuth("openai"), false);
-  await assert.rejects(() => signOutProvider(workspace, "unknown-provider", env), /Unknown provider/);
+  await assert.rejects(
+    () => signOutProvider(workspace, "unknown-provider", env),
+    /Unknown provider/,
+  );
 });
 
 test("configuration save smoke-tests the selected model before persistence", async () => {
@@ -310,9 +395,18 @@ test("configuration save smoke-tests the selected model before persistence", asy
   const { SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST: _skip, ...smokeEnv } = env;
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/event-stream" });
-    const common = { id: "chatcmpl-ready", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: "ready-model" };
-    response.write(`data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: { role: "assistant", content: "READY" }, finish_reason: null }] })}\n\n`);
-    response.write(`data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+    const common = {
+      id: "chatcmpl-ready",
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: "ready-model",
+    };
+    response.write(
+      `data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: { role: "assistant", content: "READY" }, finish_reason: null }] })}\n\n`,
+    );
+    response.write(
+      `data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`,
+    );
     response.end("data: [DONE]\n\n");
   });
   server.listen(0, "127.0.0.1");
@@ -320,15 +414,25 @@ test("configuration save smoke-tests the selected model before persistence", asy
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   try {
-    const view = await saveConfigurationSubmission(workspace, {
-      primary: "ready/ready-model",
-      fallbacks: [],
-      customProviders: [{
-        id: "ready", name: "Ready", baseUrl: `http://127.0.0.1:${address.port}/v1`,
-        api: "openai-completions", authHeader: false, requiresApiKey: false,
-        models: [{ id: "ready-model", name: "Ready", reasoning: false, input: ["text"] }],
-      }],
-    }, smokeEnv);
+    const view = await saveConfigurationSubmission(
+      workspace,
+      {
+        primary: "ready/ready-model",
+        fallbacks: [],
+        customProviders: [
+          {
+            id: "ready",
+            name: "Ready",
+            baseUrl: `http://127.0.0.1:${address.port}/v1`,
+            api: "openai-completions",
+            authHeader: false,
+            requiresApiKey: false,
+            models: [{ id: "ready-model", name: "Ready", reasoning: false, input: ["text"] }],
+          },
+        ],
+      },
+      smokeEnv,
+    );
     assert.equal(view.configuration.primary, "ready/ready-model");
   } finally {
     server.close();
@@ -340,9 +444,18 @@ test("explicit API verification promotes only the selected connection", async ()
   const { workspace, env } = fixture();
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/event-stream" });
-    const common = { id: "chatcmpl-verify", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: "verify-model" };
-    response.write(`data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: { role: "assistant", content: "READY" }, finish_reason: null }] })}\n\n`);
-    response.write(`data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`);
+    const common = {
+      id: "chatcmpl-verify",
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: "verify-model",
+    };
+    response.write(
+      `data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: { role: "assistant", content: "READY" }, finish_reason: null }] })}\n\n`,
+    );
+    response.write(
+      `data: ${JSON.stringify({ ...common, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })}\n\n`,
+    );
     response.end("data: [DONE]\n\n");
   });
   server.listen(0, "127.0.0.1");
@@ -362,22 +475,29 @@ test("explicit API verification promotes only the selected connection", async ()
     models: [{ id: "verify-model", name: "Verify", reasoning: false, input: ["text" as const] }],
   };
   try {
-    const result = await verifyProviderConnection(workspace, {
-      model: `${provider}/verify-model`,
-      customProviders: [customProvider],
-      providerProfiles: [{
-        id: provider,
-        provider,
-        name: "Verify Local",
-        connectionKind: "custom",
-        auth: { method: "none" },
-        protocol: "openai-chat-completions",
-        runtimeApi: "openai-completions",
-        readiness: "configured",
-        settings: {},
-        headers: [],
-      }],
-    }, new CredentialDraftVault(), env);
+    const result = await verifyProviderConnection(
+      workspace,
+      {
+        model: `${provider}/verify-model`,
+        customProviders: [customProvider],
+        providerProfiles: [
+          {
+            id: provider,
+            provider,
+            name: "Verify Local",
+            connectionKind: "custom",
+            auth: { method: "none" },
+            protocol: "openai-chat-completions",
+            runtimeApi: "openai-completions",
+            readiness: "configured",
+            settings: {},
+            headers: [],
+          },
+        ],
+      },
+      new CredentialDraftVault(),
+      env,
+    );
     assert.equal(result.profile.readiness, "verified");
     assert.equal(result.profile.verifiedModel, `${provider}/verify-model`);
   } finally {
@@ -433,31 +553,33 @@ test("configuration service validates every fallback and credential payload", as
   };
 
   await assert.rejects(
-    () => saveConfigurationSubmission(
-      workspace,
-      {
-        primary: "local-test/test-model",
-        fallbacks: ["locked-test/locked-model"],
-        customProviders: [...customProviders, lockedProvider],
-        credentialDrafts: [{ provider: "local-test", draftId: credentialDraft.id }],
-      },
-      env,
-      { credentialVault },
-    ),
+    () =>
+      saveConfigurationSubmission(
+        workspace,
+        {
+          primary: "local-test/test-model",
+          fallbacks: ["locked-test/locked-model"],
+          customProviders: [...customProviders, lockedProvider],
+          credentialDrafts: [{ provider: "local-test", draftId: credentialDraft.id }],
+        },
+        env,
+        { credentialVault },
+      ),
     /Selected models are not authenticated/,
   );
   await assert.rejects(
-    () => saveConfigurationSubmission(
-      workspace,
-      {
-        primary: "local-test/test-model",
-        fallbacks: [],
-        customProviders,
-        credentialDrafts: [{ provider: 42, draftId: [] }] as never,
-      },
-      env,
-      { credentialVault },
-    ),
+    () =>
+      saveConfigurationSubmission(
+        workspace,
+        {
+          primary: "local-test/test-model",
+          fallbacks: [],
+          customProviders,
+          credentialDrafts: [{ provider: 42, draftId: [] }] as never,
+        },
+        env,
+        { credentialVault },
+      ),
     /Credential draft references require provider and draftId strings/,
   );
 });
@@ -506,7 +628,12 @@ test("local configuration server requires its token and closes after save", asyn
       "x-swarm-token": token,
       origin: setupUrl.origin,
     },
-    body: JSON.stringify({ primary: null, fallbacks: [], customProviders: [], credential: { provider: "openai", apiKey: secret } }),
+    body: JSON.stringify({
+      primary: null,
+      fallbacks: [],
+      customProviders: [],
+      credential: { provider: "openai", apiKey: secret },
+    }),
   });
   assert.equal(rawCredential.status, 400);
   assert.doesNotMatch(await rawCredential.text(), new RegExp(secret));
@@ -526,7 +653,7 @@ test("local configuration server requires its token and closes after save", asyn
       secret,
     }),
   });
-  const credentialBody = await credentialResponse.json() as {
+  const credentialBody = (await credentialResponse.json()) as {
     provider: string;
     credentialDraft: { id: string };
   };
@@ -549,7 +676,9 @@ test("local configuration server requires its token and closes after save", asyn
       primary: `${credentialBody.provider}/test-model`,
       fallbacks: [],
       customProviders: [stagedProvider],
-      credentialDrafts: [{ provider: credentialBody.provider, draftId: credentialBody.credentialDraft.id }],
+      credentialDrafts: [
+        { provider: credentialBody.provider, draftId: credentialBody.credentialDraft.id },
+      ],
     }),
   });
   const body = await response.text();
@@ -569,7 +698,11 @@ test("local configuration server requires its token and closes after save", asyn
 
 test("cancel closes the setup session without creating model.json", async () => {
   const { workspace, env } = fixture();
-  const server = await startConfigurationServer(workspace, { env, openBrowser: false, timeoutMs: 10_000 });
+  const server = await startConfigurationServer(workspace, {
+    env,
+    openBrowser: false,
+    timeoutMs: 10_000,
+  });
   const url = new URL(server.url);
   const response = await fetch(`${url.origin}/api/cancel`, {
     method: "POST",

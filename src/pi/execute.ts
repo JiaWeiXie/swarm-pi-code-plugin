@@ -1,5 +1,4 @@
 import type { TaskKind, WorkerResult } from "../core/contracts.js";
-import type { ThinkingLevel } from "../core/contracts.js";
 
 interface SessionEvent {
   type: string;
@@ -36,10 +35,7 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
   let output = "";
   let terminalMessage: SessionEvent["message"];
   const unsubscribe = options.session.subscribe((event) => {
-    if (
-      event.type === "message_update" &&
-      event.assistantMessageEvent?.type === "text_delta"
-    ) {
+    if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
       output += event.assistantMessageEvent.delta ?? "";
     }
     if (event.type === "message_end" && event.message?.role === "assistant") {
@@ -54,29 +50,35 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
       () => ({ type: "completed" as const }),
       (error: unknown) => ({ type: "error" as const, error }),
     );
-    const interruption = new Promise<{ type: "interrupted"; status: "cancelled" | "timed-out" }>((resolve) => {
-      const interrupt = (status: "cancelled" | "timed-out") => {
-        void interruptSession(options.session).finally(() => resolve({ type: "interrupted", status }));
-      };
-      if (options.signal) {
-        const onAbort = () => interrupt("cancelled");
-        if (options.signal.aborted) onAbort();
-        else {
-          options.signal.addEventListener("abort", onAbort, { once: true });
-          removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
+    const interruption = new Promise<{ type: "interrupted"; status: "cancelled" | "timed-out" }>(
+      (resolve) => {
+        const interrupt = (status: "cancelled" | "timed-out") => {
+          void interruptSession(options.session).finally(() =>
+            resolve({ type: "interrupted", status }),
+          );
+        };
+        if (options.signal) {
+          const onAbort = () => interrupt("cancelled");
+          if (options.signal.aborted) onAbort();
+          else {
+            options.signal.addEventListener("abort", onAbort, { once: true });
+            removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
+          }
         }
-      }
-      if (options.timeoutMs !== undefined) {
-        timeout = setTimeout(() => interrupt("timed-out"), options.timeoutMs);
-      }
-    });
+        if (options.timeoutMs !== undefined) {
+          timeout = setTimeout(() => interrupt("timed-out"), options.timeoutMs);
+        }
+      },
+    );
     const outcome = await Promise.race([promptOutcome, interruption]);
     if (outcome.type === "interrupted") {
-      const message = outcome.status === "timed-out" ? "Pi session timed out." : "Pi session was cancelled.";
+      const message =
+        outcome.status === "timed-out" ? "Pi session timed out." : "Pi session was cancelled.";
       return result(options.kind, outcome.status, options.model, message);
     }
     if (outcome.type === "error") {
-      const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+      const message =
+        outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
       return result(options.kind, "failed", options.model, message);
     }
     return resultFromTerminalMessage(options.kind, options.model, output.trim(), terminalMessage);
@@ -95,7 +97,9 @@ async function interruptSession(session: RunnableSession): Promise<void> {
   try {
     await Promise.race([
       session.waitForIdle().catch(() => {}),
-      new Promise<void>((resolve) => { timeout = setTimeout(resolve, 5_000); }),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, 5_000);
+      }),
     ]);
   } finally {
     if (timeout) clearTimeout(timeout);
@@ -109,11 +113,21 @@ function resultFromTerminalMessage(
   message: SessionEvent["message"],
 ): WorkerResult {
   if (!message?.stopReason) {
-    return result(kind, "failed", model, "Pi session completed without a terminal assistant message.");
+    return result(
+      kind,
+      "failed",
+      model,
+      "Pi session completed without a terminal assistant message.",
+    );
   }
   if (message.stopReason === "stop") return result(kind, "succeeded", model, output);
   if (message.stopReason === "error") {
-    return result(kind, "failed", model, message.errorMessage ?? (output || "Pi provider request failed."));
+    return result(
+      kind,
+      "failed",
+      model,
+      message.errorMessage ?? (output || "Pi provider request failed."),
+    );
   }
   if (message.stopReason === "length") {
     return result(kind, "failed", model, "Pi response ended before completion.");

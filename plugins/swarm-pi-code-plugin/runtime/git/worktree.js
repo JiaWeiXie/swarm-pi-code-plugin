@@ -43,8 +43,17 @@ export async function assessWorkspace(cwd) {
         const visible = inventory.entries.filter((entry) => entry.category === "user" || entry.category === "unsafe");
         const disposition = inventory.entries.some((entry) => entry.category === "unsafe")
             ? "unsafe"
-            : visible.length === 0 ? "non-git-empty" : "non-git-existing";
-        return { root, git: false, head: null, disposition, entries: inventory.entries, fingerprint: fingerprint(inventory.fingerprints) };
+            : visible.length === 0
+                ? "non-git-empty"
+                : "non-git-existing";
+        return {
+            root,
+            git: false,
+            head: null,
+            disposition,
+            entries: inventory.entries,
+            fingerprint: fingerprint(inventory.fingerprints),
+        };
     }
     const raw = parsePorcelain(output);
     const assessments = [];
@@ -72,7 +81,9 @@ export async function assessWorkspace(cwd) {
 async function assessEntry(root, entry) {
     const absolute = path.resolve(root, entry.path);
     const stat = await fs.lstat(absolute).catch(() => undefined);
-    if (entry.status.includes("U") || stat?.isSymbolicLink() || (stat && !stat.isFile() && !stat.isDirectory())) {
+    if (entry.status.includes("U") ||
+        stat?.isSymbolicLink() ||
+        (stat && !stat.isFile() && !stat.isDirectory())) {
         return { ...entry, category: "unsafe", reason: "conflict, link, or unsupported file type" };
     }
     if (entry.status === "??" && isRuntimePath(entry.path)) {
@@ -81,17 +92,22 @@ async function assessEntry(root, entry) {
     if (entry.status === "??" && isSafeGeneratedPath(entry.path)) {
         return { ...entry, category: "ephemeral", reason: "recognized generated artifact" };
     }
-    return { ...entry, category: "user", reason: entry.status === "??" ? "unknown untracked content" : "tracked or staged content" };
+    return {
+        ...entry,
+        category: "user",
+        reason: entry.status === "??" ? "unknown untracked content" : "tracked or staged content",
+    };
 }
 function isRuntimePath(value) {
     const normalized = value.split(path.sep).join("/");
-    return [".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"]
-        .some((directory) => normalized === directory || normalized.startsWith(`${directory}/`));
+    return [".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].some((directory) => normalized === directory || normalized.startsWith(`${directory}/`));
 }
 function isSafeGeneratedPath(value) {
     const normalized = value.split(path.sep).join("/");
     const basename = path.posix.basename(normalized);
-    return basename === ".DS_Store" || normalized.split("/").includes("__pycache__") || /\.(?:pyc|pyo)$/.test(basename);
+    return (basename === ".DS_Store" ||
+        normalized.split("/").includes("__pycache__") ||
+        /\.(?:pyc|pyo)$/.test(basename));
 }
 function fingerprint(value) {
     return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -121,7 +137,9 @@ async function digestWorkspacePath(file) {
             file: true,
             mode: stat.mode,
             size: stat.size,
-            digest: createHash("sha256").update(await fs.readFile(file)).digest("hex"),
+            digest: createHash("sha256")
+                .update(await fs.readFile(file))
+                .digest("hex"),
         };
     }
     if (!stat.isDirectory())
@@ -130,7 +148,9 @@ async function digestWorkspacePath(file) {
     return {
         directory: true,
         mode: stat.mode,
-        children: await Promise.all(children.sort((left, right) => left.name.localeCompare(right.name)).map(async (child) => ({
+        children: await Promise.all(children
+            .sort((left, right) => left.name.localeCompare(right.name))
+            .map(async (child) => ({
             name: child.name,
             digest: await digestWorkspacePath(path.join(file, child.name)),
         }))),
@@ -145,21 +165,46 @@ async function inventoryDirectory(root) {
             const relative = prefix ? `${prefix}/${child.name}` : child.name;
             const absolute = path.join(directory, child.name);
             const stat = await fs.lstat(absolute);
-            const category = isRuntimePath(relative) ? "runtime" : isSafeGeneratedPath(relative) ? "ephemeral" : "user";
+            const category = isRuntimePath(relative)
+                ? "runtime"
+                : isSafeGeneratedPath(relative)
+                    ? "ephemeral"
+                    : "user";
             if (child.isSymbolicLink() || (!child.isFile() && !child.isDirectory())) {
-                entries.push({ path: relative, status: "??", category: "unsafe", reason: "link or unsupported file type" });
+                entries.push({
+                    path: relative,
+                    status: "??",
+                    category: "unsafe",
+                    reason: "link or unsupported file type",
+                });
                 fingerprints.push([relative, "unsafe", stat.mode, stat.size]);
                 continue;
             }
             if (child.isDirectory()) {
                 if (category === "runtime" || category === "ephemeral") {
-                    entries.push({ path: relative, status: "??", category, reason: category === "runtime" ? "plugin runtime state" : "recognized generated artifact" });
+                    entries.push({
+                        path: relative,
+                        status: "??",
+                        category,
+                        reason: category === "runtime" ? "plugin runtime state" : "recognized generated artifact",
+                    });
                 }
                 await visit(absolute, relative);
                 continue;
             }
-            entries.push({ path: relative, status: "??", category, reason: category === "user" ? "existing non-Git content" : category === "runtime" ? "plugin runtime state" : "recognized generated artifact" });
-            const digest = createHash("sha256").update(await fs.readFile(absolute)).digest("hex");
+            entries.push({
+                path: relative,
+                status: "??",
+                category,
+                reason: category === "user"
+                    ? "existing non-Git content"
+                    : category === "runtime"
+                        ? "plugin runtime state"
+                        : "recognized generated artifact",
+            });
+            const digest = createHash("sha256")
+                .update(await fs.readFile(absolute))
+                .digest("hex");
             fingerprints.push([relative, stat.mode, stat.size, digest]);
         }
     }
@@ -232,13 +277,7 @@ export async function assertWorktreeBaseline(cwd, baseline) {
         throw new WorktreeBaselineError(changedPaths);
 }
 export async function captureIgnoredPaths(cwd) {
-    const output = await gitOutput(cwd, [
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--ignored=matching",
-        "--untracked-files=normal",
-    ], 8 * 1024 * 1024);
+    const output = await gitOutput(cwd, ["status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=normal"], 8 * 1024 * 1024);
     return output
         .split("\0")
         .filter((record) => record.startsWith("!! "))
@@ -285,8 +324,8 @@ export async function validateChangedPaths(cwd, changedFiles) {
 export function isProtectedWorkspacePath(value) {
     const normalized = value.split(path.sep).join("/").replace(/^\.\//, "");
     const first = normalized.split("/")[0] ?? "";
-    return [".git", ".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].includes(first) ||
-        [".env", ".env.local", ".swarm-pi-policy.json"].includes(normalized);
+    return ([".git", ".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].includes(first) ||
+        [".env", ".env.local", ".swarm-pi-policy.json"].includes(normalized));
 }
 export async function captureWorktreeChanges(cwd) {
     const inspection = await inspectWorktree(cwd);
@@ -397,5 +436,6 @@ function processAlive(pid) {
 }
 function isInside(root, candidate) {
     const relative = path.relative(root, candidate);
-    return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+    return (relative === "" ||
+        (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)));
 }

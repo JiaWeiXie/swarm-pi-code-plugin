@@ -31,29 +31,47 @@ async function terminalFixture() {
     policySnapshot,
     modelConfiguration,
   });
-  await finishJob(cwd, job.id, {
-    kind: "implement",
-    status: "succeeded",
-    success: true,
-    output: `raw agent output secret=sk-output-secret ${cwd}`,
-    model: "test/model",
-    changedFiles: ["src/example.ts"],
-    diffStat: "1 file changed",
-    verification: { status: "passed", commands: ["mise run check"] },
-    agentVerification: { status: "passed", output: "VERIFIED token=sk-verifier-secret", model: "test/verifier" },
-    artifact: { worktree: `${cwd}/.worktree`, branch: "swarm/test", commit: "abc123", deliverable: true, kind: "implementation" },
-  }, `diff --git a/src/example.ts b/src/example.ts\n+const token = "sk-patch-secret";\n+const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature";\n+const url = "https://user:password@example.com";\n+const key = "-----BEGIN PRIVATE KEY-----\\nsecret\\n-----END PRIVATE KEY-----";\n+// workspace ${cwd}\n`);
+  await finishJob(
+    cwd,
+    job.id,
+    {
+      kind: "implement",
+      status: "succeeded",
+      success: true,
+      output: `raw agent output secret=sk-output-secret ${cwd}`,
+      model: "test/model",
+      changedFiles: ["src/example.ts"],
+      diffStat: "1 file changed",
+      verification: { status: "passed", commands: ["mise run check"] },
+      agentVerification: {
+        status: "passed",
+        output: "VERIFIED token=sk-verifier-secret",
+        model: "test/verifier",
+      },
+      artifact: {
+        worktree: `${cwd}/.worktree`,
+        branch: "swarm/test",
+        commit: "abc123",
+        deliverable: true,
+        kind: "implementation",
+      },
+    },
+    `diff --git a/src/example.ts b/src/example.ts\n+const token = "sk-patch-secret";\n+const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature";\n+const url = "https://user:password@example.com";\n+const key = "-----BEGIN PRIVATE KEY-----\\nsecret\\n-----END PRIVATE KEY-----";\n+// workspace ${cwd}\n`,
+  );
   const directory = await jobDirectory(cwd, job.id);
-  await fs.writeFile(path.join(directory, "policy-events.jsonl"), `${JSON.stringify({
-    timestamp: new Date().toISOString(),
-    tool: "bash",
-    fingerprint: "fingerprint",
-    decision: "require-approval",
-    risk: "high",
-    reason: "Review bounded command",
-    policyHash: policySnapshot.hash,
-    classifierCache: "miss",
-  })}\n`);
+  await fs.writeFile(
+    path.join(directory, "policy-events.jsonl"),
+    `${JSON.stringify({
+      timestamp: new Date().toISOString(),
+      tool: "bash",
+      fingerprint: "fingerprint",
+      decision: "require-approval",
+      risk: "high",
+      reason: "Review bounded command",
+      policyHash: policySnapshot.hash,
+      classifierCache: "miss",
+    })}\n`,
+  );
   return { cwd, job, directory };
 }
 
@@ -80,11 +98,21 @@ test("audit export returns a safe single-job evidence package", async () => {
 
 test("audit export rejects non-terminal jobs, malformed events, and traversal ids", async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-audit-invalid-"));
-  const policySnapshot = createPolicySnapshot({ sandboxMode: "strict", approvalMode: "deny", rolePolicy: resolveRolePolicy("scout") });
+  const policySnapshot = createPolicySnapshot({
+    sandboxMode: "strict",
+    approvalMode: "deny",
+    rolePolicy: resolveRolePolicy("scout"),
+  });
   const job = await startJob(cwd, {
-    host: "codex", kind: "ask", prompt: "inspect", cwd,
-    executionMode: "supervised", sandboxMode: "strict", timeoutMs: 60_000,
-    role: "scout", policySnapshot,
+    host: "codex",
+    kind: "ask",
+    prompt: "inspect",
+    cwd,
+    executionMode: "supervised",
+    sandboxMode: "strict",
+    timeoutMs: 60_000,
+    role: "scout",
+    policySnapshot,
   });
   await assert.rejects(exportJobAudit(cwd, job.id), /not terminal/);
   await assert.rejects(exportJobAudit(cwd, "../outside"), /Invalid job id/);
@@ -95,7 +123,10 @@ test("audit export rejects non-terminal jobs, malformed events, and traversal id
 });
 
 test("audit CLI requires --audit and a job id", () => {
-  assert.deepEqual(parseArguments(["jobs", "export", "--audit", "--job", "job-1", "--json"]).audit, true);
+  assert.deepEqual(
+    parseArguments(["jobs", "export", "--audit", "--job", "job-1", "--json"]).audit,
+    true,
+  );
   assert.throws(() => parseArguments(["jobs", "export", "--job", "job-1"]), /requires --audit/);
   assert.throws(() => parseArguments(["jobs", "export", "--audit"]), /requires --job/);
   assert.throws(() => parseArguments(["jobs", "list", "--audit"]), /only supported/);

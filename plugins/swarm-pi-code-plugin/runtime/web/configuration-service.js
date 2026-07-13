@@ -9,11 +9,11 @@ import { createWorkerSession } from "../pi/runtime.js";
 import { createModelCatalog, describeProviders, modelId } from "../pi/models.js";
 import { getProviderDefinition, listProviderDefinitions, unknownProviderIds, } from "../providers/capabilities.js";
 import { CredentialDraftVault } from "../providers/credentials.js";
-import { normalizeModelsEndpoint, normalizeProtocolRoot, stableCustomProviderId } from "../providers/endpoints.js";
+import { normalizeModelsEndpoint, normalizeProtocolRoot, stableCustomProviderId, } from "../providers/endpoints.js";
 import { detectSandboxAvailability } from "../sandbox/availability.js";
 import { assessWorkspace } from "../git/worktree.js";
 import { loadModelConfiguration, modelPriority, parseModelConfiguration, saveModelConfiguration, resolveModelConfigurationFile, providerHeaderSecretRef, providerSecretRef, } from "../state/model-config.js";
-import { loadState, resolveStateDir, resolveStateFile, resolveWorkspaceRoot, saveProjectSettings, saveExecutionSettings, setModelPriority, setSandboxMode, defaultHostActionPolicy, } from "../state/state.js";
+import { loadState, resolveStateDir, resolveStateFile, resolveWorkspaceRoot, saveProjectSettings, saveExecutionSettings, setModelPriority, defaultHostActionPolicy, } from "../state/state.js";
 import { discoverEndpoint, discoverLocalEndpoints, } from "./model-discovery.js";
 export async function configureBuiltInProvider(cwd, request, credentialVault, env = process.env) {
     const definition = getProviderDefinition(request.provider);
@@ -35,7 +35,9 @@ export async function configureBuiltInProvider(cwd, request, credentialVault, en
             throw new Error("Credential draft does not match the selected authentication method");
         }
     }
-    if ((request.authMethod === "api-key" || request.authMethod === "oauth") && !credentialDraft && !persistentAuth.hasAuth(definition.id)) {
+    if ((request.authMethod === "api-key" || request.authMethod === "oauth") &&
+        !credentialDraft &&
+        !persistentAuth.hasAuth(definition.id)) {
         throw new Error(`${definition.name} requires a credential`);
     }
     const profile = providerProfile(definition, request.authMethod, settings, "configured");
@@ -64,10 +66,12 @@ export async function configureBuiltInProvider(cwd, request, credentialVault, en
             modelCount: models.length,
             availableModelCount: models.filter((model) => model.available).length,
             auth: {
-                source: credentialDraft ? "runtime" : authStatus.source ?? request.authMethod,
+                source: credentialDraft ? "runtime" : (authStatus.source ?? request.authMethod),
                 label: credentialDraft
-                    ? request.authMethod === "oauth" ? "Subscription sign-in pending save" : "Credential pending save"
-                    : authStatus.label ?? authMethodLabel(request.authMethod),
+                    ? request.authMethod === "oauth"
+                        ? "Subscription sign-in pending save"
+                        : "Credential pending save"
+                    : (authStatus.label ?? authMethodLabel(request.authMethod)),
             },
             selection: null,
             custom: false,
@@ -176,6 +180,7 @@ export async function createManualCustomProvider(cwd, request) {
     const modelIds = [...new Set(request.modelIds.map((model) => model.trim()).filter(Boolean))];
     if (modelIds.length === 0 || modelIds.length > 500)
         throw new Error("Enter between 1 and 500 model identifiers");
+    // oxlint-disable-next-line no-control-regex -- intentionally rejects ASCII control characters in model ids
     if (modelIds.some((model) => model.length > 512 || /[\u0000-\u001f\u007f]/.test(model))) {
         throw new Error("Manual model identifiers contain unsupported characters");
     }
@@ -185,7 +190,12 @@ export async function createManualCustomProvider(cwd, request) {
         ...(request.headerName ? { headerName: request.headerName } : {}),
     };
     const headers = request.authMethod === "custom-header"
-        ? [{ name: requireSecretHeader(request.headerName), secretRef: providerHeaderSecretRef(provider, requireSecretHeader(request.headerName)) }]
+        ? [
+            {
+                name: requireSecretHeader(request.headerName),
+                secretRef: providerHeaderSecretRef(provider, requireSecretHeader(request.headerName)),
+            },
+        ]
         : [];
     const customProvider = {
         id: provider,
@@ -280,7 +290,8 @@ export async function verifyProviderConnection(cwd, request, credentialVault, en
 export async function signOutProvider(cwd, provider, env = process.env) {
     const state = await loadState(cwd);
     const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
-    if (!getProviderDefinition(provider) && !configuration.customProviders.some((candidate) => candidate.id === provider)) {
+    if (!getProviderDefinition(provider) &&
+        !configuration.customProviders.some((candidate) => candidate.id === provider)) {
         throw new Error(`Unknown provider: ${provider}`);
     }
     AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).logout(provider);
@@ -308,7 +319,9 @@ export async function loadConfigurationView(cwd, env = process.env) {
     const unknownProviders = unknownProviderIds(providerIds.filter((id) => !custom.has(id)));
     const registryProblems = [
         catalog.error?.(),
-        unknownProviders.length ? `Pinned Pi exposes providers missing from ProviderCapabilityRegistry: ${unknownProviders.join(", ")}` : undefined,
+        unknownProviders.length
+            ? `Pinned Pi exposes providers missing from ProviderCapabilityRegistry: ${unknownProviders.join(", ")}`
+            : undefined,
     ].filter((entry) => Boolean(entry));
     return {
         configuration,
@@ -318,7 +331,7 @@ export async function loadConfigurationView(cwd, env = process.env) {
         providerCatalog: listProviderDefinitions().map((definition) => {
             const status = definition.id === "custom"
                 ? { configured: false }
-                : catalog.authStatus?.(definition.id) ?? { configured: false };
+                : (catalog.authStatus?.(definition.id) ?? { configured: false });
             return {
                 ...definition,
                 auth: {
@@ -337,7 +350,10 @@ export async function loadConfigurationView(cwd, env = process.env) {
         backgroundRolePolicy: structuredClone(state.config.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY),
         roles: listDefaultRoles(),
         workspace: await assessWorkspace(cwd),
-        workspaceId: createHash("sha256").update(await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd))).digest("hex").slice(0, 24),
+        workspaceId: createHash("sha256")
+            .update(await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd)))
+            .digest("hex")
+            .slice(0, 24),
         decisionMode: state.config.decisionMode ?? "balance",
         hostAssistance: structuredClone(state.config.hostAssistance ?? defaultHostAssistancePolicy()),
         contextBudget: state.config.contextBudget ?? 4,
@@ -359,16 +375,18 @@ function browserModel(model, available, configuration) {
         available,
         reasoning: model.reasoning,
         input: model.input,
-        contextWindow: isCustomModel ? configured.contextWindow ?? null : model.contextWindow ?? null,
-        maxTokens: isCustomModel ? configured.maxTokens ?? null : model.maxTokens ?? null,
+        contextWindow: isCustomModel
+            ? (configured.contextWindow ?? null)
+            : (model.contextWindow ?? null),
+        maxTokens: isCustomModel ? (configured.maxTokens ?? null) : (model.maxTokens ?? null),
         metadata: {
             contextWindow: isCustomModel
-                ? configured.metadata?.contextWindow ?? null
+                ? (configured.metadata?.contextWindow ?? null)
                 : model.contextWindow
                     ? "pi-catalog"
                     : null,
             maxTokens: isCustomModel
-                ? configured.metadata?.maxTokens ?? null
+                ? (configured.metadata?.maxTokens ?? null)
                 : model.maxTokens
                     ? "pi-catalog"
                     : null,
@@ -422,10 +440,12 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
     }
     assertExecutionModels(execution, all, available, sandboxMode);
     if (env.SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST !== "1") {
-        const smokeModels = [...new Set([
+        const smokeModels = [
+            ...new Set([
                 ...(candidate.primary ? [candidate.primary] : []),
                 ...(sandboxMode === "adaptive" ? execution.adaptivePolicy.classifierModels : []),
-            ])];
+            ]),
+        ];
         for (const reference of smokeModels) {
             const model = all.get(reference);
             const { session } = await createWorkerSession({
@@ -588,7 +608,9 @@ function normalizeHostAssistance(value, fallback) {
     if (value === undefined)
         return structuredClone(fallback);
     const contextClasses = Array.isArray(value.contextClasses)
-        ? [...new Set(value.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item)))]
+        ? [
+            ...new Set(value.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item))),
+        ]
         : [];
     if (value.mode !== "on" && value.mode !== "off" && value.mode !== "inherit")
         throw new Error("Invalid Host Assistance mode");
@@ -607,7 +629,18 @@ function normalizeAdvisor(value, fallback) {
     if (value === undefined)
         return structuredClone(fallback);
     const targets = Array.isArray(value.targets)
-        ? [...new Set(value.targets.filter((item) => ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"].includes(item)))]
+        ? [
+            ...new Set(value.targets.filter((item) => [
+                "ask",
+                "review",
+                "plan",
+                "implement",
+                "orchestrate",
+                "scaffold",
+                "setup",
+                "discover",
+            ].includes(item))),
+        ]
         : [];
     return {
         enabled: value.enabled === true,
@@ -620,14 +653,27 @@ function normalizeHostActions(value, fallback) {
     if (value === undefined)
         return structuredClone(fallback);
     const allowedActionClasses = Array.isArray(value.allowedActionClasses)
-        ? [...new Set(value.allowedActionClasses.filter((item) => ["local-mutation", "draft", "remote-write", "message", "deploy", "transaction"].includes(item)))]
+        ? [
+            ...new Set(value.allowedActionClasses.filter((item) => [
+                "local-mutation",
+                "draft",
+                "remote-write",
+                "message",
+                "deploy",
+                "transaction",
+            ].includes(item))),
+        ]
         : [];
     return {
         enabled: value.enabled === true,
         allowedActionClasses,
         remoteActionsEnabled: value.remoteActionsEnabled === true,
         maxUses: normalizeBoundedInteger(value.maxUses, fallback.maxUses, 1, 100, "Host Action use limit"),
-        maxCost: typeof value.maxCost === "number" && Number.isFinite(value.maxCost) && value.maxCost >= 0 ? value.maxCost : (() => { throw new Error("Host Action cost limit must be non-negative"); })(),
+        maxCost: typeof value.maxCost === "number" && Number.isFinite(value.maxCost) && value.maxCost >= 0
+            ? value.maxCost
+            : (() => {
+                throw new Error("Host Action cost limit must be non-negative");
+            })(),
         ttlMs: normalizeBoundedInteger(value.ttlMs, fallback.ttlMs, 60_000, 86_400_000, "Host Action TTL"),
     };
 }
@@ -648,7 +694,8 @@ function normalizeExecutionSettings(value, fallback) {
         if (policy.thinkingLevel !== undefined && !isThinkingLevel(policy.thinkingLevel)) {
             throw new Error(`Invalid thinking level for ${role}`);
         }
-        if (policy.maxAttempts !== undefined && (!Number.isInteger(policy.maxAttempts) || policy.maxAttempts < 1 || policy.maxAttempts > 2)) {
+        if (policy.maxAttempts !== undefined &&
+            (!Number.isInteger(policy.maxAttempts) || policy.maxAttempts < 1 || policy.maxAttempts > 2)) {
             throw new Error(`Role ${role} max attempts must be 1 or 2`);
         }
         rolePolicies[role] = {
@@ -663,31 +710,47 @@ function normalizeExecutionSettings(value, fallback) {
         rolePolicies,
         adaptivePolicy,
         backgroundRolePolicy: {
-            mechanicalExecutor: (value.backgroundRolePolicy ?? fallback.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY).mechanicalExecutor === true,
+            mechanicalExecutor: (value.backgroundRolePolicy ??
+                fallback.backgroundRolePolicy ??
+                DEFAULT_BACKGROUND_ROLE_POLICY).mechanicalExecutor === true,
         },
         decisionMode: normalizeDecisionMode(value.decisionMode, fallback.decisionMode),
         hostAssistance: normalizeHostAssistance(value.hostAssistance, fallback.hostAssistance),
         contextBudget: normalizeBoundedInteger(value.contextBudget, fallback.contextBudget, 0, 64, "Context budget"),
         advisor: normalizeAdvisor(value.advisor, fallback.advisor),
-        doctrine: value.doctrine === undefined ? fallback.doctrine : value.doctrine === null || value.doctrine === "first-principles-qds-v1" ? value.doctrine : (() => { throw new Error("Unknown decision doctrine"); })(),
+        doctrine: value.doctrine === undefined
+            ? fallback.doctrine
+            : value.doctrine === null || value.doctrine === "first-principles-qds-v1"
+                ? value.doctrine
+                : (() => {
+                    throw new Error("Unknown decision doctrine");
+                })(),
         hostActions: normalizeHostActions(value.hostActions, fallback.hostActions),
     };
 }
 function validateAdaptivePolicy(policy) {
     const capabilities = new Set([
-        "filesystem.read-workspace", "filesystem.write-workspace", "filesystem.write-temp",
-        "git.read", "shell.execute", "network.connect",
+        "filesystem.read-workspace",
+        "filesystem.write-workspace",
+        "filesystem.write-temp",
+        "git.read",
+        "shell.execute",
+        "network.connect",
     ]);
     for (const domain of policy.trustedDomains) {
         if (!/^(?:\*\.)?[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(domain) ||
-            domain === "localhost" || /^\d+(?:\.\d+){3}$/.test(domain)) {
+            domain === "localhost" ||
+            /^\d+(?:\.\d+){3}$/.test(domain)) {
             throw new Error(`Invalid trusted domain: ${domain}`);
         }
     }
     if (policy.rules.length > 128)
         throw new Error("Adaptive policy supports at most 128 rules");
     for (const rule of policy.rules) {
-        if (!rule || typeof rule.id !== "string" || !rule.id || !["deny", "ask", "allow"].includes(rule.effect) ||
+        if (!rule ||
+            typeof rule.id !== "string" ||
+            !rule.id ||
+            !["deny", "ask", "allow"].includes(rule.effect) ||
             !capabilities.has(rule.capability)) {
             throw new Error("Adaptive policy rules require an id, valid effect, and capability");
         }
@@ -720,13 +783,17 @@ function normalizeProviderFields(definition, authMethod, value) {
     const settings = {};
     let secret;
     for (const field of definition.fields) {
-        const visible = (!field.visibleWhen || field.visibleWhen.field !== "authMethod" || field.visibleWhen.equals === authMethod) &&
+        const visible = (!field.visibleWhen ||
+            field.visibleWhen.field !== "authMethod" ||
+            field.visibleWhen.equals === authMethod) &&
             (!field.secret || authMethod === "api-key");
         const raw = value[field.id];
         if (raw !== undefined && typeof raw !== "string")
             throw new Error(`${field.label} must be text`);
         const normalized = raw?.trim() ?? "";
-        if (field.type === "select" && normalized && !field.options?.some((option) => option.value === normalized)) {
+        if (field.type === "select" &&
+            normalized &&
+            !field.options?.some((option) => option.value === normalized)) {
             throw new Error(`${field.label} has an invalid option`);
         }
         if (!visible) {
@@ -751,7 +818,10 @@ function normalizeProviderFields(definition, authMethod, value) {
     if (definition.id === "azure-openai-responses" && !settings.baseUrl && !settings.resourceName) {
         throw new Error("Azure OpenAI requires an endpoint or resource name");
     }
-    if (settings.deploymentNameMap && !settings.deploymentNameMap.split(",").every((entry) => /^[^=,\s]+=[^=,\s]+$/.test(entry.trim()))) {
+    if (settings.deploymentNameMap &&
+        !settings.deploymentNameMap
+            .split(",")
+            .every((entry) => /^[^=,\s]+=[^=,\s]+$/.test(entry.trim()))) {
         throw new Error("Azure deployment mapping must use model=deployment entries separated by commas");
     }
     return { settings, ...(secret ? { secret } : {}) };
@@ -768,7 +838,9 @@ function normalizeProviderUrl(value, label, authMethod) {
         throw new Error(`${label} must use HTTP or HTTPS`);
     if (url.username || url.password)
         throw new Error(`${label} may not contain credentials`);
-    if (authMethod !== "none" && url.protocol === "http:" && !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+    if (authMethod !== "none" &&
+        url.protocol === "http:" &&
+        !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
         throw new Error(`${label} must use HTTPS when credentials are configured`);
     }
     url.hash = "";
@@ -787,7 +859,9 @@ function providerProfile(definition, authMethod, settings, readiness) {
         connectionKind: "builtin",
         auth: {
             method: authMethod,
-            ...(authMethod === "api-key" || authMethod === "oauth" ? { secretRef: providerSecretRef(definition.id) } : {}),
+            ...(authMethod === "api-key" || authMethod === "oauth"
+                ? { secretRef: providerSecretRef(definition.id) }
+                : {}),
         },
         ...(definition.wireProtocol ? { protocol: definition.wireProtocol } : {}),
         runtimeApi,
@@ -801,11 +875,16 @@ function upsertProviderProfile(profiles, profile) {
 }
 function authMethodLabel(method) {
     switch (method) {
-        case "api-key": return "Stored API key";
-        case "oauth": return "Subscription OAuth";
-        case "ambient": return "Ambient cloud identity";
-        case "none": return "No credential";
-        case "custom-header": return "API key plus custom secret header";
+        case "api-key":
+            return "Stored API key";
+        case "oauth":
+            return "Subscription OAuth";
+        case "ambient":
+            return "Ambient cloud identity";
+        case "none":
+            return "No credential";
+        case "custom-header":
+            return "API key plus custom secret header";
     }
 }
 function credentialSecret(credential, provider, authMethod, headerName) {
@@ -840,11 +919,13 @@ async function normalizeProjectProfile(cwd, submission) {
     }
     if (submission.goal.length > 4_000)
         throw new Error("Project goal is too long");
-    if (submission.dirs !== undefined
-        && (!Array.isArray(submission.dirs) || !submission.dirs.every((entry) => typeof entry === "string"))) {
+    if (submission.dirs !== undefined &&
+        (!Array.isArray(submission.dirs) ||
+            !submission.dirs.every((entry) => typeof entry === "string"))) {
         throw new Error("Project directories must be a string array");
     }
-    if (!Array.isArray(submission.tasks) || !submission.tasks.every((entry) => typeof entry === "string")) {
+    if (!Array.isArray(submission.tasks) ||
+        !submission.tasks.every((entry) => typeof entry === "string")) {
         throw new Error("Delegated task types must be a string array");
     }
     if ((submission.dirs?.length ?? 0) > 128)
@@ -855,7 +936,7 @@ async function normalizeProjectProfile(cwd, submission) {
         throw new Error("Too many delegated task types were selected");
     const root = await fs.realpath(await resolveWorkspaceRoot(cwd));
     const dirs = [];
-    for (const raw of [...new Set((submission.dirs ?? []).map((entry) => entry.trim()).filter(Boolean))]) {
+    for (const raw of new Set((submission.dirs ?? []).map((entry) => entry.trim()).filter(Boolean))) {
         if (path.isAbsolute(raw))
             throw new Error(`Project directory must be relative: ${raw}`);
         const normalized = path.normalize(raw);

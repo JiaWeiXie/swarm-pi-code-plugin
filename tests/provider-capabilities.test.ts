@@ -50,11 +50,16 @@ test("protocol URL policy distinguishes OpenAI roots from Anthropic service root
     "https://api.anthropic.com/v1/models",
   );
   assert.throws(
-    () => normalizeProtocolRoot("https://api.example.test/v1/chat/completions", "openai-chat-completions"),
+    () =>
+      normalizeProtocolRoot(
+        "https://api.example.test/v1/chat/completions",
+        "openai-chat-completions",
+      ),
     /API root/,
   );
   assert.throws(
-    () => normalizeModelsEndpoint("https://other.example.test/models", "https://api.example.test/v1"),
+    () =>
+      normalizeModelsEndpoint("https://other.example.test/models", "https://api.example.test/v1"),
     /same origin/,
   );
 });
@@ -74,15 +79,17 @@ test("legacy custom providers migrate in memory without persisting secrets", () 
     version: 1,
     primary: "legacy/model",
     fallbacks: [],
-    customProviders: [{
-      id: "legacy",
-      name: "Legacy Anthropic",
-      baseUrl: "https://anthropic.example.test/v1",
-      api: "anthropic-messages",
-      authHeader: false,
-      requiresApiKey: true,
-      models: [{ id: "model" }],
-    }],
+    customProviders: [
+      {
+        id: "legacy",
+        name: "Legacy Anthropic",
+        baseUrl: "https://anthropic.example.test/v1",
+        api: "anthropic-messages",
+        authHeader: false,
+        requiresApiKey: true,
+        models: [{ id: "model" }],
+      },
+    ],
     updatedAt: null,
   });
 
@@ -96,15 +103,17 @@ test("legacy custom providers migrate in memory without persisting secrets", () 
   const noAuth = parseModelConfiguration({
     ...configuration,
     primary: "local/model",
-    customProviders: [{
-      id: "local",
-      name: "Local",
-      baseUrl: "http://127.0.0.1:11434/v1",
-      api: "openai-completions",
-      authHeader: false,
-      requiresApiKey: false,
-      models: [{ id: "model" }],
-    }],
+    customProviders: [
+      {
+        id: "local",
+        name: "Local",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        api: "openai-completions",
+        authHeader: false,
+        requiresApiKey: false,
+        models: [{ id: "model" }],
+      },
+    ],
   });
   assert.deepEqual(noAuth.customProviders[0]?.auth, { method: "none" });
 });
@@ -115,43 +124,61 @@ test("provider profiles accept controlled references and reject secret material"
     primary: null,
     fallbacks: [],
     customProviders: [],
-    providerProfiles: [{
-      id: "openai",
-      provider: "openai",
-      name: "OpenAI",
-      connectionKind: "builtin",
-      auth: { method: "api-key", secretRef: "auth:openai" },
-      protocol: "openai-responses",
-      runtimeApi: "openai-responses",
-      readiness: "verified",
-      settings: { organization: "org_example" },
-      headers: [],
-      verifiedAt: "2026-07-11T00:00:00.000Z",
-      verifiedModel: "openai/gpt-test",
-    }],
+    providerProfiles: [
+      {
+        id: "openai",
+        provider: "openai",
+        name: "OpenAI",
+        connectionKind: "builtin",
+        auth: { method: "api-key", secretRef: "auth:openai" },
+        protocol: "openai-responses",
+        runtimeApi: "openai-responses",
+        readiness: "verified",
+        settings: { organization: "org_example" },
+        headers: [],
+        verifiedAt: "2026-07-11T00:00:00.000Z",
+        verifiedModel: "openai/gpt-test",
+      },
+    ],
     updatedAt: null,
   });
   assert.equal(valid.providerProfiles[0]?.readiness, "verified");
 
-  assert.throws(() => parseModelConfiguration({
-    ...valid,
-    providerProfiles: [{
-      ...valid.providerProfiles[0],
-      settings: { apiKey: "must-not-be-stored" },
-    }],
-  }), /may not contain secrets/);
-  assert.throws(() => parseModelConfiguration({
-    ...valid,
-    providerProfiles: [{
-      ...valid.providerProfiles[0],
-      headers: [{ name: "authorization", value: "Bearer secret" }],
-    }],
-  }), /must use secretRef/);
-  assert.throws(() => parseModelConfiguration({
-    ...valid,
-    providerProfiles: [
-      valid.providerProfiles[0],
-      { ...valid.providerProfiles[0], id: "openai-secondary" },
-    ],
-  }), /only one provider profile/);
+  assert.throws(
+    () =>
+      parseModelConfiguration({
+        ...valid,
+        providerProfiles: [
+          {
+            ...valid.providerProfiles[0],
+            settings: { apiKey: "must-not-be-stored" },
+          },
+        ],
+      }),
+    /may not contain secrets/,
+  );
+  assert.throws(
+    () =>
+      parseModelConfiguration({
+        ...valid,
+        providerProfiles: [
+          {
+            ...valid.providerProfiles[0],
+            headers: [{ name: "authorization", value: "Bearer secret" }],
+          },
+        ],
+      }),
+    /must use secretRef/,
+  );
+  assert.throws(
+    () =>
+      parseModelConfiguration({
+        ...valid,
+        providerProfiles: [
+          valid.providerProfiles[0],
+          { ...valid.providerProfiles[0], id: "openai-secondary" },
+        ],
+      }),
+    /only one provider profile/,
+  );
 });

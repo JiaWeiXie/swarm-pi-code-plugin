@@ -18,12 +18,14 @@ export function describeProviders(catalog, configuration) {
     const priority = modelPriority(configuration);
     const custom = new Set(configuration.customProviders.map((provider) => provider.id));
     const selectedProviders = priority.map((reference) => reference.slice(0, reference.indexOf("/")));
-    const providerIds = [...new Set([
+    const providerIds = [
+        ...new Set([
             ...availableModels.map((model) => model.provider),
             ...custom,
             ...selectedProviders,
             ...configuration.providerProfiles.map((profile) => profile.provider),
-        ])].sort((left, right) => (catalog.displayName?.(left) ?? left).localeCompare(catalog.displayName?.(right) ?? right));
+        ]),
+    ].sort((left, right) => (catalog.displayName?.(left) ?? left).localeCompare(catalog.displayName?.(right) ?? right));
     return providerIds.map((id) => {
         const models = all.filter((model) => model.provider === id);
         const availableModelCount = models.filter((model) => available.has(modelId(model))).length;

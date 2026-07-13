@@ -33,7 +33,10 @@ export async function prepareJobWorktree(cwd, jobId, strategy = "auto") {
             try {
                 if (patch.trim()) {
                     await fs.writeFile(patchFile, patch, { mode: 0o600 });
-                    await execFileAsync("git", ["apply", "--binary", "--whitespace=nowarn", patchFile], { cwd: worktree, encoding: "utf8" });
+                    await execFileAsync("git", ["apply", "--binary", "--whitespace=nowarn", patchFile], {
+                        cwd: worktree,
+                        encoding: "utf8",
+                    });
                 }
             }
             finally {
@@ -44,10 +47,15 @@ export async function prepareJobWorktree(cwd, jobId, strategy = "auto") {
             const status = await git(worktree, ["status", "--porcelain=v1"]);
             if (status.trim()) {
                 await execFileAsync("git", [
-                    "-c", "user.name=Swarm Pi Control Plane",
-                    "-c", "user.email=swarm-pi@localhost",
-                    "-c", "commit.gpgsign=false",
-                    "commit", "-m", `swarm-pi: local snapshot ${jobId}`,
+                    "-c",
+                    "user.name=Swarm Pi Control Plane",
+                    "-c",
+                    "user.email=swarm-pi@localhost",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "-m",
+                    `swarm-pi: local snapshot ${jobId}`,
                 ], { cwd: worktree, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
             }
         }
@@ -55,8 +63,14 @@ export async function prepareJobWorktree(cwd, jobId, strategy = "auto") {
     }
     catch (error) {
         if (created) {
-            await execFileAsync("git", ["worktree", "remove", "--force", worktree], { cwd: workspace, encoding: "utf8" }).catch(() => { });
-            await execFileAsync("git", ["branch", "-D", branch], { cwd: workspace, encoding: "utf8" }).catch(() => { });
+            await execFileAsync("git", ["worktree", "remove", "--force", worktree], {
+                cwd: workspace,
+                encoding: "utf8",
+            }).catch(() => { });
+            await execFileAsync("git", ["branch", "-D", branch], {
+                cwd: workspace,
+                encoding: "utf8",
+            }).catch(() => { });
         }
         throw error;
     }
@@ -67,10 +81,15 @@ export async function checkpointJobWorktree(worktree, jobId) {
     if (!status.trim())
         return null;
     await execFileAsync("git", [
-        "-c", "user.name=Swarm Pi",
-        "-c", "user.email=swarm-pi@localhost",
-        "-c", "commit.gpgsign=false",
-        "commit", "-m", `swarm-pi: checkpoint ${jobId}`,
+        "-c",
+        "user.name=Swarm Pi",
+        "-c",
+        "user.email=swarm-pi@localhost",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        `swarm-pi: checkpoint ${jobId}`,
     ], { cwd: worktree, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
     return (await git(worktree, ["rev-parse", "HEAD"])).trim();
 }
@@ -87,7 +106,14 @@ export async function materializeJobWorktree(cwd, jobId, artifact) {
         cwd: workspace,
         encoding: "utf8",
     });
-    const changed = await git(workspace, ["diff", "--name-only", "-z", artifact.base, artifact.commit, "--"]);
+    const changed = await git(workspace, [
+        "diff",
+        "--name-only",
+        "-z",
+        artifact.base,
+        artifact.commit,
+        "--",
+    ]);
     const changedFiles = changed.split("\0").filter(Boolean);
     const preserved = assessment.entries
         .filter((entry) => entry.category === "runtime" || entry.category === "ephemeral")
@@ -104,8 +130,14 @@ export async function materializeJobWorktree(cwd, jobId, artifact) {
     let applied = false;
     try {
         await fs.writeFile(patchFile, patch, { mode: 0o600 });
-        await execFileAsync("git", ["apply", "--check", "--binary", patchFile], { cwd: workspace, encoding: "utf8" });
-        await execFileAsync("git", ["apply", "--binary", patchFile], { cwd: workspace, encoding: "utf8" });
+        await execFileAsync("git", ["apply", "--check", "--binary", patchFile], {
+            cwd: workspace,
+            encoding: "utf8",
+        });
+        await execFileAsync("git", ["apply", "--binary", patchFile], {
+            cwd: workspace,
+            encoding: "utf8",
+        });
         applied = true;
         await assertWorktreeBaseline(workspace, lease.baseline);
         await validateChangedPaths(workspace, changedFiles);
@@ -114,7 +146,10 @@ export async function materializeJobWorktree(cwd, jobId, artifact) {
     catch (error) {
         if (applied) {
             try {
-                await execFileAsync("git", ["apply", "--reverse", "--binary", patchFile], { cwd: workspace, encoding: "utf8" });
+                await execFileAsync("git", ["apply", "--reverse", "--binary", patchFile], {
+                    cwd: workspace,
+                    encoding: "utf8",
+                });
             }
             catch (rollbackError) {
                 const original = error instanceof Error ? error.message : String(error);
@@ -138,22 +173,34 @@ export async function cleanupJobWorktree(cwd, artifact, discard = false) {
     }
     if (!discard && artifact.commit) {
         try {
-            await execFileAsync("git", ["merge-base", "--is-ancestor", artifact.commit, "HEAD"], { cwd: workspace });
+            await execFileAsync("git", ["merge-base", "--is-ancestor", artifact.commit, "HEAD"], {
+                cwd: workspace,
+            });
         }
         catch {
             throw new Error("Job artifact is not integrated; use --discard to remove it explicitly");
         }
     }
-    await execFileAsync("git", ["worktree", "remove", "--force", artifact.worktree], { cwd: workspace, encoding: "utf8" });
+    await execFileAsync("git", ["worktree", "remove", "--force", artifact.worktree], {
+        cwd: workspace,
+        encoding: "utf8",
+    });
     if (discard || !artifact.commit) {
-        await execFileAsync("git", ["branch", "-D", artifact.branch], { cwd: workspace, encoding: "utf8" }).catch(() => { });
+        await execFileAsync("git", ["branch", "-D", artifact.branch], {
+            cwd: workspace,
+            encoding: "utf8",
+        }).catch(() => { });
     }
     else {
-        await execFileAsync("git", ["branch", "-d", artifact.branch], { cwd: workspace, encoding: "utf8" }).catch(() => { });
+        await execFileAsync("git", ["branch", "-d", artifact.branch], {
+            cwd: workspace,
+            encoding: "utf8",
+        }).catch(() => { });
     }
 }
 async function git(cwd, args) {
-    return (await execFileAsync("git", args, { cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 })).stdout;
+    return (await execFileAsync("git", args, { cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }))
+        .stdout;
 }
 async function copyWorkspaceSnapshot(source, destination, entries) {
     for (const entry of entries) {

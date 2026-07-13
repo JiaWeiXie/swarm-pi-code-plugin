@@ -1,0 +1,4 @@
+interface:
+  display_name: "Swarm Pi Code Plugin Ask"
+  short_description: "Ask Pi for repository analysis"
+  default_prompt: "Use $swarm-pi-ask to investigate this repository question."

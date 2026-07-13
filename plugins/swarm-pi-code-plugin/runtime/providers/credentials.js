@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AuthStorage, } from "@earendil-works/pi-coding-agent";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { getProviderDefinition } from "./capabilities.js";
 import { customProviderHeaderVariable } from "../pi/environment.js";
 import { CONTROLLED_SECRET_HEADER_NAMES, } from "../state/model-config.js";
@@ -88,7 +88,8 @@ export class OAuthSessionManager {
         this.vault = vault;
         this.persistentAuth = persistentAuth;
         this.timeoutMs = options.timeoutMs ?? DEFAULT_OAUTH_TIMEOUT_MS;
-        this.login = options.login ?? ((storage, provider, callbacks) => storage.login(provider, callbacks));
+        this.login =
+            options.login ?? ((storage, provider, callbacks) => storage.login(provider, callbacks));
     }
     start(provider, preferredMethod) {
         const definition = getProviderDefinition(provider);
@@ -119,14 +120,20 @@ export class OAuthSessionManager {
         const callbacks = {
             signal: controller.signal,
             onAuth: (info) => this.update(record, {
-                notice: { type: "auth-url", url: safeOAuthUrl(info.url), ...(info.instructions ? { instructions: info.instructions } : {}) },
+                notice: {
+                    type: "auth-url",
+                    url: safeOAuthUrl(info.url),
+                    ...(info.instructions ? { instructions: info.instructions } : {}),
+                },
             }),
             onDeviceCode: (info) => this.update(record, {
                 notice: {
                     type: "device-code",
                     userCode: info.userCode,
                     verificationUri: safeOAuthUrl(info.verificationUri),
-                    ...(info.expiresInSeconds === undefined ? {} : { expiresInSeconds: info.expiresInSeconds }),
+                    ...(info.expiresInSeconds === undefined
+                        ? {}
+                        : { expiresInSeconds: info.expiresInSeconds }),
                 },
             }),
             onProgress: (message) => this.update(record, {
@@ -158,7 +165,8 @@ export class OAuthSessionManager {
                 message: "Complete login in the browser or paste the authorization code.",
             }).then((value) => value ?? ""),
         };
-        void this.login(staging, definition.oauthProvider, callbacks).then(() => {
+        void this.login(staging, definition.oauthProvider, callbacks)
+            .then(() => {
             if (isOAuthTerminal(record.status))
                 return;
             const credential = staging.get(provider);
@@ -168,7 +176,8 @@ export class OAuthSessionManager {
             this.releasePending(record, new Error("OAuth flow completed"));
             clearTimeout(record.timer);
             this.update(record, { status: "completed", challenge: null, credentialDraft });
-        }).catch((error) => {
+        })
+            .catch((error) => {
             if (isOAuthTerminal(record.status))
                 return;
             this.releasePending(record, new Error("OAuth flow stopped"));
@@ -208,7 +217,8 @@ export class OAuthSessionManager {
         const pending = record.pending;
         if (!pending || pending.challenge.id !== challengeId)
             throw new Error("OAuth prompt is stale or no longer active");
-        if (pending.challenge.type === "select" && !pending.challenge.options.some((option) => option.id === value)) {
+        if (pending.challenge.type === "select" &&
+            !pending.challenge.options.some((option) => option.id === value)) {
             throw new Error("Choose one of the offered OAuth options");
         }
         record.pending = undefined;
@@ -258,6 +268,7 @@ export class OAuthSessionManager {
         Object.assign(record, patch);
         record.revision += 1;
         record.updatedAt = new Date().toISOString();
+        // oxlint-disable-next-line no-useless-spread -- defensive copy: callbacks may mutate record.waiters mid-iteration
         for (const waiter of [...record.waiters])
             waiter();
     }
@@ -308,13 +319,16 @@ function providerIdentifier(value) {
 }
 function safeOAuthUrl(value) {
     const url = new URL(value);
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname))) {
+    if (url.protocol !== "https:" &&
+        !(url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname))) {
         throw new Error("OAuth provider returned an unsafe URL");
     }
     return url.toString();
 }
 function safeOAuthMessage(value) {
-    return value.replace(/(?:access|refresh|id)_?token\s*[:=]\s*\S+/gi, "token=[redacted]").slice(0, 2_000);
+    return value
+        .replace(/(?:access|refresh|id)_?token\s*[:=]\s*\S+/gi, "token=[redacted]")
+        .slice(0, 2_000);
 }
 function safeOAuthError(error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
@@ -331,5 +345,8 @@ function safeOAuthError(error) {
     return "OAuth sign-in failed. Retry or choose another sign-in method.";
 }
 function isOAuthTerminal(status) {
-    return status === "completed" || status === "failed" || status === "cancelled" || status === "timed-out";
+    return (status === "completed" ||
+        status === "failed" ||
+        status === "cancelled" ||
+        status === "timed-out");
 }

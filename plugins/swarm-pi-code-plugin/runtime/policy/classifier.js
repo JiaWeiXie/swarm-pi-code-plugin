@@ -89,9 +89,11 @@ function classifierPrompt(action, snapshot, repair) {
         `Path: ${action.path ?? ""}`,
         `Network: ${action.domain ? `${action.domain}:${action.port ?? ""}` : ""}`,
         `Input: ${actionInput}`,
-        "Schema: {\"decision\":\"allow|deny|require-approval\",\"risk\":\"low|medium|high|critical\",\"capabilities\":[],\"reason\":\"...\",\"constraints\":[],\"policyHash\":\"...\"}",
+        'Schema: {"decision":"allow|deny|require-approval","risk":"low|medium|high|critical","capabilities":[],"reason":"...","constraints":[],"policyHash":"..."}',
         "Use require-approval for high-risk but bounded actions. Use deny for critical, ambiguous privilege expansion, or policy violations.",
-    ].filter(Boolean).join("\n");
+    ]
+        .filter(Boolean)
+        .join("\n");
 }
 function parseDecision(output, snapshot, model) {
     const start = output.indexOf("{");
@@ -99,9 +101,12 @@ function parseDecision(output, snapshot, model) {
     if (start < 0 || end < start)
         throw new Error("Classifier did not return JSON");
     const value = JSON.parse(output.slice(start, end + 1));
-    if (typeof value.decision !== "string" || typeof value.risk !== "string" ||
-        typeof value.reason !== "string" || value.policyHash !== snapshot.hash ||
-        !Array.isArray(value.capabilities) || !Array.isArray(value.constraints)) {
+    if (typeof value.decision !== "string" ||
+        typeof value.risk !== "string" ||
+        typeof value.reason !== "string" ||
+        value.policyHash !== snapshot.hash ||
+        !Array.isArray(value.capabilities) ||
+        !Array.isArray(value.constraints)) {
         throw new Error("Classifier JSON does not match the decision schema");
     }
     return {
@@ -121,6 +126,8 @@ function redact(value) {
         return typeof value === "string" ? value.slice(0, 4_000) : value;
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [
         key,
-        /(token|secret|password|api.?key|authorization|cookie)/i.test(key) ? "[redacted]" : redact(item),
+        /(token|secret|password|api.?key|authorization|cookie)/i.test(key)
+            ? "[redacted]"
+            : redact(item),
     ]));
 }

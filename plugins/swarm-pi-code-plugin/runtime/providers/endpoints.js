@@ -1,23 +1,25 @@
 import { createHash } from "node:crypto";
-const GENERATION_SUFFIXES = [
-    "/chat/completions",
-    "/responses",
-    "/v1/messages",
-    "/messages",
-];
+const GENERATION_SUFFIXES = ["/chat/completions", "/responses", "/v1/messages", "/messages"];
 export function runtimeApiForWireProtocol(protocol) {
     switch (protocol) {
-        case "openai-chat-completions": return "openai-completions";
-        case "openai-responses": return "openai-responses";
-        case "anthropic-messages": return "anthropic-messages";
+        case "openai-chat-completions":
+            return "openai-completions";
+        case "openai-responses":
+            return "openai-responses";
+        case "anthropic-messages":
+            return "anthropic-messages";
     }
 }
 export function wireProtocolForRuntimeApi(api) {
     switch (api) {
-        case "openai-completions": return "openai-chat-completions";
-        case "openai-responses": return "openai-responses";
-        case "anthropic-messages": return "anthropic-messages";
-        case "google-generative-ai": return undefined;
+        case "openai-completions":
+            return "openai-chat-completions";
+        case "openai-responses":
+            return "openai-responses";
+        case "anthropic-messages":
+            return "anthropic-messages";
+        case "google-generative-ai":
+            return undefined;
     }
 }
 export function normalizeProtocolRoot(value, protocol) {
@@ -37,9 +39,10 @@ export function normalizeProtocolRoot(value, protocol) {
 export function protocolModelsUrl(root, protocol) {
     const url = safeHttpUrl(root, "endpoint");
     const path = url.pathname.replace(/\/+$/, "");
-    url.pathname = protocol === "anthropic-messages"
-        ? `${path}/v1/models`.replace(/\/+/g, "/")
-        : `${path}/models`.replace(/\/+/g, "/");
+    url.pathname =
+        protocol === "anthropic-messages"
+            ? `${path}/v1/models`.replace(/\/+/g, "/")
+            : `${path}/models`.replace(/\/+/g, "/");
     return url;
 }
 export function normalizeModelsEndpoint(value, generationRoot) {
@@ -57,7 +60,10 @@ export function stableCustomProviderId(root, protocol) {
         .replace(/[^a-z0-9._-]+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 40) || "endpoint";
-    const hash = createHash("sha256").update(`${url.toString().replace(/\/$/, "")}|${protocol}`).digest("hex").slice(0, 10);
+    const hash = createHash("sha256")
+        .update(`${url.toString().replace(/\/$/, "")}|${protocol}`)
+        .digest("hex")
+        .slice(0, 10);
     return `custom-${slug}-${hash}`.slice(0, 64);
 }
 export function safeHttpUrl(value, label) {

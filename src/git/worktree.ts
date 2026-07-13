@@ -39,7 +39,9 @@ export class WorktreeDirtyError extends Error {
   readonly inspection: WorktreeInspection;
 
   constructor(inspection: WorktreeInspection) {
-    super(`Implementation requires a clean worktree. Existing changes: ${inspection.changedFiles.join(", ")}`);
+    super(
+      `Implementation requires a clean worktree. Existing changes: ${inspection.changedFiles.join(", ")}`,
+    );
     this.name = "WorktreeDirtyError";
     this.inspection = inspection;
   }
@@ -49,7 +51,9 @@ export class WorktreeBaselineError extends Error {
   readonly code = "baseline-side-effect";
 
   constructor(readonly changedPaths: string[]) {
-    super(`Preserved workspace paths changed during delegated execution: ${changedPaths.join(", ")}`);
+    super(
+      `Preserved workspace paths changed during delegated execution: ${changedPaths.join(", ")}`,
+    );
     this.name = "WorktreeBaselineError";
   }
 }
@@ -57,9 +61,13 @@ export class WorktreeBaselineError extends Error {
 export async function inspectWorktree(cwd: string): Promise<WorktreeInspection> {
   const assessment = await assessWorkspace(cwd);
   if (!assessment.git) {
-    throw new Error(`Implementation requires a Git repository; workspace is ${assessment.disposition}`);
+    throw new Error(
+      `Implementation requires a Git repository; workspace is ${assessment.disposition}`,
+    );
   }
-  const relevant = assessment.entries.filter((entry) => entry.category === "user" || entry.category === "unsafe");
+  const relevant = assessment.entries.filter(
+    (entry) => entry.category === "user" || entry.category === "unsafe",
+  );
   const entries = relevant.map(({ status, path: entryPath }) => ({ status, path: entryPath }));
   const changedFiles = [...new Set(entries.map((entry) => entry.path))].sort();
   return { clean: entries.length === 0, changedFiles, entries, assessment };
@@ -72,11 +80,22 @@ export async function assessWorkspace(cwd: string): Promise<WorkspaceAssessment>
     output = await gitOutput(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   } catch {
     const inventory = await inventoryDirectory(root);
-    const visible = inventory.entries.filter((entry) => entry.category === "user" || entry.category === "unsafe");
+    const visible = inventory.entries.filter(
+      (entry) => entry.category === "user" || entry.category === "unsafe",
+    );
     const disposition = inventory.entries.some((entry) => entry.category === "unsafe")
       ? "unsafe"
-      : visible.length === 0 ? "non-git-empty" : "non-git-existing";
-    return { root, git: false, head: null, disposition, entries: inventory.entries, fingerprint: fingerprint(inventory.fingerprints) };
+      : visible.length === 0
+        ? "non-git-empty"
+        : "non-git-existing";
+    return {
+      root,
+      git: false,
+      head: null,
+      disposition,
+      entries: inventory.entries,
+      fingerprint: fingerprint(inventory.fingerprints),
+    };
   }
   const raw = parsePorcelain(output);
   const assessments: WorkspaceEntryAssessment[] = [];
@@ -101,10 +120,17 @@ export async function assessWorkspace(cwd: string): Promise<WorkspaceAssessment>
   };
 }
 
-async function assessEntry(root: string, entry: { status: string; path: string }): Promise<WorkspaceEntryAssessment> {
+async function assessEntry(
+  root: string,
+  entry: { status: string; path: string },
+): Promise<WorkspaceEntryAssessment> {
   const absolute = path.resolve(root, entry.path);
   const stat = await fs.lstat(absolute).catch(() => undefined);
-  if (entry.status.includes("U") || stat?.isSymbolicLink() || (stat && !stat.isFile() && !stat.isDirectory())) {
+  if (
+    entry.status.includes("U") ||
+    stat?.isSymbolicLink() ||
+    (stat && !stat.isFile() && !stat.isDirectory())
+  ) {
     return { ...entry, category: "unsafe", reason: "conflict, link, or unsupported file type" };
   }
   if (entry.status === "??" && isRuntimePath(entry.path)) {
@@ -113,33 +139,47 @@ async function assessEntry(root: string, entry: { status: string; path: string }
   if (entry.status === "??" && isSafeGeneratedPath(entry.path)) {
     return { ...entry, category: "ephemeral", reason: "recognized generated artifact" };
   }
-  return { ...entry, category: "user", reason: entry.status === "??" ? "unknown untracked content" : "tracked or staged content" };
+  return {
+    ...entry,
+    category: "user",
+    reason: entry.status === "??" ? "unknown untracked content" : "tracked or staged content",
+  };
 }
 
 function isRuntimePath(value: string): boolean {
   const normalized = value.split(path.sep).join("/");
-  return [".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"]
-    .some((directory) => normalized === directory || normalized.startsWith(`${directory}/`));
+  return [".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].some(
+    (directory) => normalized === directory || normalized.startsWith(`${directory}/`),
+  );
 }
 
 function isSafeGeneratedPath(value: string): boolean {
   const normalized = value.split(path.sep).join("/");
   const basename = path.posix.basename(normalized);
-  return basename === ".DS_Store" || normalized.split("/").includes("__pycache__") || /\.(?:pyc|pyo)$/.test(basename);
+  return (
+    basename === ".DS_Store" ||
+    normalized.split("/").includes("__pycache__") ||
+    /\.(?:pyc|pyo)$/.test(basename)
+  );
 }
 
 function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-async function gitWorkspaceFingerprint(root: string, entries: WorkspaceEntryAssessment[]): Promise<string> {
+async function gitWorkspaceFingerprint(
+  root: string,
+  entries: WorkspaceEntryAssessment[],
+): Promise<string> {
   const head = await headRevision(root);
-  const content = await Promise.all(entries.map(async (entry) => ({
-    path: entry.path,
-    status: entry.status,
-    category: entry.category,
-    digest: await digestWorkspacePath(path.join(root, entry.path)),
-  })));
+  const content = await Promise.all(
+    entries.map(async (entry) => ({
+      path: entry.path,
+      status: entry.status,
+      category: entry.category,
+      digest: await digestWorkspacePath(path.join(root, entry.path)),
+    })),
+  );
   return fingerprint({ head, entries: content });
 }
 
@@ -155,7 +195,9 @@ async function digestWorkspacePath(file: string): Promise<unknown> {
       file: true,
       mode: stat.mode,
       size: stat.size,
-      digest: createHash("sha256").update(await fs.readFile(file)).digest("hex"),
+      digest: createHash("sha256")
+        .update(await fs.readFile(file))
+        .digest("hex"),
     };
   }
   if (!stat.isDirectory()) return { unsupported: true, mode: stat.mode, size: stat.size };
@@ -163,10 +205,14 @@ async function digestWorkspacePath(file: string): Promise<unknown> {
   return {
     directory: true,
     mode: stat.mode,
-    children: await Promise.all(children.sort((left, right) => left.name.localeCompare(right.name)).map(async (child) => ({
-      name: child.name,
-      digest: await digestWorkspacePath(path.join(file, child.name)),
-    }))),
+    children: await Promise.all(
+      children
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map(async (child) => ({
+          name: child.name,
+          digest: await digestWorkspacePath(path.join(file, child.name)),
+        })),
+    ),
   };
 }
 
@@ -182,21 +228,48 @@ async function inventoryDirectory(root: string): Promise<{
       const relative = prefix ? `${prefix}/${child.name}` : child.name;
       const absolute = path.join(directory, child.name);
       const stat = await fs.lstat(absolute);
-      const category = isRuntimePath(relative) ? "runtime" : isSafeGeneratedPath(relative) ? "ephemeral" : "user";
+      const category = isRuntimePath(relative)
+        ? "runtime"
+        : isSafeGeneratedPath(relative)
+          ? "ephemeral"
+          : "user";
       if (child.isSymbolicLink() || (!child.isFile() && !child.isDirectory())) {
-        entries.push({ path: relative, status: "??", category: "unsafe", reason: "link or unsupported file type" });
+        entries.push({
+          path: relative,
+          status: "??",
+          category: "unsafe",
+          reason: "link or unsupported file type",
+        });
         fingerprints.push([relative, "unsafe", stat.mode, stat.size]);
         continue;
       }
       if (child.isDirectory()) {
         if (category === "runtime" || category === "ephemeral") {
-          entries.push({ path: relative, status: "??", category, reason: category === "runtime" ? "plugin runtime state" : "recognized generated artifact" });
+          entries.push({
+            path: relative,
+            status: "??",
+            category,
+            reason:
+              category === "runtime" ? "plugin runtime state" : "recognized generated artifact",
+          });
         }
         await visit(absolute, relative);
         continue;
       }
-      entries.push({ path: relative, status: "??", category, reason: category === "user" ? "existing non-Git content" : category === "runtime" ? "plugin runtime state" : "recognized generated artifact" });
-      const digest = createHash("sha256").update(await fs.readFile(absolute)).digest("hex");
+      entries.push({
+        path: relative,
+        status: "??",
+        category,
+        reason:
+          category === "user"
+            ? "existing non-Git content"
+            : category === "runtime"
+              ? "plugin runtime state"
+              : "recognized generated artifact",
+      });
+      const digest = createHash("sha256")
+        .update(await fs.readFile(absolute))
+        .digest("hex");
       fingerprints.push([relative, stat.mode, stat.size, digest]);
     }
   }
@@ -221,7 +294,9 @@ export async function acquireWorktreeLease(cwd: string, jobId: string): Promise<
     try {
       const handle = await fs.open(file, "wx", 0o600);
       try {
-        await handle.writeFile(`${JSON.stringify({ jobId, pid: process.pid, token, workspace })}\n`);
+        await handle.writeFile(
+          `${JSON.stringify({ jobId, pid: process.pid, token, workspace })}\n`,
+        );
       } finally {
         await handle.close();
       }
@@ -244,7 +319,9 @@ export async function acquireWorktreeLease(cwd: string, jobId: string): Promise<
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const current = await readLease(file);
       if (current?.pid && processAlive(current.pid)) {
-        throw new Error(`Another implementation job already owns this worktree: ${current.jobId ?? "unknown"}`);
+        throw new Error(
+          `Another implementation job already owns this worktree: ${current.jobId ?? "unknown"}`,
+        );
       }
       await fs.rm(file, { force: true });
     }
@@ -252,7 +329,10 @@ export async function acquireWorktreeLease(cwd: string, jobId: string): Promise<
   throw new Error("Unable to acquire the implementation worktree lease");
 }
 
-export async function assertWorktreeBaseline(cwd: string, baseline: WorktreeBaseline): Promise<void> {
+export async function assertWorktreeBaseline(
+  cwd: string,
+  baseline: WorktreeBaseline,
+): Promise<void> {
   const head = await headRevision(cwd);
   if (head !== baseline.head) {
     throw new Error("The worktree HEAD changed while the delegated implementation was running");
@@ -266,13 +346,11 @@ export async function assertWorktreeBaseline(cwd: string, baseline: WorktreeBase
 }
 
 export async function captureIgnoredPaths(cwd: string): Promise<string[]> {
-  const output = await gitOutput(cwd, [
-    "status",
-    "--porcelain=v1",
-    "-z",
-    "--ignored=matching",
-    "--untracked-files=normal",
-  ], 8 * 1024 * 1024);
+  const output = await gitOutput(
+    cwd,
+    ["status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=normal"],
+    8 * 1024 * 1024,
+  );
   return output
     .split("\0")
     .filter((record) => record.startsWith("!! "))
@@ -283,7 +361,8 @@ export async function captureIgnoredPaths(cwd: string): Promise<string[]> {
 export async function validateChangedPaths(cwd: string, changedFiles: string[]): Promise<void> {
   const root = await fs.realpath(await resolveWorkspaceRoot(cwd));
   for (const file of changedFiles) {
-    if (isProtectedWorkspacePath(file)) throw new Error(`Changed path is protected by the delegated worker boundary: ${file}`);
+    if (isProtectedWorkspacePath(file))
+      throw new Error(`Changed path is protected by the delegated worker boundary: ${file}`);
     const absolute = path.resolve(root, file);
     if (!isInside(root, absolute)) throw new Error(`Changed path escaped the worktree: ${file}`);
     let stat: Awaited<ReturnType<typeof fs.lstat>>;
@@ -308,7 +387,9 @@ export async function validateChangedPaths(cwd: string, changedFiles: string[]):
       throw new Error(`Changed path has an unsupported file type: ${file}`);
     }
     if (stat.isFile() && stat.nlink > 1) {
-      throw new Error(`Changed file has multiple hard links and cannot be accepted safely: ${file}`);
+      throw new Error(
+        `Changed file has multiple hard links and cannot be accepted safely: ${file}`,
+      );
     }
   }
 }
@@ -316,27 +397,30 @@ export async function validateChangedPaths(cwd: string, changedFiles: string[]):
 export function isProtectedWorkspacePath(value: string): boolean {
   const normalized = value.split(path.sep).join("/").replace(/^\.\//, "");
   const first = normalized.split("/")[0] ?? "";
-  return [".git", ".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].includes(first) ||
-    [".env", ".env.local", ".swarm-pi-policy.json"].includes(normalized);
+  return (
+    [".git", ".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].includes(first) ||
+    [".env", ".env.local", ".swarm-pi-policy.json"].includes(normalized)
+  );
 }
 
 export async function captureWorktreeChanges(cwd: string): Promise<WorktreeChanges> {
   const inspection = await inspectWorktree(cwd);
   const head = await headRevision(cwd);
-  const [{ stdout: diff }, { stdout: trackedStat }] = head === null
-    ? [{ stdout: "" }, { stdout: "" }]
-    : await Promise.all([
-      execFileAsync("git", ["diff", "--binary", "--no-ext-diff", head, "--"], {
-        cwd,
-        encoding: "utf8",
-        maxBuffer: 16 * 1024 * 1024,
-      }),
-      execFileAsync("git", ["diff", "--stat", head, "--"], {
-        cwd,
-        encoding: "utf8",
-        maxBuffer: 4 * 1024 * 1024,
-      }),
-    ]);
+  const [{ stdout: diff }, { stdout: trackedStat }] =
+    head === null
+      ? [{ stdout: "" }, { stdout: "" }]
+      : await Promise.all([
+          execFileAsync("git", ["diff", "--binary", "--no-ext-diff", head, "--"], {
+            cwd,
+            encoding: "utf8",
+            maxBuffer: 16 * 1024 * 1024,
+          }),
+          execFileAsync("git", ["diff", "--stat", head, "--"], {
+            cwd,
+            encoding: "utf8",
+            maxBuffer: 4 * 1024 * 1024,
+          }),
+        ]);
   const untracked = inspection.entries
     .filter((entry) => entry.status === "??")
     .map((entry) => entry.path);
@@ -364,10 +448,12 @@ async function captureWorktreeBaseline(cwd: string): Promise<WorktreeBaseline> {
     head: assessment.head,
     ignoredPaths: await captureIgnoredPaths(cwd),
     safePaths,
-    preservedEntries: await Promise.all(safePaths.map(async (entryPath) => ({
-      path: entryPath,
-      digest: fingerprint(await digestWorkspacePath(path.join(cwd, entryPath))),
-    }))),
+    preservedEntries: await Promise.all(
+      safePaths.map(async (entryPath) => ({
+        path: entryPath,
+        digest: fingerprint(await digestWorkspacePath(path.join(cwd, entryPath))),
+      })),
+    ),
     workspaceFingerprint: assessment.fingerprint,
   };
 }
@@ -408,14 +494,24 @@ export function parsePorcelain(output: string): Array<{ status: string; path: st
   return entries;
 }
 
-async function gitOutput(cwd: string, args: string[], maxBuffer = 4 * 1024 * 1024): Promise<string> {
+async function gitOutput(
+  cwd: string,
+  args: string[],
+  maxBuffer = 4 * 1024 * 1024,
+): Promise<string> {
   const { stdout } = await execFileAsync("git", args, { cwd, encoding: "utf8", maxBuffer });
   return stdout;
 }
 
-async function readLease(file: string): Promise<{ jobId?: string; pid?: number; token?: string } | undefined> {
+async function readLease(
+  file: string,
+): Promise<{ jobId?: string; pid?: number; token?: string } | undefined> {
   try {
-    return JSON.parse(await fs.readFile(file, "utf8")) as { jobId?: string; pid?: number; token?: string };
+    return JSON.parse(await fs.readFile(file, "utf8")) as {
+      jobId?: string;
+      pid?: number;
+      token?: string;
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     return undefined;
@@ -433,5 +529,8 @@ function processAlive(pid: number): boolean {
 
 function isInside(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+  );
 }

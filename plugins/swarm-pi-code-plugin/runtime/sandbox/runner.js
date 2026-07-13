@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { SandboxManager, } from "@carderne/sandbox-runtime";
+import { SandboxManager } from "@carderne/sandbox-runtime";
 import { createBashToolDefinition, } from "@earendil-works/pi-coding-agent";
 import { resolveStateDir, resolveWorkspaceRoot } from "../state/state.js";
 import { detectSandboxAvailability } from "./availability.js";
@@ -96,7 +96,14 @@ export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.en
         network: {
             allowedDomains: [],
             deniedDomains: sandboxMode === "adaptive"
-                ? ["localhost", "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
+                ? [
+                    "localhost",
+                    "127.0.0.0/8",
+                    "10.0.0.0/8",
+                    "172.16.0.0/12",
+                    "192.168.0.0/16",
+                    "169.254.0.0/16",
+                ]
                 : [],
             allowUnixSockets: [],
             allowAllUnixSockets: false,
@@ -147,7 +154,9 @@ function sandboxedBashOperations(tempRoot, env) {
         async exec(command, cwd, { onData, signal, timeout }) {
             let release;
             const previous = queue;
-            queue = new Promise((resolve) => { release = resolve; });
+            queue = new Promise((resolve) => {
+                release = resolve;
+            });
             await previous;
             try {
                 return await executeSandboxed(command, cwd, tempRoot, env, onData, signal, timeout);
@@ -261,13 +270,12 @@ function credentialPaths(env) {
         env.AWS_SHARED_CREDENTIALS_FILE,
         env.KUBECONFIG,
         path.join(os.homedir(), ".pi", "agent", "auth.json"),
-    ].filter((value) => Boolean(value)).map((value) => path.resolve(value));
+    ]
+        .filter((value) => Boolean(value))
+        .map((value) => path.resolve(value));
 }
 function executableReadPaths(cwd) {
-    return uniquePaths([
-        path.dirname(process.execPath),
-        path.join(cwd, "node_modules", ".bin"),
-    ]);
+    return uniquePaths([path.dirname(process.execPath), path.join(cwd, "node_modules", ".bin")]);
 }
 function sandboxPath(cwd) {
     return uniquePaths([
@@ -286,7 +294,8 @@ function uniquePaths(values) {
 }
 function isInside(root, candidate) {
     const relative = path.relative(root, candidate);
-    return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+    return (relative === "" ||
+        (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)));
 }
 function restoreEnvironment(name, value) {
     if (value === undefined)

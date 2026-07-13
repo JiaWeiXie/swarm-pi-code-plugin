@@ -18,6 +18,22 @@ run = "npm test"
 description = "Type-check the TypeScript sources"
 run = "npm run typecheck"
 
+[tasks.lint]
+description = "Lint TypeScript sources"
+run = "npm run lint"
+
+[tasks.lint-fix]
+description = "Fix lint findings in TypeScript sources"
+run = "npm run lint:fix"
+
+[tasks.fmt]
+description = "Format TypeScript sources"
+run = "npm run fmt"
+
+[tasks.fmt-check]
+description = "Check TypeScript source formatting"
+run = "npm run fmt:check"
+
 [tasks.build]
 description = "Compile the runner and library"
 run = "npm run build"

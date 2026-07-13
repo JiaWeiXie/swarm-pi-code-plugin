@@ -4,11 +4,11 @@ import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { assertHostActionAllowed, createActionFamilyLease, createHostActionReceipt } from "../host-actions/policy.js";
+import { assertHostActionAllowed, createActionFamilyLease, createHostActionReceipt, } from "../host-actions/policy.js";
 import { buildReviewRequest } from "../git/review.js";
 import { parseDiscoveryStageOutput } from "../discovery/schema.js";
-import { checkpointJobWorktree, cleanupJobWorktree, materializeJobWorktree, prepareJobWorktree } from "../git/job-worktree.js";
-import { checkpointScaffold, materializeScaffold, parseScaffoldSpec, prepareScaffoldWorkspace } from "../git/scaffold.js";
+import { checkpointJobWorktree, cleanupJobWorktree, materializeJobWorktree, prepareJobWorktree, } from "../git/job-worktree.js";
+import { checkpointScaffold, materializeScaffold, parseScaffoldSpec, prepareScaffoldWorkspace, } from "../git/scaffold.js";
 import { acquireWorktreeLease, assertWorktreeBaseline, captureIgnoredPaths, captureWorktreeChanges, inspectWorktree, assessWorkspace, requireCleanWorktree, validateChangedPaths, WorktreeBaselineError, } from "../git/worktree.js";
 import { executeSession } from "../pi/execute.js";
 import { createModelCatalog, describeModels, describeProviders, modelId, orderModels, } from "../pi/models.js";
@@ -22,7 +22,7 @@ import { acknowledgeJob, attachJobProcess, cancelJob, finishJob, getJob, heartbe
 import { clearModelConfiguration, loadModelConfiguration, modelPriority, parseModelConfiguration, saveModelPriority, } from "../state/model-config.js";
 import { clearConfiguration, defaultState, resolveStateDir, loadState, saveProfile, setAvailableModels, setModelPriority, updateState, } from "../state/state.js";
 import { StateMigrationConflictError } from "../state/state.js";
-import { createContinuation, consumeContinuation, readContinuation } from "../onboarding/continuations.js";
+import { createContinuation, consumeContinuation, readContinuation, } from "../onboarding/continuations.js";
 import { inspectReadiness } from "../onboarding/readiness.js";
 import { spawnBackgroundWorker } from "./background.js";
 import { buildWorkerPrompt } from "./prompts.js";
@@ -57,7 +57,8 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
     if (args.command === "resume") {
         const continuation = await readContinuation(cwd, args.continuationId);
         const resumed = await runCommand(requestArguments(continuation.request), continuation.request.cwd, dependencies, { ...options, requestOverride: continuation.request, continuationId: continuation.id });
-        if (!("event" in resumed) || (resumed.event !== "setup-required" && resumed.event !== "workspace-action-required")) {
+        if (!("event" in resumed) ||
+            (resumed.event !== "setup-required" && resumed.event !== "workspace-action-required")) {
             await consumeContinuation(cwd, continuation.id);
         }
         return resumed;
@@ -93,7 +94,9 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
     }
     // A continuation carries its own (possibly absent) goal; only a fresh submission reads the live profile,
     // so a later profile edit never changes a resumed job's snapshotted goal.
-    const projectGoal = options.requestOverride ? options.requestOverride.projectGoal : state.config.profile?.goal;
+    const projectGoal = options.requestOverride
+        ? options.requestOverride.projectGoal
+        : state.config.profile?.goal;
     const persistedSnapshot = options.requestOverride?.policySnapshot;
     let effectiveProjectPolicy;
     if (options.requestOverride === undefined) {
@@ -126,30 +129,33 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         }
     }
     const host = args.host;
-    const scaffoldSpec = options.requestOverride?.scaffoldSpec ?? (args.command === "scaffold"
-        ? parseScaffoldSpec(await activeDependencies.readFile(args.specFile))
-        : undefined);
+    const scaffoldSpec = options.requestOverride?.scaffoldSpec ??
+        (args.command === "scaffold"
+            ? parseScaffoldSpec(await activeDependencies.readFile(args.specFile))
+            : undefined);
     const reviewPolicy = effectiveProjectPolicy && args.command === "review"
         ? await bindProjectPolicy(effectiveProjectPolicy, cwd)
         : undefined;
-    const submittedPrompt = options.requestOverride?.prompt ?? (scaffoldSpec
-        ? scaffoldSpec.request
-        :
-            args.command === "review"
+    const submittedPrompt = options.requestOverride?.prompt ??
+        (scaffoldSpec
+            ? scaffoldSpec.request
+            : args.command === "review"
                 ? await buildReviewRequest(cwd, {
                     base: args.base,
                     scope: args.scope,
-                    ...(reviewPolicy ? {
-                        allowedPath: async (relativePath) => {
-                            try {
-                                await assertPathAllowed(reviewPolicy, "read", relativePath);
-                                return true;
-                            }
-                            catch {
-                                return false;
-                            }
-                        },
-                    } : {}),
+                    ...(reviewPolicy
+                        ? {
+                            allowedPath: async (relativePath) => {
+                                try {
+                                    await assertPathAllowed(reviewPolicy, "read", relativePath);
+                                    return true;
+                                }
+                                catch {
+                                    return false;
+                                }
+                            },
+                        }
+                        : {}),
                 })
                 : await activeDependencies.readFile(args.promptFile));
     const discoveryFrom = options.requestOverride?.discoveryFrom ?? args.discoveryFrom;
@@ -178,35 +184,39 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         adaptivePolicy.rules.push(...effectiveProjectPolicy.repositoryDenyRules);
     }
     const approvalMode = persistedSnapshot?.approvalMode ?? args.approvalMode ?? adaptivePolicy.approvalPolicy;
-    const escalationPolicy = persistedSnapshot?.escalationPolicy ?? (roleId === "mechanical-executor"
-        ? resolveRolePolicy("executor", state.config.rolePolicies, modelPriority(modelConfiguration), state.config.backgroundRolePolicy)
-        : undefined);
-    const policySnapshot = persistedSnapshot ?? (effectiveProjectPolicy
-        ? createPolicySnapshot({
-            sandboxMode,
-            approvalMode,
-            rolePolicy,
-            adaptivePolicy,
-            ...(escalationPolicy ? { escalationPolicy } : {}),
-            effectiveProjectPolicy,
-            decisionMode: args.decisionMode ?? state.config.decisionMode ?? "balance",
-            hostAssistance: resolveHostAssistancePolicy(state.config.hostAssistance, args.hostAssistance),
-            ...(state.config.advisor ? { advisor: state.config.advisor } : {}),
-            ...(state.config.doctrine ? { doctrine: state.config.doctrine } : {}),
-            contextBudget: state.config.contextBudget ?? 4,
-        })
-        : createPolicySnapshot({
-            sandboxMode,
-            approvalMode,
-            rolePolicy,
-            adaptivePolicy,
-            ...(escalationPolicy ? { escalationPolicy } : {}),
-        }));
+    const escalationPolicy = persistedSnapshot?.escalationPolicy ??
+        (roleId === "mechanical-executor"
+            ? resolveRolePolicy("executor", state.config.rolePolicies, modelPriority(modelConfiguration), state.config.backgroundRolePolicy)
+            : undefined);
+    const policySnapshot = persistedSnapshot ??
+        (effectiveProjectPolicy
+            ? createPolicySnapshot({
+                sandboxMode,
+                approvalMode,
+                rolePolicy,
+                adaptivePolicy,
+                ...(escalationPolicy ? { escalationPolicy } : {}),
+                effectiveProjectPolicy,
+                decisionMode: args.decisionMode ?? state.config.decisionMode ?? "balance",
+                hostAssistance: resolveHostAssistancePolicy(state.config.hostAssistance, args.hostAssistance),
+                ...(state.config.advisor ? { advisor: state.config.advisor } : {}),
+                ...(state.config.doctrine ? { doctrine: state.config.doctrine } : {}),
+                contextBudget: state.config.contextBudget ?? 4,
+            })
+            : createPolicySnapshot({
+                sandboxMode,
+                approvalMode,
+                rolePolicy,
+                adaptivePolicy,
+                ...(escalationPolicy ? { escalationPolicy } : {}),
+            }));
     if (policySnapshot.version === 3)
         assertPolicySnapshotValid(policySnapshot);
-    if (args.hostContextFile && policySnapshot.version === 3 && (!policySnapshot.hostAssistance.enabled
-        || policySnapshot.hostAssistance.maxRequests <= 0
-        || !policySnapshot.hostAssistance.contextClasses.includes("workspace"))) {
+    if (args.hostContextFile &&
+        policySnapshot.version === 3 &&
+        (!policySnapshot.hostAssistance.enabled ||
+            policySnapshot.hostAssistance.maxRequests <= 0 ||
+            !policySnapshot.hostAssistance.contextClasses.includes("workspace"))) {
         return new ProjectPolicyError({
             event: "policy-rejected",
             errorCode: "project-scope-violation",
@@ -214,14 +224,22 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
             recoverable: false,
             message: "--host-context-file is not permitted by the effective Host Assistance policy",
             preserved: [],
-            nextActions: [{ action: "review-host-assistance-policy", label: "Review Host Assistance policy or remove the context file" }],
+            nextActions: [
+                {
+                    action: "review-host-assistance-policy",
+                    label: "Review Host Assistance policy or remove the context file",
+                },
+            ],
             policyHash: policySnapshot.hash,
             scopeHash: policySnapshot.scopeHash,
         }).rejection;
     }
     let hostContext = "";
-    if (args.hostContextFile && policySnapshot.version === 3 && policySnapshot.hostAssistance.enabled
-        && policySnapshot.hostAssistance.maxRequests > 0 && policySnapshot.hostAssistance.contextClasses.includes("workspace")) {
+    if (args.hostContextFile &&
+        policySnapshot.version === 3 &&
+        policySnapshot.hostAssistance.enabled &&
+        policySnapshot.hostAssistance.maxRequests > 0 &&
+        policySnapshot.hostAssistance.contextClasses.includes("workspace")) {
         try {
             const budget = Math.min(32_768, policySnapshot.contextBudget * 8_192);
             if (budget > 0) {
@@ -242,9 +260,10 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         requested: args.model,
         priority: rolePolicy.models.length ? rolePolicy.models : modelPriority(modelConfiguration),
     }).slice(0, Math.min(rolePolicy.maxAttempts, decisionAttemptLimit(policySnapshot)));
-    const delegationSpec = options.requestOverride?.delegationSpec ?? (args.specFile && args.command !== "scaffold"
-        ? parseDelegationSpec(await activeDependencies.readFile(args.specFile))
-        : { request: rawPrompt });
+    const delegationSpec = options.requestOverride?.delegationSpec ??
+        (args.specFile && args.command !== "scaffold"
+            ? parseDelegationSpec(await activeDependencies.readFile(args.specFile))
+            : { request: rawPrompt });
     const timeoutMs = args.timeoutMs ?? defaultTimeoutMs(args.command);
     let workspaceStrategy = args.workspaceStrategy ?? options.requestOverride?.workspaceStrategy ?? "auto";
     const target = args.target ?? options.requestOverride?.target;
@@ -256,7 +275,9 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         availableModels: available.map(modelId),
         registryError: activeDependencies.catalog.error?.() ?? null,
     });
-    if (isMutationTask(args.command) && workspaceStrategy === "auto" && readiness.workspace.disposition === "safe-dirty") {
+    if (isMutationTask(args.command) &&
+        workspaceStrategy === "auto" &&
+        readiness.workspace.disposition === "safe-dirty") {
         workspaceStrategy = "isolated-head";
     }
     const workerRequest = {
@@ -284,25 +305,38 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         ...(args.hostContextFile ? { hostContextFile: args.hostContextFile } : {}),
         ...(discoveryFrom ? { discoveryFrom } : {}),
     };
-    const setupBlocked = !dependencies && readiness.issues.some((issue) => issue.severity === "blocking" && issue.stage !== "workspace");
+    const setupBlocked = !dependencies &&
+        readiness.issues.some((issue) => issue.severity === "blocking" && issue.stage !== "workspace");
     if (setupBlocked) {
         const continuation = await createContinuation(cwd, workerRequest);
         return { event: "setup-required", continuationId: continuation.id, readiness };
     }
     const mutationCommand = args.command === "implement" || args.command === "setup";
     if ((args.command !== "scaffold" && readiness.workspace.disposition === "unsafe") ||
-        (mutationCommand && (readiness.workspace.disposition === "git-unborn" ||
-            readiness.workspace.disposition === "non-git-empty" ||
-            readiness.workspace.disposition === "non-git-existing" ||
-            (readiness.workspace.disposition === "user-dirty" && workspaceStrategy === "auto")))) {
-        const continuationId = options.continuationId ?? (await createContinuation(cwd, workerRequest, { workspaceFence: "repair" })).id;
+        (mutationCommand &&
+            (readiness.workspace.disposition === "git-unborn" ||
+                readiness.workspace.disposition === "non-git-empty" ||
+                readiness.workspace.disposition === "non-git-existing" ||
+                (readiness.workspace.disposition === "user-dirty" && workspaceStrategy === "auto")))) {
+        const continuationId = options.continuationId ??
+            (await createContinuation(cwd, workerRequest, { workspaceFence: "repair" })).id;
         const userDirty = readiness.workspace.disposition === "user-dirty";
         const unborn = readiness.workspace.disposition === "git-unborn";
         const unsafe = readiness.workspace.disposition === "unsafe";
-        const strategies = unsafe ? ["inspect-workspace"] : userDirty ? ["isolated-head", "isolated-snapshot"] : ["scaffold", "inspect-adoption"];
+        const strategies = unsafe
+            ? ["inspect-workspace"]
+            : userDirty
+                ? ["isolated-head", "isolated-snapshot"]
+                : ["scaffold", "inspect-adoption"];
         return {
             event: "workspace-action-required",
-            errorCode: unsafe ? "workspace-unsafe" : unborn ? "workspace-unborn-head" : userDirty ? "workspace-user-dirty" : `workspace-${readiness.workspace.disposition}`,
+            errorCode: unsafe
+                ? "workspace-unsafe"
+                : unborn
+                    ? "workspace-unborn-head"
+                    : userDirty
+                        ? "workspace-user-dirty"
+                        : `workspace-${readiness.workspace.disposition}`,
             message: unsafe
                 ? "The workspace contains conflicts or unsafe filesystem entries. No model was started; inspect and repair the workspace before resuming."
                 : unborn
@@ -313,16 +347,21 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
             strategies,
             nextActions: strategies.map((action) => ({
                 action,
-                label: action === "isolated-head" ? "Run from HEAD"
-                    : action === "isolated-snapshot" ? "Include a local snapshot"
-                        : action === "scaffold" ? "Design the initial project"
-                            : action === "inspect-workspace" ? "Review blocking workspace entries"
+                label: action === "isolated-head"
+                    ? "Run from HEAD"
+                    : action === "isolated-snapshot"
+                        ? "Include a local snapshot"
+                        : action === "scaffold"
+                            ? "Design the initial project"
+                            : action === "inspect-workspace"
+                                ? "Review blocking workspace entries"
                                 : "Inspect and adopt existing files",
             })),
         };
     }
     if (args.command === "scaffold" && scaffoldSpec?.targetMode === "adopt" && !adoptExisting) {
-        const continuationId = options.continuationId ?? (await createContinuation(cwd, workerRequest, { workspaceFence: "repair" })).id;
+        const continuationId = options.continuationId ??
+            (await createContinuation(cwd, workerRequest, { workspaceFence: "repair" })).id;
         return {
             event: "workspace-action-required",
             errorCode: "workspace-adoption-approval-required",
@@ -392,8 +431,11 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
             return failed;
         }
     }
-    if (executionMode === "supervised" && (approvalMode === "wait" ||
-        (policySnapshot.version === 3 && policySnapshot.hostAssistance.enabled && dependencies === undefined))) {
+    if (executionMode === "supervised" &&
+        (approvalMode === "wait" ||
+            (policySnapshot.version === 3 &&
+                policySnapshot.hostAssistance.enabled &&
+                dependencies === undefined))) {
         try {
             const spawnWorker = options.spawnWorker ?? spawnBackgroundWorker;
             const pid = await spawnWorker({ cwd, jobId: job.id, workerToken: job.workerToken });
@@ -429,7 +471,9 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
 function resolveHostAssistancePolicy(configured, override) {
     const base = configured ?? defaultHostAssistancePolicy();
     if (!override || override === "inherit") {
-        return base.mode === "inherit" ? { ...structuredClone(base), mode: base.enabled ? "on" : "off" } : structuredClone(base);
+        return base.mode === "inherit"
+            ? { ...structuredClone(base), mode: base.enabled ? "on" : "off" }
+            : structuredClone(base);
     }
     return { ...base, enabled: override === "on", mode: override };
 }
@@ -451,10 +495,7 @@ async function waitForManagedRelay(cwd, jobId, timeoutMs, signal) {
         signal.addEventListener("abort", abort, { once: true });
     });
     try {
-        const result = await Promise.race([
-            waitForJob(cwd, jobId, timeoutMs),
-            aborted,
-        ]);
+        const result = await Promise.race([waitForJob(cwd, jobId, timeoutMs), aborted]);
         if (result !== "aborted")
             return result;
         await cancelJob(cwd, jobId);
@@ -515,7 +556,9 @@ async function handleJobs(args, cwd, dependencies, signal) {
             });
         case "materialize": {
             const snapshot = await getJob(cwd, args.jobId);
-            if (snapshot.job.materializedAt && typeof snapshot.job.materializedTarget === "string" && snapshot.result?.artifact?.commit) {
+            if (snapshot.job.materializedAt &&
+                typeof snapshot.job.materializedTarget === "string" &&
+                snapshot.result?.artifact?.commit) {
                 return {
                     materialized: true,
                     jobId: args.jobId,
@@ -524,7 +567,9 @@ async function handleJobs(args, cwd, dependencies, signal) {
                 };
             }
             const workspace = snapshot.job.executionWorkspace;
-            if (!workspace || !snapshot.result?.artifact?.commit || !snapshot.result.artifact.deliverable) {
+            if (!workspace ||
+                !snapshot.result?.artifact?.commit ||
+                !snapshot.result.artifact.deliverable) {
                 throw new Error(`Job has no verified deliverable artifact: ${args.jobId}`);
             }
             if (snapshot.job.kind !== "scaffold") {
@@ -566,7 +611,8 @@ async function handleJobs(args, cwd, dependencies, signal) {
                 },
             });
             const cleanupWarnings = [...materialized.cleanupWarnings];
-            if (materialized.stateMoved && path.resolve(sourceStateDir) !== path.resolve(await resolveStateDir(cwd))) {
+            if (materialized.stateMoved &&
+                path.resolve(sourceStateDir) !== path.resolve(await resolveStateDir(cwd))) {
                 await fs.rm(sourceStateDir, { recursive: true, force: true }).catch(() => {
                     cleanupWarnings.push(`Previous runtime state retained for recovery: ${sourceStateDir}`);
                 });
@@ -628,7 +674,9 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal) {
         const modelConfiguration = request.modelConfiguration
             ? parseModelConfiguration(request.modelConfiguration)
             : await loadModelConfiguration(cwd, state.config.modelPriority);
-        if (request.requestVersion === 3 || request.requestVersion === 4 || request.requestVersion === 5) {
+        if (request.requestVersion === 3 ||
+            request.requestVersion === 4 ||
+            request.requestVersion === 5) {
             if (!request.modelConfiguration || !request.providerSnapshotHash) {
                 throw new Error("Background job is missing its provider configuration snapshot");
             }
@@ -640,8 +688,13 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal) {
             const expectedVersion = request.requestVersion === 4 ? 2 : 3;
             if (!request.policySnapshot || request.policySnapshot.version !== expectedVersion) {
                 throw new ProjectPolicyError({
-                    event: "policy-rejected", errorCode: "policy-snapshot-invalid", stage: "materialization",
-                    recoverable: false, message: `Background job request version ${request.requestVersion} has a mismatched policy snapshot`, preserved: [], nextActions: [],
+                    event: "policy-rejected",
+                    errorCode: "policy-snapshot-invalid",
+                    stage: "materialization",
+                    recoverable: false,
+                    message: `Background job request version ${request.requestVersion} has a mismatched policy snapshot`,
+                    preserved: [],
+                    nextActions: [],
                 });
             }
             assertPolicySnapshotValid(request.policySnapshot);
@@ -662,10 +715,16 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal) {
             stateCwd: cwd,
             host: request.host,
             rawPrompt: prompt,
-            ...(request.requestVersion !== 4 && request.requestVersion !== 5 && state?.config.profile ? { profile: state.config.profile } : {}),
+            ...(request.requestVersion !== 4 && request.requestVersion !== 5 && state?.config.profile
+                ? { profile: state.config.profile }
+                : {}),
             ...(request.requestVersion === 4 || request.requestVersion === 5
-                ? (request.projectGoal !== undefined ? { projectGoal: request.projectGoal } : {})
-                : (state?.config.profile?.goal !== undefined ? { projectGoal: state.config.profile.goal } : {})),
+                ? request.projectGoal !== undefined
+                    ? { projectGoal: request.projectGoal }
+                    : {}
+                : state?.config.profile?.goal !== undefined
+                    ? { projectGoal: state.config.profile.goal }
+                    : {}),
             candidates,
             dependencies: activeDependencies,
             requireDiscoveryGates: dependencies === undefined,
@@ -716,11 +775,15 @@ async function buildDiscoveryHandoffPrompt(cwd, discoveryJobId, planPrompt) {
     if (discovery.job.kind !== "discover" || !result || result.kind !== "discover") {
         throw new Error(`Discovery handoff source is not a Discovery Job: ${discoveryJobId}`);
     }
-    if (!result.success || result.verification.status !== "passed" || result.discovery?.stages.length !== 3) {
+    if (!result.success ||
+        result.verification.status !== "passed" ||
+        result.discovery?.stages.length !== 3) {
         throw new Error(`Discovery handoff source is not successfully verified: ${discoveryJobId}`);
     }
     const convergence = result.discovery.stages.find((stage) => stage.stage === "convergence");
-    if (!convergence || convergence.status !== "passed" || !convergence.verification.includes("user-gate:approved")) {
+    if (!convergence ||
+        convergence.status !== "passed" ||
+        !convergence.verification.includes("user-gate:approved")) {
         throw new Error(`Discovery handoff source lacks final user approval: ${discoveryJobId}`);
     }
     const provenance = {
@@ -761,7 +824,9 @@ async function runStartedJobSafely(options) {
 }
 async function runStartedJob(options) {
     const boundProjectPolicy = await materializeBoundProjectPolicy(options.policySnapshot, options.cwd);
-    const renderedProjectPolicy = boundProjectPolicy ? renderProjectPolicy(boundProjectPolicy.effective) : undefined;
+    const renderedProjectPolicy = boundProjectPolicy
+        ? renderProjectPolicy(boundProjectPolicy.effective)
+        : undefined;
     const kind = options.args.command;
     const jobId = options.job.id;
     let actualRole = options.policySnapshot.rolePolicy.role;
@@ -776,7 +841,9 @@ async function runStartedJob(options) {
     let worktreeLease;
     try {
         if (options.candidates.length === 0) {
-            const result = withMetadata(failure(kind, options.args.model ? `Requested Pi model is unavailable: ${options.args.model}` : "No configured Pi model is available."), options.host, jobId, 0);
+            const result = withMetadata(failure(kind, options.args.model
+                ? `Requested Pi model is unavailable: ${options.args.model}`
+                : "No configured Pi model is available."), options.host, jobId, 0);
             const final = options.finalizeResult?.(result) ?? result;
             await finishJob(options.stateCwd, jobId, final);
             return final;
@@ -798,7 +865,9 @@ async function runStartedJob(options) {
         const classifierModels = options.policySnapshot.adaptivePolicy.classifierModels
             .map((reference) => options.dependencies.catalog.available().find((model) => modelId(model) === reference))
             .filter((model) => Boolean(model));
-        const classifier = options.sandboxMode === "adaptive" && classifierModels.length && options.dependencies.createClassifier
+        const classifier = options.sandboxMode === "adaptive" &&
+            classifierModels.length &&
+            options.dependencies.createClassifier
             ? options.dependencies.createClassifier({
                 cwd: options.cwd,
                 models: classifierModels,
@@ -819,7 +888,9 @@ async function runStartedJob(options) {
                 risk: "high",
                 reason: error.rejection.message.slice(0, 500),
                 stage: error.rejection.stage,
-                ...(error.rejection.violatingPaths?.length ? { paths: error.rejection.violatingPaths } : {}),
+                ...(error.rejection.violatingPaths?.length
+                    ? { paths: error.rejection.violatingPaths }
+                    : {}),
                 policyHash: error.rejection.policyHash ?? options.policySnapshot.hash,
                 ...(error.rejection.scopeHash ? { scopeHash: error.rejection.scopeHash } : {}),
             });
@@ -837,7 +908,10 @@ async function runStartedJob(options) {
                     metrics.denied += 1;
                 else
                     metrics.approvals += 1;
-                if (decision.decision === "allow" && decision.capabilities.some((capability) => capability === "filesystem.write-workspace" || capability === "shell.execute" || capability === "network.connect")) {
+                if (decision.decision === "allow" &&
+                    decision.capabilities.some((capability) => capability === "filesystem.write-workspace" ||
+                        capability === "shell.execute" ||
+                        capability === "network.connect")) {
                     sideEffectsObserved = true;
                 }
                 await appendPolicyEvent(options.stateCwd, jobId, {
@@ -847,7 +921,9 @@ async function runStartedJob(options) {
                     decision: decision.decision,
                     risk: decision.risk,
                     reason: decision.reason.slice(0, 500),
-                    ...(options.policySnapshot.adaptivePolicy.diagnostics ? { action: summarizePolicyAction(action) } : {}),
+                    ...(options.policySnapshot.adaptivePolicy.diagnostics
+                        ? { action: summarizePolicyAction(action) }
+                        : {}),
                     ...(metadata?.classifierCache ? { classifierCache: metadata.classifierCache } : {}),
                     model: decision.model,
                     policyHash: decision.policyHash,
@@ -879,9 +955,12 @@ async function runStartedJob(options) {
                     return hostAssistanceUnavailable("quota-exceeded", "The request exceeds the snapshotted context budget.");
                 }
                 const requiresApproval = request.contextClass === "connector" ||
-                    (request.dataClassification !== "public" && request.contextClass !== "workspace" && request.egressAllowed);
+                    (request.dataClassification !== "public" &&
+                        request.contextClass !== "workspace" &&
+                        request.egressAllowed);
                 if (requiresApproval) {
-                    if (request.contextClass === "connector" && options.policySnapshot.hostAssistance.privateConnector === "deny") {
+                    if (request.contextClass === "connector" &&
+                        options.policySnapshot.hostAssistance.privateConnector === "deny") {
                         return hostAssistanceUnavailable("policy-denied", "Private connectors are disabled by policy.");
                     }
                     const action = {
@@ -924,7 +1003,11 @@ async function runStartedJob(options) {
             }
             catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                const reason = /quota/i.test(message) ? "quota-exceeded" : /disabled|not allowed|denied|secret/i.test(message) ? "policy-denied" : "cancelled";
+                const reason = /quota/i.test(message)
+                    ? "quota-exceeded"
+                    : /disabled|not allowed|denied|secret/i.test(message)
+                        ? "policy-denied"
+                        : "cancelled";
                 return hostAssistanceUnavailable(reason, message);
             }
         };
@@ -935,20 +1018,28 @@ async function runStartedJob(options) {
                 sandboxMode: options.sandboxMode,
                 trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
                 ...(boundProjectPolicy ? { boundProjectPolicy } : {}),
-                ...(options.sandboxMode === "adaptive" ? {
-                    authorizeNetwork: async (host, port) => {
-                        if (!await publicNetworkTarget(host))
-                            return false;
-                        const action = { toolName: "network", input: { host, port }, cwd: options.cwd, domain: host, ...(port ? { port } : {}) };
-                        let decision = await engine.authorize(action, options.signal);
-                        if (decision.decision === "require-approval") {
-                            const resolution = await onApproval(action, decision, actionFingerprint(action), options.signal);
-                            if (resolution === "approved")
-                                decision = await engine.authorize(action, options.signal);
-                        }
-                        return decision.decision === "allow";
-                    },
-                } : {}),
+                ...(options.sandboxMode === "adaptive"
+                    ? {
+                        authorizeNetwork: async (host, port) => {
+                            if (!(await publicNetworkTarget(host)))
+                                return false;
+                            const action = {
+                                toolName: "network",
+                                input: { host, port },
+                                cwd: options.cwd,
+                                domain: host,
+                                ...(port ? { port } : {}),
+                            };
+                            let decision = await engine.authorize(action, options.signal);
+                            if (decision.decision === "require-approval") {
+                                const resolution = await onApproval(action, decision, actionFingerprint(action), options.signal);
+                                if (resolution === "approved")
+                                    decision = await engine.authorize(action, options.signal);
+                            }
+                            return decision.decision === "allow";
+                        },
+                    }
+                    : {}),
             });
         }
         if (kind === "orchestrate") {
@@ -956,7 +1047,12 @@ async function runStartedJob(options) {
                 cwd: options.cwd,
                 host: options.host,
                 prompt: options.rawPrompt,
-                ...(options.policySnapshot.version === 3 ? { decisionMode: options.policySnapshot.decisionMode, advisorPolicy: options.policySnapshot.advisor } : {}),
+                ...(options.policySnapshot.version === 3
+                    ? {
+                        decisionMode: options.policySnapshot.decisionMode,
+                        advisorPolicy: options.policySnapshot.advisor,
+                    }
+                    : {}),
                 projectGoal: options.projectGoal,
                 renderedProjectPolicy,
                 candidates: options.candidates,
@@ -973,14 +1069,20 @@ async function runStartedJob(options) {
             const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
             final.role = options.policySnapshot.rolePolicy.role;
             final.requestedThinkingLevel = options.policySnapshot.rolePolicy.thinkingLevel;
-            final.policySummary = { mode: options.sandboxMode, hash: options.policySnapshot.hash, ...metrics };
+            final.policySummary = {
+                mode: options.sandboxMode,
+                hash: options.policySnapshot.hash,
+                ...metrics,
+            };
             if (final.success) {
-                final.nextActions = [{
+                final.nextActions = [
+                    {
                         action: "review-handoff",
                         label: "Review the durable analysis before starting implementation",
                         requiresConfirmation: true,
                         jobId,
-                    }];
+                    },
+                ];
             }
             const finalized = options.finalizeResult?.(final) ?? final;
             await finishJob(options.stateCwd, jobId, finalized);
@@ -1003,8 +1105,12 @@ async function runStartedJob(options) {
                 sandboxMode: options.sandboxMode,
                 ...(boundProjectPolicy ? { boundProjectPolicy } : {}),
                 ...(sandboxRunner ? { sandboxRunner } : {}),
-                ...(options.policySnapshot.version === 3 ? { decisionMode: options.policySnapshot.decisionMode } : {}),
-                ...(options.policySnapshot.version === 3 ? { advisorPolicy: options.policySnapshot.advisor } : {}),
+                ...(options.policySnapshot.version === 3
+                    ? { decisionMode: options.policySnapshot.decisionMode }
+                    : {}),
+                ...(options.policySnapshot.version === 3
+                    ? { advisorPolicy: options.policySnapshot.advisor }
+                    : {}),
                 deadline,
                 ...(options.signal ? { signal: options.signal } : {}),
                 onPolicyViolation: recordPolicyViolation,
@@ -1015,7 +1121,11 @@ async function runStartedJob(options) {
             });
             const final = withMetadata(discovery, options.host, jobId, discovery.attempts ?? 0);
             final.role = options.policySnapshot.rolePolicy.role;
-            final.policySummary = { mode: options.sandboxMode, hash: options.policySnapshot.hash, ...metrics };
+            final.policySummary = {
+                mode: options.sandboxMode,
+                hash: options.policySnapshot.hash,
+                ...metrics,
+            };
             const finalized = options.finalizeResult?.(final) ?? final;
             await finishJob(options.stateCwd, jobId, finalized);
             return finalized;
@@ -1026,12 +1136,14 @@ async function runStartedJob(options) {
             prompt: options.rawPrompt,
             projectGoal: options.projectGoal,
             renderedProjectPolicy,
-            ...(options.policySnapshot.version === 3 ? {
-                decisionMode: options.policySnapshot.decisionMode,
-                advisorEnabled: options.policySnapshot.advisor.enabled
-                    && options.policySnapshot.advisor.maxRequests > 0
-                    && options.policySnapshot.advisor.targets.includes(kind),
-            } : {}),
+            ...(options.policySnapshot.version === 3
+                ? {
+                    decisionMode: options.policySnapshot.decisionMode,
+                    advisorEnabled: options.policySnapshot.advisor.enabled &&
+                        options.policySnapshot.advisor.maxRequests > 0 &&
+                        options.policySnapshot.advisor.targets.includes(kind),
+                }
+                : {}),
         });
         let result = await runWithFallback({
             kind,
@@ -1051,10 +1163,11 @@ async function runStartedJob(options) {
             ...(options.signal ? { signal: options.signal } : {}),
         });
         let totalRoleAttempts = result.attempts ?? 0;
-        if (options.policySnapshot.version === 3 && options.policySnapshot.advisor.enabled
-            && options.policySnapshot.advisor.targets.includes(kind)
-            && options.policySnapshot.advisor.maxRequests > 0
-            && options.policySnapshot.advisor.maxPerspectives > 0) {
+        if (options.policySnapshot.version === 3 &&
+            options.policySnapshot.advisor.enabled &&
+            options.policySnapshot.advisor.targets.includes(kind) &&
+            options.policySnapshot.advisor.maxRequests > 0 &&
+            options.policySnapshot.advisor.maxPerspectives > 0) {
             const advisorCount = Math.min(options.policySnapshot.advisor.maxRequests, options.policySnapshot.advisor.maxPerspectives);
             for (let index = 0; index < advisorCount; index += 1) {
                 const advisorResult = await runWithFallback({
@@ -1086,7 +1199,11 @@ async function runStartedJob(options) {
                     ...(options.signal ? { signal: options.signal } : {}),
                 });
                 totalRoleAttempts += advisorResult.attempts ?? 0;
-                orchestrationTrace.push({ role: "advisor", model: advisorResult.model, status: advisorResult.status });
+                orchestrationTrace.push({
+                    role: "advisor",
+                    model: advisorResult.model,
+                    status: advisorResult.status,
+                });
                 result = {
                     ...result,
                     output: `${result.output}\n\n## Advisor consultation ${index + 1}\n\n${advisorResult.output}`.trim(),
@@ -1094,10 +1211,15 @@ async function runStartedJob(options) {
             }
         }
         orchestrationTrace.push({ role: actualRole, model: result.model, status: result.status });
-        if (kind === "implement" && actualRole === "mechanical-executor" && !result.success &&
-            !sideEffectsObserved && (await inspectWorktree(options.cwd)).clean && options.policySnapshot.escalationPolicy) {
+        if (kind === "implement" &&
+            actualRole === "mechanical-executor" &&
+            !result.success &&
+            !sideEffectsObserved &&
+            (await inspectWorktree(options.cwd)).clean &&
+            options.policySnapshot.escalationPolicy) {
             let escalationAllowed = options.executionMode === "supervised";
-            if (options.executionMode === "background" && options.policySnapshot.approvalMode === "wait") {
+            if (options.executionMode === "background" &&
+                options.policySnapshot.approvalMode === "wait") {
                 escalationAllowed = await approveRoleEscalation({
                     cwd: options.cwd,
                     jobId,
@@ -1179,8 +1301,10 @@ async function runStartedJob(options) {
                     success: false,
                     output: `${result.output}\n\nSandbox postflight failed: ${message}`.trim(),
                     error: message,
-                    errorCode: error instanceof ProjectPolicyError ? error.rejection.errorCode
-                        : error instanceof WorktreeBaselineError ? error.code
+                    errorCode: error instanceof ProjectPolicyError
+                        ? error.rejection.errorCode
+                        : error instanceof WorktreeBaselineError
+                            ? error.code
                             : "sandbox-postflight-failed",
                     changedFiles: changes.changedFiles,
                     diffStat: changes.diffStat,
@@ -1202,17 +1326,31 @@ async function runStartedJob(options) {
                             deliverable: false,
                             kind: "scaffold",
                             ...(workspace.target ? { target: workspace.target } : {}),
-                            ...(workspace.targetFingerprint ? { targetFingerprint: workspace.targetFingerprint } : {}),
+                            ...(workspace.targetFingerprint
+                                ? { targetFingerprint: workspace.targetFingerprint }
+                                : {}),
                         };
                     }
                     else {
                         const commit = await checkpointJobWorktree(options.cwd, jobId);
-                        artifact = { worktree: workspace.worktree, branch: workspace.branch, ...(commit ? { commit } : {}), deliverable: false, kind: kind === "setup" ? "snapshot" : "implementation" };
+                        artifact = {
+                            worktree: workspace.worktree,
+                            branch: workspace.branch,
+                            ...(commit ? { commit } : {}),
+                            deliverable: false,
+                            kind: kind === "setup" ? "snapshot" : "implementation",
+                        };
                     }
                 }
                 else if (options.executionMode === "background") {
                     if (!workspace) {
-                        result = { ...result, status: "failed", success: false, error: "Background implementation has no isolated worktree", errorCode: "artifact-missing" };
+                        result = {
+                            ...result,
+                            status: "failed",
+                            success: false,
+                            error: "Background implementation has no isolated worktree",
+                            errorCode: "artifact-missing",
+                        };
                     }
                 }
                 if (result.success) {
@@ -1232,22 +1370,28 @@ async function runStartedJob(options) {
                         attempts: (result.attempts ?? 0) + verification.attempts,
                         fallbackUsed: Boolean(result.fallbackUsed || verification.fallbackUsed),
                         agentVerification: verification.result,
-                        ...(artifact ? { artifact: { ...artifact, deliverable: verification.result.status === "passed" } } : {}),
+                        ...(artifact
+                            ? { artifact: { ...artifact, deliverable: verification.result.status === "passed" } }
+                            : {}),
                     };
                     if (artifact && verification.result.status === "passed") {
-                        result.nextActions = [{
+                        result.nextActions = [
+                            {
                                 action: "materialize",
                                 label: "Apply the verified artifact to the target workspace",
                                 requiresConfirmation: true,
                                 jobId,
-                            }];
+                            },
+                        ];
                     }
                     if (verification.result.status !== "passed") {
                         result = {
                             ...result,
                             status: "failed",
                             success: false,
-                            errorCode: verification.result.status === "refuted" ? "verification-refuted" : "verification-inconclusive",
+                            errorCode: verification.result.status === "refuted"
+                                ? "verification-refuted"
+                                : "verification-inconclusive",
                             error: `Agent verification ${verification.result.status}`,
                             output: `${result.output}\n\nVerifier: ${verification.result.output}`.trim(),
                         };
@@ -1257,10 +1401,15 @@ async function runStartedJob(options) {
         }
         const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
         final.role = actualRole;
-        final.requestedThinkingLevel = actualRole === "executor" && options.policySnapshot.escalationPolicy
-            ? options.policySnapshot.escalationPolicy.thinkingLevel
-            : options.policySnapshot.rolePolicy.thinkingLevel;
-        final.policySummary = { mode: options.sandboxMode, hash: options.policySnapshot.hash, ...metrics };
+        final.requestedThinkingLevel =
+            actualRole === "executor" && options.policySnapshot.escalationPolicy
+                ? options.policySnapshot.escalationPolicy.thinkingLevel
+                : options.policySnapshot.rolePolicy.thinkingLevel;
+        final.policySummary = {
+            mode: options.sandboxMode,
+            hash: options.policySnapshot.hash,
+            ...metrics,
+        };
         final.orchestrationTrace = orchestrationTrace;
         const finalized = options.finalizeResult?.(final) ?? final;
         await finishJob(options.stateCwd, jobId, finalized, diff);
@@ -1279,7 +1428,9 @@ async function runAgentVerifier(options) {
         approvalMode: "deny",
         rolePolicy: verifierPolicy,
         adaptivePolicy: normalizeAdaptivePolicy(undefined),
-        ...(options.boundProjectPolicy ? { effectiveProjectPolicy: options.boundProjectPolicy.effective } : {}),
+        ...(options.boundProjectPolicy
+            ? { effectiveProjectPolicy: options.boundProjectPolicy.effective }
+            : {}),
     });
     const verifierEngine = new PolicyEngine({ snapshot: verifierSnapshot });
     const prompt = [
@@ -1334,7 +1485,9 @@ async function handleReadiness(args, cwd, dependencies) {
             report = {
                 ...report,
                 status: "blocked",
-                issues: [...report.issues, {
+                issues: [
+                    ...report.issues,
+                    {
                         code: "configuration-recovery-required",
                         stage: "recovery",
                         severity: "blocking",
@@ -1342,7 +1495,8 @@ async function handleReadiness(args, cwd, dependencies) {
                         message: "A previous configuration save could not be fully rolled back.",
                         preserved: ["recovery journal", "existing credentials and configuration"],
                         nextActions: [{ action: "doctor", label: "Inspect configuration recovery" }],
-                    }],
+                    },
+                ],
             };
         }
         if (args.command !== "doctor")
@@ -1357,7 +1511,12 @@ async function handleReadiness(args, cwd, dependencies) {
                 try {
                     // "low" is the reasoning-effort floor accepted by both OpenAI and Azure
                     // responses models; "minimal" is OpenAI-only and 400s on Azure gpt-5.x.
-                    const session = await activeDependencies.createSession({ cwd, mode: "readonly", model, thinkingLevel: "low" });
+                    const session = await activeDependencies.createSession({
+                        cwd,
+                        mode: "readonly",
+                        model,
+                        thinkingLevel: "low",
+                    });
                     const result = await executeSession({
                         kind: "ask",
                         model: report.activeModel,
@@ -1375,7 +1534,9 @@ async function handleReadiness(args, cwd, dependencies) {
                     report = {
                         ...report,
                         status: "blocked",
-                        issues: [...report.issues, {
+                        issues: [
+                            ...report.issues,
+                            {
                                 code: "model-smoke-test-failed",
                                 stage: "models",
                                 severity: "blocking",
@@ -1383,7 +1544,8 @@ async function handleReadiness(args, cwd, dependencies) {
                                 message,
                                 preserved: ["existing configuration"],
                                 nextActions: [{ action: "configure", label: "Choose or reconnect a model" }],
-                            }],
+                            },
+                        ],
                     };
                 }
             }
@@ -1402,7 +1564,8 @@ async function handleReadiness(args, cwd, dependencies) {
             sandboxMode: state.config.sandboxMode ?? "strict",
             workspace,
             capabilities: { readonly: "blocked", mutation: "blocked", delivery: "blocked" },
-            issues: [{
+            issues: [
+                {
                     code: "state-migration-conflict",
                     stage: "recovery",
                     severity: "blocking",
@@ -1410,8 +1573,11 @@ async function handleReadiness(args, cwd, dependencies) {
                     message: error.message,
                     preserved: [error.legacyDir, error.destinationDir],
                     nextActions: [{ action: "doctor", label: "Inspect state locations" }],
-                }],
-            ...(args.command === "doctor" ? { smokeTest: { status: "not-run", model: null } } : {}),
+                },
+            ],
+            ...(args.command === "doctor"
+                ? { smokeTest: { status: "not-run", model: null } }
+                : {}),
         };
     }
 }
@@ -1426,9 +1592,10 @@ async function handleInit(args, cwd, available, dependencies, modelConfiguration
     }
     const detected = available.map(modelId);
     await setAvailableModels(cwd, detected);
-    const selectedPriority = args.modelPriority ?? (args.modelPriorityFile
-        ? parseStringArrayJson(await dependencies.readFile(args.modelPriorityFile), "model priority file")
-        : undefined);
+    const selectedPriority = args.modelPriority ??
+        (args.modelPriorityFile
+            ? parseStringArrayJson(await dependencies.readFile(args.modelPriorityFile), "model priority file")
+            : undefined);
     if (selectedPriority) {
         const unavailable = selectedPriority.filter((model) => !detected.includes(model));
         if (unavailable.length)
@@ -1436,9 +1603,10 @@ async function handleInit(args, cwd, available, dependencies, modelConfiguration
         await saveModelPriority(cwd, modelConfiguration, selectedPriority);
         await setModelPriority(cwd, selectedPriority);
     }
-    const profile = args.profile ?? (args.profileFile
-        ? parseObjectJson(await dependencies.readFile(args.profileFile), "profile file")
-        : undefined);
+    const profile = args.profile ??
+        (args.profileFile
+            ? parseObjectJson(await dependencies.readFile(args.profileFile), "profile file")
+            : undefined);
     if (profile)
         await saveProfile(cwd, parseProfile(profile));
     const state = await loadState(cwd);
@@ -1492,13 +1660,15 @@ async function runWithFallback(options) {
                 ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
                 ...(options.onApproval ? { onApproval: options.onApproval } : {}),
                 ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-                ...(options.requestHostAssistance ? {
-                    requestHostAssistance: (request, signal) => options.requestHostAssistance(request, {
-                        sessionId,
-                        attempt: index + 1,
-                        ...(options.perspective ? { perspective: options.perspective } : {}),
-                    }, signal),
-                } : {}),
+                ...(options.requestHostAssistance
+                    ? {
+                        requestHostAssistance: (request, signal) => options.requestHostAssistance(request, {
+                            sessionId,
+                            attempt: index + 1,
+                            ...(options.perspective ? { perspective: options.perspective } : {}),
+                        }, signal),
+                    }
+                    : {}),
             });
             const effectiveThinkingLevel = session.thinkingLevel;
             last = await executeSession({
@@ -1642,9 +1812,17 @@ async function runHostActionChild(options) {
             job.leases ??= [];
             job.leases.push(lease);
         });
-        const candidates = orderModels(dependencies.catalog.available(), { priority: rolePolicy.models }).slice(0, rolePolicy.maxAttempts);
+        const candidates = orderModels(dependencies.catalog.available(), {
+            priority: rolePolicy.models,
+        }).slice(0, rolePolicy.maxAttempts);
         return await runStartedJob({
-            args: { command: "implement", host: parentRequest.host, reconfigure: false, reset: false, json: true },
+            args: {
+                command: "implement",
+                host: parentRequest.host,
+                reconfigure: false,
+                reset: false,
+                json: true,
+            },
             cwd: workspace.worktree,
             stateCwd: options.cwd,
             host: parentRequest.host,
@@ -1659,8 +1837,12 @@ async function runHostActionChild(options) {
             modelConfiguration,
             executionMode: "supervised",
             finalizeResult: (result) => {
-                const artifact = result.artifact ? { ...result.artifact, kind: "host-action" } : undefined;
-                const artifactHash = artifact ? createHash("sha256").update(JSON.stringify(artifact)).digest("hex") : undefined;
+                const artifact = result.artifact
+                    ? { ...result.artifact, kind: "host-action" }
+                    : undefined;
+                const artifactHash = artifact
+                    ? createHash("sha256").update(JSON.stringify(artifact)).digest("hex")
+                    : undefined;
                 return {
                     ...result,
                     ...(artifact ? { artifact } : {}),
@@ -1735,11 +1917,13 @@ async function runDiscoveryWorkflow(options) {
     for (const { stage, instruction } of stages) {
         const priorReports = reports.length === 0
             ? "No earlier stage report is available."
-            : reports.map((report) => [
+            : reports
+                .map((report) => [
                 `### Prior ${report.stage} report (${report.status})`,
                 report.output.slice(0, 8_000),
                 report.evidence.join("; "),
-            ].join("\n")).join("\n\n");
+            ].join("\n"))
+                .join("\n\n");
         const stagePrompt = buildWorkerPrompt({
             host: options.host,
             kind: "discover",
@@ -1771,23 +1955,29 @@ async function runDiscoveryWorkflow(options) {
                 ...(options.signal ? { signal: options.signal } : {}),
             })
             : undefined;
-        const result = child?.result ?? await runWithFallback({
-            kind: "discover",
-            cwd: options.cwd,
-            prompt: stagePrompt,
-            mode: "readonly",
-            candidates: options.candidates,
-            dependencies: options.dependencies,
-            ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
-            ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
-            ...(options.sandboxRunner ? { sandboxRunner: options.sandboxRunner } : {}),
-            ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
-            ...(options.onApproval ? { onApproval: options.onApproval } : {}),
-            ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-            ...(options.requestHostAssistance ? { requestHostAssistance: options.requestHostAssistance, perspective: `discovery:${stage}` } : {}),
-            deadline: options.deadline,
-            ...(options.signal ? { signal: options.signal } : {}),
-        });
+        const result = child?.result ??
+            (await runWithFallback({
+                kind: "discover",
+                cwd: options.cwd,
+                prompt: stagePrompt,
+                mode: "readonly",
+                candidates: options.candidates,
+                dependencies: options.dependencies,
+                ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+                ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+                ...(options.sandboxRunner ? { sandboxRunner: options.sandboxRunner } : {}),
+                ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
+                ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+                ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+                ...(options.requestHostAssistance
+                    ? {
+                        requestHostAssistance: options.requestHostAssistance,
+                        perspective: `discovery:${stage}`,
+                    }
+                    : {}),
+                deadline: options.deadline,
+                ...(options.signal ? { signal: options.signal } : {}),
+            }));
         let status = result.success
             ? "passed"
             : result.status === "timed-out" || result.status === "cancelled"
@@ -1810,9 +2000,15 @@ async function runDiscoveryWorkflow(options) {
             output: result.output,
             evidence: [
                 "Stage output was captured as the canonical evidence record.",
-                ...(stage === "experiment" ? ["Reproducibility, testability, explicit evidence, and clean replay were required by the stage contract."] : []),
+                ...(stage === "experiment"
+                    ? [
+                        "Reproducibility, testability, explicit evidence, and clean replay were required by the stage contract.",
+                    ]
+                    : []),
             ],
-            verification: validated?.verification ?? [validationError ? `schema-validation-failed: ${validationError}` : `stage-${status}`],
+            verification: validated?.verification ?? [
+                validationError ? `schema-validation-failed: ${validationError}` : `stage-${status}`,
+            ],
             ...(validated ? { structuredArtifact: validated.artifact } : {}),
             ...(child ? { childJobId: child.jobId } : {}),
         });
@@ -1848,9 +2044,13 @@ async function runDiscoveryWorkflow(options) {
             }
         }
     }
-    if (options.advisorPolicy?.enabled && options.advisorPolicy.targets.includes("discover") && reports.length > 0) {
+    if (options.advisorPolicy?.enabled &&
+        options.advisorPolicy.targets.includes("discover") &&
+        reports.length > 0) {
         const advisorCount = Math.min(options.advisorPolicy.maxRequests, options.advisorPolicy.maxPerspectives);
-        const evidenceContext = reports.map((report) => `### ${report.stage}\n${report.output.slice(0, 8_000)}`).join("\n\n");
+        const evidenceContext = reports
+            .map((report) => `### ${report.stage}\n${report.output.slice(0, 8_000)}`)
+            .join("\n\n");
         for (let index = 0; index < advisorCount; index += 1) {
             const advisorResult = await runWithFallback({
                 kind: "discover",
@@ -1877,7 +2077,12 @@ async function runDiscoveryWorkflow(options) {
                 ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
                 ...(options.onApproval ? { onApproval: options.onApproval } : {}),
                 ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-                ...(options.requestHostAssistance ? { requestHostAssistance: options.requestHostAssistance, perspective: `discovery:advisor:${index + 1}` } : {}),
+                ...(options.requestHostAssistance
+                    ? {
+                        requestHostAssistance: options.requestHostAssistance,
+                        perspective: `discovery:advisor:${index + 1}`,
+                    }
+                    : {}),
                 deadline: options.deadline,
                 ...(options.signal ? { signal: options.signal } : {}),
             });
@@ -1901,7 +2106,9 @@ async function runDiscoveryWorkflow(options) {
         }
     }
     const convergence = reports.find((report) => report.stage === "convergence");
-    if (options.requireUserGates && overallStatus === "succeeded" && convergence?.status === "passed") {
+    if (options.requireUserGates &&
+        overallStatus === "succeeded" &&
+        convergence?.status === "passed") {
         const gate = await requestDiscoveryGate({
             requestHostAssistance: options.requestHostAssistance,
             stage: "convergence",
@@ -1924,7 +2131,11 @@ async function runDiscoveryWorkflow(options) {
         changedFiles: [],
         diffStat: "",
         verification: {
-            status: overallStatus === "succeeded" && reports.length === 3 && reports.every((report) => report.status === "passed") ? "passed" : "failed",
+            status: overallStatus === "succeeded" &&
+                reports.length === 3 &&
+                reports.every((report) => report.status === "passed")
+                ? "passed"
+                : "failed",
             commands: reports.flatMap((report) => report.verification.map((check) => `${report.stage}:${check}`)),
         },
         attempts: totalAttempts,
@@ -1951,7 +2162,10 @@ async function requestDiscoveryGate(options) {
         perspective: `discovery:${options.stage}-gate`,
     }, options.signal);
     if (result.kind !== "decision")
-        return { approved: false, reason: result.kind === "unavailable" ? result.reason : "invalid-response" };
+        return {
+            approved: false,
+            reason: result.kind === "unavailable" ? result.reason : "invalid-response",
+        };
     const decision = result.decision.trim().toLowerCase();
     return decision === "approve"
         ? { approved: true, reason: "approved" }
@@ -1959,12 +2173,12 @@ async function requestDiscoveryGate(options) {
 }
 function discoveryOutputContract(stage) {
     if (stage === "research") {
-        return "Return only JSON: {\"evidencePlan\":{\"unknowns\":[...],\"sources\":[\"workspace|web|docs|paper|connector|skill\"],\"acceptanceCriteria\":[...],\"budget\":number},\"evidencePack\":{\"claims\":[{\"claim\":string,\"evidenceIds\":[...],\"confidence\":\"low|medium|high\"}],\"citations\":[{\"id\":string,\"title\":string,\"url\":string?,\"version\":string?,\"retrievedAt\":ISO-date}],\"conflicts\":[...],\"unknowns\":[...]}}.";
+        return 'Return only JSON: {"evidencePlan":{"unknowns":[...],"sources":["workspace|web|docs|paper|connector|skill"],"acceptanceCriteria":[...],"budget":number},"evidencePack":{"claims":[{"claim":string,"evidenceIds":[...],"confidence":"low|medium|high"}],"citations":[{"id":string,"title":string,"url":string?,"version":string?,"retrievedAt":ISO-date}],"conflicts":[...],"unknowns":[...]}}.';
     }
     if (stage === "experiment") {
-        return "Return only JSON: {\"experimentSpec\":{\"hypothesis\":string,\"baseline\":string,\"dependencies\":[...],\"fixture\":string,\"seedOrDataHash\":string,\"setupCommand\":string,\"runCommand\":string,\"testCommand\":string,\"verifyCommand\":string,\"cleanupCommand\":string,\"metrics\":[...],\"tolerance\":string,\"cleanReplayCommand\":string},\"execution\":{\"commandsRun\":[...],\"testsRun\":[...],\"evidence\":[...],\"cleanReplayPassed\":true},\"conclusion\":\"supported|refuted|inconclusive\"}. Report only commands actually run in the isolated child worktree.";
+        return 'Return only JSON: {"experimentSpec":{"hypothesis":string,"baseline":string,"dependencies":[...],"fixture":string,"seedOrDataHash":string,"setupCommand":string,"runCommand":string,"testCommand":string,"verifyCommand":string,"cleanupCommand":string,"metrics":[...],"tolerance":string,"cleanReplayCommand":string},"execution":{"commandsRun":[...],"testsRun":[...],"evidence":[...],"cleanReplayPassed":true},"conclusion":"supported|refuted|inconclusive"}. Report only commands actually run in the isolated child worktree.';
     }
-    return "Return only JSON: {\"featureDefinition\":{\"summary\":string,\"acceptanceCriteria\":[...],\"nonGoals\":[...]},\"decisionLedger\":[{\"decision\":string,\"rationale\":string,\"evidenceIds\":[...]}]}.";
+    return 'Return only JSON: {"featureDefinition":{"summary":string,"acceptanceCriteria":[...],"nonGoals":[...]},"decisionLedger":[{"decision":string,"rationale":string,"evidenceIds":[...]}]}.';
 }
 async function runIsolatedExperimentChild(options) {
     const rolePolicy = resolveRolePolicy("experimenter", {}, options.candidates.map((candidate) => modelId(candidate)));
@@ -2028,7 +2242,12 @@ async function runIsolatedExperimentChild(options) {
         }
         else if (sourceAssessment.disposition === "non-git-empty") {
             const scratch = await fs.mkdtemp(path.join(os.tmpdir(), `swarm-pi-experiment-${child.id}-`));
-            workspace = { worktree: scratch, branch: `scratch/${child.id}`, base: "scratch", scratch: true };
+            workspace = {
+                worktree: scratch,
+                branch: `scratch/${child.id}`,
+                base: "scratch",
+                scratch: true,
+            };
         }
         else {
             throw new Error("Experiment child requires a Git workspace or an empty scratch workspace");
@@ -2067,14 +2286,19 @@ async function runIsolatedExperimentChild(options) {
             ? async (request, correlation, signal) => {
                 if (request.dataClassification === "secret")
                     return hostAssistanceUnavailable("policy-denied", "Secret or credential egress is hard denied.");
-                if (request.kind === "context" && (!childSnapshot.hostAssistance.contextClasses.includes(request.contextClass) || request.budget > childSnapshot.contextBudget)) {
+                if (request.kind === "context" &&
+                    (!childSnapshot.hostAssistance.contextClasses.includes(request.contextClass) ||
+                        request.budget > childSnapshot.contextBudget)) {
                     return hostAssistanceUnavailable("policy-denied", "The child experiment context request exceeds policy.");
                 }
                 if (request.kind === "context") {
                     const requiresApproval = request.contextClass === "connector" ||
-                        (request.dataClassification !== "public" && request.contextClass !== "workspace" && request.egressAllowed);
+                        (request.dataClassification !== "public" &&
+                            request.contextClass !== "workspace" &&
+                            request.egressAllowed);
                     if (requiresApproval) {
-                        if (request.contextClass === "connector" && childSnapshot.hostAssistance.privateConnector === "deny") {
+                        if (request.contextClass === "connector" &&
+                            childSnapshot.hostAssistance.privateConnector === "deny") {
                             return hostAssistanceUnavailable("policy-denied", "Private connectors are disabled by policy.");
                         }
                         const action = {
@@ -2091,7 +2315,9 @@ async function runIsolatedExperimentChild(options) {
                             risk: "high",
                             capabilities: ["network.connect"],
                             reason: "Project-internal or private Host context requires supervisor approval.",
-                            constraints: ["Only the redacted request preview may leave the project boundary."],
+                            constraints: [
+                                "Only the redacted request preview may leave the project boundary.",
+                            ],
                             policyHash: childSnapshot.hash,
                             scopeHash: childSnapshot.scopeHash,
                         };
@@ -2110,13 +2336,15 @@ async function runIsolatedExperimentChild(options) {
                 return waitForHostAssistanceResolution(options.stateCwd, child.id, child.workerToken, summary.id, signal);
             }
             : undefined;
-        const childSandbox = options.sandboxMode === "strict" ? undefined : await createSandboxRunner({
-            cwd: executionCwd,
-            mode: "implement",
-            sandboxMode: options.sandboxMode,
-            trustedDomains: childSnapshot.adaptivePolicy.trustedDomains,
-            ...(boundPolicy ? { boundProjectPolicy: boundPolicy } : {}),
-        });
+        const childSandbox = options.sandboxMode === "strict"
+            ? undefined
+            : await createSandboxRunner({
+                cwd: executionCwd,
+                mode: "implement",
+                sandboxMode: options.sandboxMode,
+                trustedDomains: childSnapshot.adaptivePolicy.trustedDomains,
+                ...(boundPolicy ? { boundProjectPolicy: boundPolicy } : {}),
+            });
         let result = await runWithFallback({
             kind: "discover",
             cwd: executionCwd,
@@ -2129,7 +2357,9 @@ async function runIsolatedExperimentChild(options) {
             policyEngine: engine,
             onApproval,
             thinkingLevel: rolePolicy.thinkingLevel,
-            ...(requestHostAssistance ? { requestHostAssistance, perspective: "discovery:experiment" } : {}),
+            ...(requestHostAssistance
+                ? { requestHostAssistance, perspective: "discovery:experiment" }
+                : {}),
             deadline: options.deadline,
             ...(options.signal ? { signal: options.signal } : {}),
         });
@@ -2154,7 +2384,9 @@ async function runIsolatedExperimentChild(options) {
                 output: `${result.output}\n\nExperiment verification failed: ${message}`.trim(),
             };
         }
-        const commit = result.success && !workspace.scratch ? await checkpointJobWorktree(executionCwd, child.id) : null;
+        const commit = result.success && !workspace.scratch
+            ? await checkpointJobWorktree(executionCwd, child.id)
+            : null;
         result = {
             ...result,
             role: "experimenter",
@@ -2162,7 +2394,9 @@ async function runIsolatedExperimentChild(options) {
             diffStat: changes.diffStat,
             verification: {
                 status: result.success ? "passed" : "failed",
-                commands: result.success ? ["schema:experiment", "postflight:changed-paths", "clean-replay:reported"] : [],
+                commands: result.success
+                    ? ["schema:experiment", "postflight:changed-paths", "clean-replay:reported"]
+                    : [],
             },
             artifact: {
                 worktree: workspace.worktree,
@@ -2215,7 +2449,9 @@ async function runOrchestration(options) {
             ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
             ...(options.onApproval ? { onApproval: options.onApproval } : {}),
             ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-            ...(options.requestHostAssistance ? { requestHostAssistance: options.requestHostAssistance, perspective } : {}),
+            ...(options.requestHostAssistance
+                ? { requestHostAssistance: options.requestHostAssistance, perspective }
+                : {}),
             deadline: options.deadline,
             ...(options.signal ? { signal: options.signal } : {}),
             prompt: buildWorkerPrompt({
@@ -2272,7 +2508,9 @@ async function handlePolicyApproval(options) {
 async function withApprovalQueue(jobId, run) {
     const previous = approvalQueues.get(jobId) ?? Promise.resolve();
     let release;
-    const current = new Promise((resolve) => { release = resolve; });
+    const current = new Promise((resolve) => {
+        release = resolve;
+    });
     approvalQueues.set(jobId, current);
     await previous;
     try {
@@ -2335,7 +2573,9 @@ function hostAssistanceUnavailable(reason, message) {
 }
 async function publicNetworkTarget(host) {
     try {
-        const addresses = isIP(host) ? [{ address: host }] : await lookup(host, { all: true, verbatim: true });
+        const addresses = isIP(host)
+            ? [{ address: host }]
+            : await lookup(host, { all: true, verbatim: true });
         return addresses.length > 0 && addresses.every(({ address }) => !privateAddress(address));
     }
     catch {
@@ -2344,14 +2584,24 @@ async function publicNetworkTarget(host) {
 }
 function privateAddress(address) {
     const value = address.toLowerCase();
-    return value === "::1" || value === "0.0.0.0" || value === "169.254.169.254" ||
-        value.startsWith("127.") || value.startsWith("10.") || value.startsWith("192.168.") ||
-        /^172\.(1[6-9]|2\d|3[01])\./.test(value) || value.startsWith("169.254.") ||
-        value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe80:");
+    return (value === "::1" ||
+        value === "0.0.0.0" ||
+        value === "169.254.169.254" ||
+        value.startsWith("127.") ||
+        value.startsWith("10.") ||
+        value.startsWith("192.168.") ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(value) ||
+        value.startsWith("169.254.") ||
+        value.startsWith("fc") ||
+        value.startsWith("fd") ||
+        value.startsWith("fe80:"));
 }
 function parseDelegationSpec(value) {
     const parsed = JSON.parse(value);
-    if (!parsed || typeof parsed !== "object" || typeof parsed.request !== "string" || !parsed.request.trim()) {
+    if (!parsed ||
+        typeof parsed !== "object" ||
+        typeof parsed.request !== "string" ||
+        !parsed.request.trim()) {
         throw new Error("Delegation spec must be a JSON object with a non-empty request");
     }
     const strings = (candidate) => Array.isArray(candidate)
@@ -2386,7 +2636,7 @@ function legacyPolicySnapshot(request, models) {
 }
 function modelInventory(catalog, configuration, args) {
     const available = catalog.available();
-    const source = args.allModels ? catalog.all?.() ?? available : available;
+    const source = args.allModels ? (catalog.all?.() ?? available) : available;
     const models = args.provider
         ? source.filter((model) => model.provider === args.provider)
         : source;
@@ -2418,7 +2668,7 @@ function withMetadata(result, host, jobId, attempts) {
         jobId,
         attempts,
         fallbackUsed: result.fallbackUsed ?? attempts > 1,
-        error: result.success ? null : result.error ?? result.output,
+        error: result.success ? null : (result.error ?? result.output),
     };
 }
 function failure(kind, output, model = null) {

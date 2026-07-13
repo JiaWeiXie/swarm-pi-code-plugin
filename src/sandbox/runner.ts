@@ -4,10 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import {
-  SandboxManager,
-  type SandboxRuntimeConfig,
-} from "@carderne/sandbox-runtime";
+import { SandboxManager, type SandboxRuntimeConfig } from "@carderne/sandbox-runtime";
 import {
   createBashToolDefinition,
   type BashOperations,
@@ -139,9 +136,17 @@ export async function sandboxConfiguration(
   return {
     network: {
       allowedDomains: [],
-      deniedDomains: sandboxMode === "adaptive"
-        ? ["localhost", "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
-        : [],
+      deniedDomains:
+        sandboxMode === "adaptive"
+          ? [
+              "localhost",
+              "127.0.0.0/8",
+              "10.0.0.0/8",
+              "172.16.0.0/12",
+              "192.168.0.0/16",
+              "169.254.0.0/16",
+            ]
+          : [],
       allowUnixSockets: [],
       allowAllUnixSockets: false,
       allowLocalBinding: false,
@@ -151,11 +156,13 @@ export async function sandboxConfiguration(
       // Bash is a distinct capability: it may read only its shell roots, not
       // roots granted solely to the scoped read/search tools.
       allowRead: uniquePaths([...executableReadPaths(cwd), ...policyShellRoots]),
-      allowWrite: uniquePaths(mode === "implement"
-        ? boundProjectPolicy
-          ? [...boundProjectPolicy.roots.shell, tempRoot]
-          : [cwd, tempRoot]
-        : [tempRoot]),
+      allowWrite: uniquePaths(
+        mode === "implement"
+          ? boundProjectPolicy
+            ? [...boundProjectPolicy.roots.shell, tempRoot]
+            : [cwd, tempRoot]
+          : [tempRoot],
+      ),
       denyWrite: uniquePaths(denyWrite),
       allowGitConfig: false,
     },
@@ -196,7 +203,9 @@ function sandboxedBashOperations(tempRoot: string, env: NodeJS.ProcessEnv): Bash
     async exec(command, cwd, { onData, signal, timeout }) {
       let release!: () => void;
       const previous = queue;
-      queue = new Promise<void>((resolve) => { release = resolve; });
+      queue = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       await previous;
       try {
         return await executeSandboxed(command, cwd, tempRoot, env, onData, signal, timeout);
@@ -216,48 +225,48 @@ async function executeSandboxed(
   signal: AbortSignal | undefined,
   timeout: number | undefined,
 ) {
-      if (signal?.aborted) throw new Error("aborted");
-      const wrapped = await SandboxManager.wrapWithSandbox(command, "/bin/bash", undefined, signal);
-      if (signal?.aborted) {
-        SandboxManager.cleanupAfterCommand();
-        throw new Error("aborted");
-      }
-      const child = spawn("/bin/bash", ["-c", wrapped], {
-        cwd,
-        detached: process.platform !== "win32",
-        env: sanitizedSandboxEnvironment(cwd, tempRoot, env),
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      child.stdout?.on("data", onData);
-      child.stderr?.on("data", onData);
+  if (signal?.aborted) throw new Error("aborted");
+  const wrapped = await SandboxManager.wrapWithSandbox(command, "/bin/bash", undefined, signal);
+  if (signal?.aborted) {
+    SandboxManager.cleanupAfterCommand();
+    throw new Error("aborted");
+  }
+  const child = spawn("/bin/bash", ["-c", wrapped], {
+    cwd,
+    detached: process.platform !== "win32",
+    env: sanitizedSandboxEnvironment(cwd, tempRoot, env),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout?.on("data", onData);
+  child.stderr?.on("data", onData);
 
-      let timedOut = false;
-      let timeoutHandle: NodeJS.Timeout | undefined;
-      const stop = () => killProcessTree(child.pid);
-      if (timeout !== undefined && timeout > 0) {
-        timeoutHandle = setTimeout(() => {
-          timedOut = true;
-          stop();
-        }, timeout * 1000);
-      }
-      if (signal) {
-        if (signal.aborted) stop();
-        else signal.addEventListener("abort", stop, { once: true });
-      }
+  let timedOut = false;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const stop = () => killProcessTree(child.pid);
+  if (timeout !== undefined && timeout > 0) {
+    timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, timeout * 1000);
+  }
+  if (signal) {
+    if (signal.aborted) stop();
+    else signal.addEventListener("abort", stop, { once: true });
+  }
 
-      try {
-        const exitCode = await new Promise<number | null>((resolve, reject) => {
-          child.once("error", reject);
-          child.once("close", resolve);
-        });
-        if (signal?.aborted) throw new Error("aborted");
-        if (timedOut) throw new Error(`timeout:${timeout}`);
-        return { exitCode };
-      } finally {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        signal?.removeEventListener("abort", stop);
-        SandboxManager.cleanupAfterCommand();
-      }
+  try {
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    if (signal?.aborted) throw new Error("aborted");
+    if (timedOut) throw new Error(`timeout:${timeout}`);
+    return { exitCode };
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    signal?.removeEventListener("abort", stop);
+    SandboxManager.cleanupAfterCommand();
+  }
 }
 
 function killProcessTree(pid: number | undefined): void {
@@ -312,14 +321,13 @@ function credentialPaths(env: NodeJS.ProcessEnv): string[] {
     env.AWS_SHARED_CREDENTIALS_FILE,
     env.KUBECONFIG,
     path.join(os.homedir(), ".pi", "agent", "auth.json"),
-  ].filter((value): value is string => Boolean(value)).map((value) => path.resolve(value));
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => path.resolve(value));
 }
 
 function executableReadPaths(cwd: string): string[] {
-  return uniquePaths([
-    path.dirname(process.execPath),
-    path.join(cwd, "node_modules", ".bin"),
-  ]);
+  return uniquePaths([path.dirname(process.execPath), path.join(cwd, "node_modules", ".bin")]);
 }
 
 function sandboxPath(cwd: string): string {
@@ -341,7 +349,10 @@ function uniquePaths(values: string[]): string[] {
 
 function isInside(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+  );
 }
 
 function restoreEnvironment(name: string, value: string | undefined): void {

@@ -82,7 +82,7 @@ export class PolicyEngine {
             return this.record(action, decision("deny", "high", capabilities, `Denied by policy rule ${rule.id}.`, this.snapshot), fingerprint);
         }
         const lease = await this.leases?.find(fingerprint, this.snapshot);
-        if (lease && await this.leases.consume(lease)) {
+        if (lease && (await this.leases.consume(lease))) {
             return this.record(action, decision("allow", "high", capabilities, `Allowed by lease ${lease.id}.`, this.snapshot), fingerprint);
         }
         if (rule?.effect === "allow") {
@@ -92,7 +92,9 @@ export class PolicyEngine {
             return this.record(action, approvalDecision(capabilities, `Policy rule ${rule.id} requires approval.`, this.snapshot), fingerprint);
         }
         if (this.snapshot.sandboxMode === "strict") {
-            const allowed = isReadonlyTool(action.toolName) || action.toolName === "write" || action.toolName === "edit";
+            const allowed = isReadonlyTool(action.toolName) ||
+                action.toolName === "write" ||
+                action.toolName === "edit";
             return this.record(action, decision(allowed ? "allow" : "deny", allowed ? "low" : "high", capabilities, allowed ? "Strict read-only fast path." : "Strict mode does not expose this capability.", this.snapshot), fingerprint);
         }
         if (this.snapshot.sandboxMode === "lenient") {
@@ -101,7 +103,8 @@ export class PolicyEngine {
         if (isReadonlyTool(action.toolName)) {
             return this.record(action, decision("allow", "low", capabilities, "Adaptive read-only fast path.", this.snapshot), fingerprint);
         }
-        if (action.domain && trustedDomain(action.domain, this.snapshot.adaptivePolicy.trustedDomains)) {
+        if (action.domain &&
+            trustedDomain(action.domain, this.snapshot.adaptivePolicy.trustedDomains)) {
             return this.record(action, decision("allow", "medium", capabilities, "Allowed trusted network destination.", this.snapshot), fingerprint);
         }
         if (!this.classifier) {
@@ -166,13 +169,15 @@ function classifierFallback(capabilities, snapshot, error) {
         : decision("deny", "high", capabilities, `Classifier failed closed: ${message}`, snapshot);
 }
 export function actionFingerprint(action) {
-    return createHash("sha256").update(JSON.stringify({
+    return createHash("sha256")
+        .update(JSON.stringify({
         toolName: action.toolName,
         input: stable(action.input),
         path: action.path ? path.resolve(action.cwd, action.path) : undefined,
         domain: action.domain?.toLowerCase(),
         port: action.port,
-    })).digest("hex");
+    }))
+        .digest("hex");
 }
 export function capabilitiesFor(action) {
     if (action.domain)
@@ -203,7 +208,7 @@ function hardDeny(action, snapshot) {
             !/--ignore-scripts|--mode[= ]skip-build/.test(command)) {
             return approvalDecision(["shell.execute"], "Package lifecycle and native build execution requires supervisor approval.", snapshot);
         }
-        if (/(?:^|[\s'\"])(?:\.git|\.swarm-pi-code-plugin|\.env(?:\.local)?)(?:[\s/'\"]|$)/.test(command)) {
+        if (/(?:^|[\s'"])(?:\.git|\.swarm-pi-code-plugin|\.env(?:\.local)?)(?:[\s/'"]|$)/.test(command)) {
             return decision("deny", "critical", ["shell.execute"], "Shell access to protected control and credential paths is denied.", snapshot);
         }
     }
@@ -216,8 +221,11 @@ function hardDeny(action, snapshot) {
         if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
             return decision("deny", "critical", capabilitiesFor(action), "Path is outside the assigned workspace.", snapshot);
         }
-        if (relative.split(path.sep).includes(".git") || relative.startsWith(".swarm-pi-code-plugin") ||
-            relative === ".env" || relative === ".env.local" || relative === ".swarm-pi-policy.json") {
+        if (relative.split(path.sep).includes(".git") ||
+            relative.startsWith(".swarm-pi-code-plugin") ||
+            relative === ".env" ||
+            relative === ".env.local" ||
+            relative === ".swarm-pi-policy.json") {
             return decision("deny", "critical", capabilitiesFor(action), "Git metadata and plugin control state are immutable denials.", snapshot);
         }
     }
@@ -226,12 +234,15 @@ function hardDeny(action, snapshot) {
 function matchingRule(action, capabilities, snapshot) {
     const matches = snapshot.adaptivePolicy.rules.filter((rule) => capabilities.includes(rule.capability) &&
         (!rule.roles || rule.roles.includes(snapshot.rolePolicy.role)) &&
-        (!rule.taskKinds || rule.taskKinds.some((kind) => snapshot.rolePolicy.taskKinds.includes(kind))) &&
-        (!rule.pathPrefix || Boolean(action.path && isWithin(path.resolve(action.cwd, rule.pathPrefix), path.resolve(action.cwd, action.path)))) &&
+        (!rule.taskKinds ||
+            rule.taskKinds.some((kind) => snapshot.rolePolicy.taskKinds.includes(kind))) &&
+        (!rule.pathPrefix ||
+            Boolean(action.path &&
+                isWithin(path.resolve(action.cwd, rule.pathPrefix), path.resolve(action.cwd, action.path)))) &&
         (!rule.domain || Boolean(action.domain && trustedDomain(action.domain, [rule.domain]))));
-    return matches.find((rule) => rule.effect === "deny") ??
+    return (matches.find((rule) => rule.effect === "deny") ??
         matches.find((rule) => rule.effect === "ask") ??
-        matches.find((rule) => rule.effect === "allow");
+        matches.find((rule) => rule.effect === "allow"));
 }
 function validateClassifierDecision(value, capabilities, snapshot) {
     if (!["allow", "deny", "require-approval"].includes(value.decision))
@@ -248,10 +259,22 @@ function validateClassifierDecision(value, capabilities, snapshot) {
     if (value.risk === "high" && value.decision === "allow") {
         return approvalDecision(capabilities, value.reason || "High-risk action requires approval.", snapshot, value.model);
     }
-    return { ...value, capabilities, constraints: Array.isArray(value.constraints) ? value.constraints : [] };
+    return {
+        ...value,
+        capabilities,
+        constraints: Array.isArray(value.constraints) ? value.constraints : [],
+    };
 }
 function decision(kind, risk, capabilities, reason, snapshot, model) {
-    return { decision: kind, risk, capabilities, reason, constraints: [], policyHash: snapshot.hash, ...(model ? { model } : {}) };
+    return {
+        decision: kind,
+        risk,
+        capabilities,
+        reason,
+        constraints: [],
+        policyHash: snapshot.hash,
+        ...(model ? { model } : {}),
+    };
 }
 function approvalDecision(capabilities, reason, snapshot, model) {
     return decision(snapshot.approvalMode === "wait" ? "require-approval" : "deny", "high", capabilities, reason, snapshot, model);
@@ -260,7 +283,11 @@ function isReadonlyTool(name) {
     return ["read", "grep", "find", "ls"].includes(name);
 }
 function riskFor(action) {
-    return action.domain || action.toolName === "bash" ? "medium" : action.toolName === "write" || action.toolName === "edit" ? "medium" : "low";
+    return action.domain || action.toolName === "bash"
+        ? "medium"
+        : action.toolName === "write" || action.toolName === "edit"
+            ? "medium"
+            : "low";
 }
 function trustedDomain(domain, patterns) {
     const normalized = domain.toLowerCase().replace(/\.$/, "");
@@ -272,21 +299,31 @@ function trustedDomain(domain, patterns) {
     });
 }
 function isForbiddenDomain(domain) {
-    const value = domain.toLowerCase().replace(/[\[\]]/g, "");
-    return value === "localhost" || value === "0.0.0.0" || value === "::1" || value === "169.254.169.254" ||
-        value.startsWith("127.") || value.startsWith("10.") || value.startsWith("192.168.") ||
-        /^172\.(1[6-9]|2\d|3[01])\./.test(value) || value.startsWith("169.254.") || value.startsWith("fc") || value.startsWith("fd");
+    const value = domain.toLowerCase().replace(/[[\]]/g, "");
+    return (value === "localhost" ||
+        value === "0.0.0.0" ||
+        value === "::1" ||
+        value === "169.254.169.254" ||
+        value.startsWith("127.") ||
+        value.startsWith("10.") ||
+        value.startsWith("192.168.") ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(value) ||
+        value.startsWith("169.254.") ||
+        value.startsWith("fc") ||
+        value.startsWith("fd"));
 }
 function stable(value) {
     if (Array.isArray(value))
         return value.map(stable);
     if (value && typeof value === "object") {
-        return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+        return Object.fromEntries(Object.entries(value)
+            .sort(([left], [right]) => left.localeCompare(right))
             .map(([key, item]) => [key, stable(item)]));
     }
     return value;
 }
 function isWithin(root, candidate) {
     const relative = path.relative(root, candidate);
-    return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+    return (relative === "" ||
+        (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)));
 }

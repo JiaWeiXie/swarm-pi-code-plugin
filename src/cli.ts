@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { parseArguments } from "./runner/args.js";
 import { runCommand } from "./runner/run.js";
-import { createJobEventSnapshot, createWatchReadyEvent, dedupeJobEvents } from "./state/job-events.js";
+import {
+  createJobEventSnapshot,
+  createWatchReadyEvent,
+  dedupeJobEvents,
+} from "./state/job-events.js";
 import { isTerminalJobStatus, reconcileJobs } from "./state/jobs.js";
 import { loadState } from "./state/state.js";
 import { startConfigurationServer } from "./web/configuration-server.js";
@@ -46,7 +50,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.once("SIGINT", abort);
       process.once("SIGTERM", abort);
     }
-    const result = await runCommand(args, process.cwd(), undefined, { signal: controller.signal }).finally(() => {
+    const result = await runCommand(args, process.cwd(), undefined, {
+      signal: controller.signal,
+    }).finally(() => {
       process.removeListener("SIGINT", abort);
       process.removeListener("SIGTERM", abort);
     });
@@ -55,14 +61,20 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
     if ("event" in result && result.event === "wait-timed-out") return 3;
     if ("event" in result && result.event === "approval-required") return 4;
-    if ("event" in result && (result.event === "setup-required" || result.event === "workspace-action-required")) return 5;
+    if (
+      "event" in result &&
+      (result.event === "setup-required" || result.event === "workspace-action-required")
+    )
+      return 5;
     return "success" in result && !result.success ? 1 : 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (argv[0] === "jobs" && argv[1] === "watch") {
       process.stderr.write(`${message}\n`);
     } else if (wantsJson) {
-      process.stdout.write(`${JSON.stringify({ event: "system-error", errorCode: "system-error", message })}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ event: "system-error", errorCode: "system-error", message })}\n`,
+      );
     } else {
       process.stderr.write(`${message}\n`);
     }
@@ -71,8 +83,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 }
 
 export function isDelegatedCommand(command: ReturnType<typeof parseArguments>["command"]): boolean {
-  return command === "ask" || command === "review" || command === "plan" || command === "implement" ||
-    command === "orchestrate" || command === "discover" || command === "scaffold" || command === "setup";
+  return (
+    command === "ask" ||
+    command === "review" ||
+    command === "plan" ||
+    command === "implement" ||
+    command === "orchestrate" ||
+    command === "discover" ||
+    command === "scaffold" ||
+    command === "setup"
+  );
 }
 
 async function streamJobWatch(
@@ -89,7 +109,9 @@ async function streamJobWatch(
     if (signal.aborted) return 0;
     await reconcileJobs(cwd);
     const state = await loadState(cwd);
-    const projectionOptions: Parameters<typeof createJobEventSnapshot>[1] = { includeProgress: true };
+    const projectionOptions: Parameters<typeof createJobEventSnapshot>[1] = {
+      includeProgress: true,
+    };
     if (args.jobId) projectionOptions.jobId = args.jobId;
     if (!first) {
       projectionOptions.includeResolved = true;

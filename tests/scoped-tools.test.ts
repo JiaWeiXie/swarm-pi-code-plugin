@@ -40,12 +40,28 @@ test("scoped writes reject dangling final-component symlinks", async () => {
   const canonicalRoot = fs.realpathSync(root);
   fs.mkdirSync(path.join(root, "src"));
   fs.symlinkSync(path.join(root, "missing-outside"), path.join(root, "src", "escape"));
-  const bound = await bindProjectPolicy(await compileEffectiveProjectPolicy({ cwd: canonicalRoot, profile: { dirs: ["src"] } }), canonicalRoot);
-  const tools = createScopedFilesystemTools({ cwd: canonicalRoot, mode: "implement", boundProjectPolicy: bound });
+  const bound = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd: canonicalRoot, profile: { dirs: ["src"] } }),
+    canonicalRoot,
+  );
+  const tools = createScopedFilesystemTools({
+    cwd: canonicalRoot,
+    mode: "implement",
+    boundProjectPolicy: bound,
+  });
   const write = tools.find((entry) => (entry as { name: string }).name === "write") as {
-    execute: (id: string, params: unknown, signal: undefined, update: undefined, context: unknown) => Promise<unknown>;
+    execute: (
+      id: string,
+      params: unknown,
+      signal: undefined,
+      update: undefined,
+      context: unknown,
+    ) => Promise<unknown>;
   };
-  await assert.rejects(() => write.execute("call", { path: "src/escape", content: "nope" }, undefined, undefined, {}), /symlink|scope/i);
+  await assert.rejects(
+    () => write.execute("call", { path: "src/escape", content: "nope" }, undefined, undefined, {}),
+    /symlink|scope/i,
+  );
   assert.equal(fs.existsSync(path.join(root, "missing-outside")), false);
 });
 
@@ -54,26 +70,74 @@ test("scoped writes use no-follow open and never truncate a final symlink target
   fs.mkdirSync(path.join(root, "src"));
   fs.writeFileSync(path.join(root, "target.txt"), "preserve\n");
   fs.symlinkSync(path.join(root, "target.txt"), path.join(root, "src", "link.txt"));
-  const bound = await bindProjectPolicy(await compileEffectiveProjectPolicy({ cwd: root, profile: { dirs: ["src"] } }), root);
-  const tools = createScopedFilesystemTools({ cwd: root, mode: "implement", boundProjectPolicy: bound });
+  const bound = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd: root, profile: { dirs: ["src"] } }),
+    root,
+  );
+  const tools = createScopedFilesystemTools({
+    cwd: root,
+    mode: "implement",
+    boundProjectPolicy: bound,
+  });
   const write = tools.find((entry) => (entry as { name: string }).name === "write") as {
-    execute: (id: string, params: unknown, signal: undefined, update: undefined, context: unknown) => Promise<unknown>;
+    execute: (
+      id: string,
+      params: unknown,
+      signal: undefined,
+      update: undefined,
+      context: unknown,
+    ) => Promise<unknown>;
   };
-  await assert.rejects(() => write.execute("call", { path: "src/link.txt", content: "truncate" }, undefined, undefined, {}), /symlink|scope|root/i);
+  await assert.rejects(
+    () =>
+      write.execute(
+        "call",
+        { path: "src/link.txt", content: "truncate" },
+        undefined,
+        undefined,
+        {},
+      ),
+    /symlink|scope|root/i,
+  );
   assert.equal(fs.readFileSync(path.join(root, "target.txt"), "utf8"), "preserve\n");
 });
 
 test("scoped writes reject intermediate symlinks outside the write root", async () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-intermediate-link-")));
+  const root = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-intermediate-link-")),
+  );
   fs.mkdirSync(path.join(root, "src"));
   fs.mkdirSync(path.join(root, "outside"));
   fs.symlinkSync(path.join(root, "outside"), path.join(root, "src", "link"));
-  const bound = await bindProjectPolicy(await compileEffectiveProjectPolicy({ cwd: root, profile: { dirs: ["src"] } }), root);
-  const tools = createScopedFilesystemTools({ cwd: root, mode: "implement", boundProjectPolicy: bound });
+  const bound = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd: root, profile: { dirs: ["src"] } }),
+    root,
+  );
+  const tools = createScopedFilesystemTools({
+    cwd: root,
+    mode: "implement",
+    boundProjectPolicy: bound,
+  });
   const write = tools.find((entry) => (entry as { name: string }).name === "write") as {
-    execute: (id: string, params: unknown, signal: undefined, update: undefined, context: unknown) => Promise<unknown>;
+    execute: (
+      id: string,
+      params: unknown,
+      signal: undefined,
+      update: undefined,
+      context: unknown,
+    ) => Promise<unknown>;
   };
-  await assert.rejects(() => write.execute("call", { path: "src/link/pwned.txt", content: "nope" }, undefined, undefined, {}), /scope|symlink|root/i);
+  await assert.rejects(
+    () =>
+      write.execute(
+        "call",
+        { path: "src/link/pwned.txt", content: "nope" },
+        undefined,
+        undefined,
+        {},
+      ),
+    /scope|symlink|root/i,
+  );
   assert.equal(fs.existsSync(path.join(root, "outside", "pwned.txt")), false);
 });
 
@@ -82,17 +146,38 @@ test("scoped reads reject symlinks outside the read root", async () => {
   fs.mkdirSync(path.join(root, "src"));
   fs.writeFileSync(path.join(root, "secret.txt"), "secret");
   fs.symlinkSync(path.join(root, "secret.txt"), path.join(root, "src", "secret"));
-  const bound = await bindProjectPolicy(await compileEffectiveProjectPolicy({ cwd: root, profile: { dirs: ["src"] } }), root);
-  const tools = createScopedFilesystemTools({ cwd: root, mode: "readonly", boundProjectPolicy: bound });
+  const bound = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd: root, profile: { dirs: ["src"] } }),
+    root,
+  );
+  const tools = createScopedFilesystemTools({
+    cwd: root,
+    mode: "readonly",
+    boundProjectPolicy: bound,
+  });
   const read = tools.find((entry) => (entry as { name: string }).name === "read") as {
-    execute: (id: string, params: unknown, signal: undefined, update: undefined, context: unknown) => Promise<unknown>;
+    execute: (
+      id: string,
+      params: unknown,
+      signal: undefined,
+      update: undefined,
+      context: unknown,
+    ) => Promise<unknown>;
   };
-  await assert.rejects(() => read.execute("call", { path: "src/secret" }, undefined, undefined, {}), /scope|root/i);
+  await assert.rejects(
+    () => read.execute("call", { path: "src/secret" }, undefined, undefined, {}),
+    /scope|root/i,
+  );
 });
 
 test("mutation paths protect Git, runtime state, policy, and environment files", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-protected-"));
-  for (const candidate of [".git/config", ".swarm-pi-code-plugin/state.json", ".swarm-pi-policy.json", ".env"]) {
+  for (const candidate of [
+    ".git/config",
+    ".swarm-pi-code-plugin/state.json",
+    ".swarm-pi-policy.json",
+    ".env",
+  ]) {
     await assert.rejects(() => assertMutationPath(workspace, candidate), /protected/);
   }
 });
@@ -105,7 +190,10 @@ interface Harness {
   run: (name: string, params: unknown) => Promise<unknown>;
 }
 
-async function harness(dirs: string[] | undefined, mode: "readonly" | "implement" = "implement"): Promise<Harness> {
+async function harness(
+  dirs: string[] | undefined,
+  mode: "readonly" | "implement" = "implement",
+): Promise<Harness> {
   const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-scoped-")));
   fs.mkdirSync(path.join(cwd, "src"));
   fs.mkdirSync(path.join(cwd, "docs"));
@@ -121,12 +209,22 @@ async function harness(dirs: string[] | undefined, mode: "readonly" | "implement
     cwd,
     mode,
     boundProjectPolicy: bound,
-    onPolicyViolation: (error) => { violations.push(error); },
+    onPolicyViolation: (error) => {
+      violations.push(error);
+    },
   });
   const byName = new Map(tools.map((entry) => [(entry as { name: string }).name, entry]));
   const run = (name: string, params: unknown): Promise<unknown> => {
     const tool = byName.get(name) as
-      | { execute: (id: string, p: unknown, s: undefined, u: undefined, c: unknown) => Promise<unknown> }
+      | {
+          execute: (
+            id: string,
+            p: unknown,
+            s: undefined,
+            u: undefined,
+            c: unknown,
+          ) => Promise<unknown>;
+        }
       | undefined;
     if (!tool) throw new Error(`tool not registered: ${name}`);
     return tool.execute("call", params, undefined, undefined, {});
@@ -173,7 +271,10 @@ test("scoped edit requires read and write scope", async () => {
   const h = await harness(["src"]);
   await h.run("edit", { path: "src/a.ts", edits: [{ oldText: "1", newText: "2" }] });
   assert.match(fs.readFileSync(path.join(h.cwd, "src", "a.ts"), "utf8"), /a = 2/);
-  await assertScopeDenied(h, "edit", { path: "docs/x.md", edits: [{ oldText: "doc", newText: "z" }] });
+  await assertScopeDenied(h, "edit", {
+    path: "docs/x.md",
+    edits: [{ oldText: "doc", newText: "z" }],
+  });
 });
 
 test("scoped read is confined to allowed roots", async () => {
@@ -184,7 +285,10 @@ test("scoped read is confined to allowed roots", async () => {
 
 test("scoped policy violation waits for asynchronous audit callback", async () => {
   const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-scoped-audit-")));
-  const bound = await bindProjectPolicy(await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["src"] } }), cwd);
+  const bound = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["src"] } }),
+    cwd,
+  );
   let completed = false;
   const tools = createScopedFilesystemTools({
     cwd,
@@ -196,27 +300,50 @@ test("scoped policy violation waits for asynchronous audit callback", async () =
     },
   });
   const read = tools.find((entry) => (entry as { name: string }).name === "read") as {
-    execute: (id: string, params: unknown, signal: undefined, update: undefined, context: unknown) => Promise<unknown>;
+    execute: (
+      id: string,
+      params: unknown,
+      signal: undefined,
+      update: undefined,
+      context: unknown,
+    ) => Promise<unknown>;
   };
-  await assert.rejects(() => read.execute("call", { path: "outside.txt" }, undefined, undefined, {}));
+  await assert.rejects(() =>
+    read.execute("call", { path: "outside.txt" }, undefined, undefined, {}),
+  );
   assert.equal(completed, true);
 });
 
 test("scoped policy rejection survives audit callback failure", async () => {
-  const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-scoped-audit-failure-")));
-  const bound = await bindProjectPolicy(await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["src"] } }), cwd);
+  const cwd = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-scoped-audit-failure-")),
+  );
+  const bound = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["src"] } }),
+    cwd,
+  );
   const tools = createScopedFilesystemTools({
     cwd,
     mode: "readonly",
     boundProjectPolicy: bound,
-    onPolicyViolation: async () => { throw new Error("audit unavailable"); },
+    onPolicyViolation: async () => {
+      throw new Error("audit unavailable");
+    },
   });
   const read = tools.find((entry) => (entry as { name: string }).name === "read") as {
-    execute: (id: string, params: unknown, signal: undefined, update: undefined, context: unknown) => Promise<unknown>;
+    execute: (
+      id: string,
+      params: unknown,
+      signal: undefined,
+      update: undefined,
+      context: unknown,
+    ) => Promise<unknown>;
   };
   await assert.rejects(
     () => read.execute("call", { path: "outside.txt" }, undefined, undefined, {}),
-    (error: unknown) => error instanceof ProjectPolicyError && error.rejection.errorCode === "project-scope-violation",
+    (error: unknown) =>
+      error instanceof ProjectPolicyError &&
+      error.rejection.errorCode === "project-scope-violation",
   );
 });
 
@@ -227,7 +354,11 @@ test("search selectors reject traversal and absolute paths", async () => {
   await assertScopeDenied(h, "find", { pattern: "/etc/*", path: "src" });
   await assertScopeDenied(h, "find", { pattern: "C:outside/**/*.ts", path: "src" });
   await assertScopeDenied(h, "grep", { pattern: "a", glob: "C:outside/**/*.ts", path: "src" });
-  await assertScopeDenied(h, "grep", { pattern: "a", glob: "{../outside/**,**/*.ts}", path: "src" });
+  await assertScopeDenied(h, "grep", {
+    pattern: "a",
+    glob: "{../outside/**,**/*.ts}",
+    path: "src",
+  });
   await assertScopeDenied(h, "find", { pattern: "@(../outside/**|**/*.ts)", path: "src" });
   await assertScopeDenied(h, "grep", { pattern: "a", glob: "{src/**,/etc/**}", path: "src" });
   await assertScopeDenied(h, "find", { pattern: "{src/**,C:/Windows/**}", path: "src" });
@@ -239,8 +370,16 @@ test("scoped grep, find, and ls only search allowed roots", async () => {
   const h = await harness(["src"]);
   for (const name of ["grep", "find", "ls"]) {
     await assertScopeDenied(h, name, name === "ls" ? { path: "." } : { pattern: "a", path: "." });
-    await assertScopeDenied(h, name, name === "ls" ? { path: "docs" } : { pattern: "a", path: "docs" });
-    await assertScopeAllowed(h, name, name === "ls" ? { path: "src" } : { pattern: "a", path: "src" });
+    await assertScopeDenied(
+      h,
+      name,
+      name === "ls" ? { path: "docs" } : { pattern: "a", path: "docs" },
+    );
+    await assertScopeAllowed(
+      h,
+      name,
+      name === "ls" ? { path: "src" } : { pattern: "a", path: "src" },
+    );
   }
 });
 
@@ -248,8 +387,14 @@ test("recursive search rejects every symlink entry before delegating to the SDK"
   const h = await harness(["src"], "readonly");
   fs.mkdirSync(path.join(h.cwd, "src", "nested"));
   fs.symlinkSync(path.join(h.cwd, "src", "a.ts"), path.join(h.cwd, "src", "nested", "linked.ts"));
-  await assert.rejects(() => h.run("find", { pattern: "**/*.ts", path: "src" }), /refuses symlinked entries/);
-  await assert.rejects(() => h.run("grep", { pattern: "a", glob: "**/*.ts", path: "src" }), /refuses symlinked entries/);
+  await assert.rejects(
+    () => h.run("find", { pattern: "**/*.ts", path: "src" }),
+    /refuses symlinked entries/,
+  );
+  await assert.rejects(
+    () => h.run("grep", { pattern: "a", glob: "**/*.ts", path: "src" }),
+    /refuses symlinked entries/,
+  );
 });
 
 test("an unrestricted policy allows the whole workspace", async () => {

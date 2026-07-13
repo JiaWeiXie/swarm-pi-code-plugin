@@ -19,7 +19,13 @@ export async function buildReviewRequest(
   const useWorkingTree = scope === "working-tree" || (scope === "auto" && !inspection.clean);
   if (useWorkingTree) {
     const changes = await captureWorktreeChanges(cwd);
-    if (options.allowedPath && !(await everyPathAllowed(changes.entries.map((entry) => entry.path), options.allowedPath))) {
+    if (
+      options.allowedPath &&
+      !(await everyPathAllowed(
+        changes.entries.map((entry) => entry.path),
+        options.allowedPath,
+      ))
+    ) {
       throw new Error("Review includes changed paths outside the effective project read roots");
     }
     return `Review the current working tree changes.\n\nStatus:\n${formatStatus(changes.entries)}\n\nDiff:\n${changes.diff || "(no textual diff)"}`;
@@ -41,7 +47,7 @@ async function everyPathAllowed(
   allowedPath: (relativePath: string) => Promise<boolean>,
 ): Promise<boolean> {
   for (const relativePath of paths) {
-    if (!await allowedPath(relativePath)) return false;
+    if (!(await allowedPath(relativePath))) return false;
   }
   return true;
 }
@@ -53,15 +59,25 @@ async function branchChangedPaths(cwd: string, base: string): Promise<string[]> 
       encoding: "utf8",
       maxBuffer: 4 * 1024 * 1024,
     });
-    return stdout.split("\n").map((value) => value.trim()).filter(Boolean);
+    return stdout
+      .split("\n")
+      .map((value) => value.trim())
+      .filter(Boolean);
   } catch (error) {
     if (base !== "HEAD^") throw error;
-    const { stdout } = await execFileAsync("git", ["show", "--format=", "--name-only", "HEAD", "--"], {
-      cwd,
-      encoding: "utf8",
-      maxBuffer: 4 * 1024 * 1024,
-    });
-    return stdout.split("\n").map((value) => value.trim()).filter(Boolean);
+    const { stdout } = await execFileAsync(
+      "git",
+      ["show", "--format=", "--name-only", "HEAD", "--"],
+      {
+        cwd,
+        encoding: "utf8",
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+    return stdout
+      .split("\n")
+      .map((value) => value.trim())
+      .filter(Boolean);
   }
 }
 
@@ -85,5 +101,7 @@ async function branchDiff(cwd: string, base: string): Promise<string> {
 }
 
 function formatStatus(entries: Array<{ status: string; path: string }>): string {
-  return entries.length ? entries.map((entry) => `${entry.status} ${entry.path}`).join("\n") : "(clean)";
+  return entries.length
+    ? entries.map((entry) => `${entry.status} ${entry.path}`).join("\n")
+    : "(clean)";
 }

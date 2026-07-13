@@ -2,8 +2,7 @@ export async function executeSession(options) {
     let output = "";
     let terminalMessage;
     const unsubscribe = options.session.subscribe((event) => {
-        if (event.type === "message_update" &&
-            event.assistantMessageEvent?.type === "text_delta") {
+        if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
             output += event.assistantMessageEvent.delta ?? "";
         }
         if (event.type === "message_end" && event.message?.role === "assistant") {
@@ -58,7 +57,9 @@ async function interruptSession(session) {
     try {
         await Promise.race([
             session.waitForIdle().catch(() => { }),
-            new Promise((resolve) => { timeout = setTimeout(resolve, 5_000); }),
+            new Promise((resolve) => {
+                timeout = setTimeout(resolve, 5_000);
+            }),
         ]);
     }
     finally {

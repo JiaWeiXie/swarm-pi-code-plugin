@@ -24,7 +24,9 @@ export function buildWorkerPrompt(options) {
         `[TASK]\n${TASK_CONTEXT[options.kind]}`,
         options.perspective ? `[PERSPECTIVE]\n${options.perspective}` : "",
         options.decisionMode ? `[DECISION_MODE]\n${options.decisionMode}` : "",
-        options.advisorEnabled ? "[ADVISOR]\nUse bounded consultation only; do not execute actions or recurse." : "",
+        options.advisorEnabled
+            ? "[ADVISOR]\nUse bounded consultation only; do not execute actions or recurse."
+            : "",
         projectLines.length ? `[PROJECT]\n${projectLines.join("\n")}` : "",
         `[REQUEST]\n${options.prompt}`,
     ]

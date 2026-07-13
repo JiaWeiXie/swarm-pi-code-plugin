@@ -14,11 +14,18 @@ export async function startJob(cwd, input) {
     const providerSnapshotHash = input.modelConfiguration
         ? modelConfigurationSnapshotHash(input.modelConfiguration)
         : undefined;
-    if ((input.policySnapshot?.version === 2 || input.policySnapshot?.version === 3) && !input.modelConfiguration) {
+    if ((input.policySnapshot?.version === 2 || input.policySnapshot?.version === 3) &&
+        !input.modelConfiguration) {
         throw new Error(`Policy snapshot version ${input.policySnapshot.version} requires modelConfiguration`);
     }
     const request = {
-        requestVersion: input.policySnapshot?.version === 3 ? 5 : input.policySnapshot?.version === 2 ? 4 : input.modelConfiguration ? 3 : 2,
+        requestVersion: input.policySnapshot?.version === 3
+            ? 5
+            : input.policySnapshot?.version === 2
+                ? 4
+                : input.modelConfiguration
+                    ? 3
+                    : 2,
         id,
         host: input.host,
         kind: input.kind,
@@ -39,9 +46,15 @@ export async function startJob(cwd, input) {
         ...(input.adoptExisting ? { adoptExisting: true } : {}),
         ...(input.decisionMode ? { decisionMode: input.decisionMode } : {}),
         ...(input.hostAssistance ? { hostAssistance: input.hostAssistance } : {}),
-        ...(input.hostContextFile ? { hostContextFile: path.relative(input.cwd, path.resolve(input.cwd, input.hostContextFile)) } : {}),
+        ...(input.hostContextFile
+            ? {
+                hostContextFile: path.relative(input.cwd, path.resolve(input.cwd, input.hostContextFile)),
+            }
+            : {}),
         ...(input.discoveryFrom ? { discoveryFrom: input.discoveryFrom } : {}),
-        ...(input.modelConfiguration ? { modelConfiguration: structuredClone(input.modelConfiguration) } : {}),
+        ...(input.modelConfiguration
+            ? { modelConfiguration: structuredClone(input.modelConfiguration) }
+            : {}),
         ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
         workerToken,
         createdAt,
@@ -49,7 +62,10 @@ export async function startJob(cwd, input) {
     await fs.mkdir(directory, { recursive: true });
     await Promise.all([
         writeJson(path.join(directory, "request.json"), request),
-        fs.writeFile(path.join(directory, "prompt.md"), input.prompt, { encoding: "utf8", mode: 0o600 }),
+        fs.writeFile(path.join(directory, "prompt.md"), input.prompt, {
+            encoding: "utf8",
+            mode: 0o600,
+        }),
     ]);
     await updateState(cwd, (state) => {
         state.jobs.push({
@@ -62,7 +78,9 @@ export async function startJob(cwd, input) {
             ...(input.model ? { model: input.model } : {}),
             ...(input.role ? { role: input.role } : {}),
             ...(input.policySnapshot ? { policyHash: input.policySnapshot.hash } : {}),
-            ...(input.policySnapshot?.version === 2 || input.policySnapshot?.version === 3 ? { scopeHash: input.policySnapshot.scopeHash } : {}),
+            ...(input.policySnapshot?.version === 2 || input.policySnapshot?.version === 3
+                ? { scopeHash: input.policySnapshot.scopeHash }
+                : {}),
             ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
             generation: 1,
             approvals: [],
@@ -158,7 +176,10 @@ export async function finishJob(cwd, jobId, result, diff) {
     await fs.mkdir(directory, { recursive: true });
     await writeJson(path.join(directory, "result.json"), finalResult);
     if (diff)
-        await fs.writeFile(path.join(directory, "changes.patch"), diff, { encoding: "utf8", mode: 0o600 });
+        await fs.writeFile(path.join(directory, "changes.patch"), diff, {
+            encoding: "utf8",
+            mode: 0o600,
+        });
     await applyResultToState(cwd, jobId, finalResult, finishedAt);
 }
 async function applyResultToState(cwd, jobId, finalResult, finishedAt = new Date().toISOString()) {
@@ -185,7 +206,9 @@ async function applyResultToState(cwd, jobId, finalResult, finishedAt = new Date
         const summary = {
             ...(existing ?? { id: jobId }),
             id: jobId,
-            ...(finalResult.host ?? existing?.host ? { host: (finalResult.host ?? existing?.host) } : {}),
+            ...((finalResult.host ?? existing?.host)
+                ? { host: (finalResult.host ?? existing?.host) }
+                : {}),
             kind: finalResult.kind,
             status: finalResult.status,
             ...(finalResult.model ? { model: finalResult.model } : {}),
@@ -236,7 +259,8 @@ export async function listJobs(cwd, pendingNotifications = false) {
     await reconcileJobs(cwd);
     const state = await loadState(cwd);
     return state.jobs
-        .filter((job) => !pendingNotifications || job.notification === "pending" ||
+        .filter((job) => !pendingNotifications ||
+        job.notification === "pending" ||
         job.notifications?.some((notification) => notification.status === "pending"))
         .sort((left, right) => timestamp(right) - timestamp(left));
 }
@@ -424,7 +448,9 @@ export async function waitForApprovalResolution(cwd, jobId, workerToken, approva
         const job = requireJob(state.jobs, jobId);
         requireWorkerToken(job, workerToken);
         const approval = requireApproval(job, approvalId);
-        if (approval.status === "approved" || approval.status === "denied" || approval.status === "expired") {
+        if (approval.status === "approved" ||
+            approval.status === "denied" ||
+            approval.status === "expired") {
             return approval.status;
         }
         if (Date.now() >= Date.parse(approval.expiresAt)) {
@@ -432,9 +458,16 @@ export async function waitForApprovalResolution(cwd, jobId, workerToken, approva
             return "expired";
         }
         await new Promise((resolve, reject) => {
-            const finish = () => { signal?.removeEventListener("abort", abort); resolve(); };
+            const finish = () => {
+                signal?.removeEventListener("abort", abort);
+                resolve();
+            };
             const timeout = setTimeout(finish, 250);
-            const abort = () => { clearTimeout(timeout); signal?.removeEventListener("abort", abort); reject(new Error("Approval wait was cancelled")); };
+            const abort = () => {
+                clearTimeout(timeout);
+                signal?.removeEventListener("abort", abort);
+                reject(new Error("Approval wait was cancelled"));
+            };
             signal?.addEventListener("abort", abort, { once: true });
         });
     }
@@ -480,7 +513,8 @@ export async function requestJobHostAssistance(cwd, jobId, workerToken, input) {
             requireWorkerToken(job, workerToken);
             if (isTerminalJobStatus(job.status))
                 throw new Error(`Job is terminal: ${jobId}`);
-            if ((job.generation ?? 1) !== input.correlation.generation || input.correlation.jobId !== jobId) {
+            if ((job.generation ?? 1) !== input.correlation.generation ||
+                input.correlation.jobId !== jobId) {
                 throw new Error(`Host Assistance correlation is stale for job: ${jobId}`);
             }
             const records = job.hostAssistanceRequests ?? [];
@@ -610,7 +644,9 @@ export async function waitForHostAssistanceResolution(cwd, jobId, workerToken, r
             await expireHostRequest(cwd, jobId, requestId);
             continue;
         }
-        if (summary.status === "resolved" || summary.status === "declined" || summary.status === "expired") {
+        if (summary.status === "resolved" ||
+            summary.status === "declined" ||
+            summary.status === "expired") {
             const file = await ensureHostAssistanceArtifact(await jobDirectory(cwd, jobId), requestId);
             const record = await readRequiredJson(file);
             if (!record.response)
@@ -623,7 +659,9 @@ export async function waitForHostAssistanceResolution(cwd, jobId, workerToken, r
                 const currentSummary = requireHostRequest(currentJob, requestId);
                 if (currentSummary.status === "consumed")
                     return;
-                if (currentSummary.status !== "resolved" && currentSummary.status !== "declined" && currentSummary.status !== "expired")
+                if (currentSummary.status !== "resolved" &&
+                    currentSummary.status !== "declined" &&
+                    currentSummary.status !== "expired")
                     return;
                 currentSummary.status = "consumed";
                 currentSummary.consumedAt = consumedAt;
@@ -645,15 +683,19 @@ export function createJobLeaseProvider(cwd, jobId) {
         async find(actionFingerprint, snapshot) {
             const job = (await loadState(cwd)).jobs.find((item) => item.id === jobId);
             const now = Date.now();
-            return structuredClone(job?.leases?.find((lease) => lease.actionFingerprint === actionFingerprint && lease.policyHash === snapshot.hash &&
-                Date.parse(lease.expiresAt) > now && (lease.scope === "job" || !lease.consumedAt)) ?? null);
+            return structuredClone(job?.leases?.find((lease) => lease.actionFingerprint === actionFingerprint &&
+                lease.policyHash === snapshot.hash &&
+                Date.parse(lease.expiresAt) > now &&
+                (lease.scope === "job" || !lease.consumedAt)) ?? null);
         },
         async consume(target) {
             let consumed = false;
             await updateState(cwd, (state) => {
                 const job = requireJob(state.jobs, jobId);
                 const lease = job.leases?.find((item) => item.id === target.id);
-                if (!lease || lease.generation !== (job.generation ?? 1) || Date.parse(lease.expiresAt) <= Date.now())
+                if (!lease ||
+                    lease.generation !== (job.generation ?? 1) ||
+                    Date.parse(lease.expiresAt) <= Date.now())
                     return;
                 if (lease.scope === "once" && lease.consumedAt)
                     return;
@@ -811,14 +853,23 @@ function normalizeHostAssistanceResponse(record, input) {
         throw new Error(`Host response request correlation mismatch: ${record.id}`);
     }
     if (value.kind === "unavailable") {
-        const reason = ["declined", "expired", "disabled", "quota-exceeded", "policy-denied", "cancelled"].includes(String(value.reason))
+        const reason = [
+            "declined",
+            "expired",
+            "disabled",
+            "quota-exceeded",
+            "policy-denied",
+            "cancelled",
+        ].includes(String(value.reason))
             ? value.reason
             : "declined";
         const base = {
             kind: "unavailable",
             requestId: record.id,
             reason,
-            message: typeof value.message === "string" ? value.message.slice(0, 4_000) : "Host Assistance is unavailable.",
+            message: typeof value.message === "string"
+                ? value.message.slice(0, 4_000)
+                : "Host Assistance is unavailable.",
             resolvedAt: new Date().toISOString(),
         };
         return { ...base, hash: valueHash(base) };
@@ -830,7 +881,9 @@ function normalizeHostAssistanceResponse(record, input) {
             kind: "decision",
             requestId: record.id,
             decision: value.decision.slice(0, 4_000),
-            ...(typeof value.rationale === "string" ? { rationale: value.rationale.slice(0, 8_000) } : {}),
+            ...(typeof value.rationale === "string"
+                ? { rationale: value.rationale.slice(0, 8_000) }
+                : {}),
             decidedAt: new Date().toISOString(),
         };
         return { ...base, hash: valueHash(base) };
@@ -840,7 +893,9 @@ function normalizeHostAssistanceResponse(record, input) {
             kind: "action-recommendation",
             requestId: record.id,
             status: value.status === "declined" ? "declined" : "recorded",
-            message: typeof value.message === "string" ? value.message.slice(0, 4_000) : "Action recommendation recorded; no action was executed.",
+            message: typeof value.message === "string"
+                ? value.message.slice(0, 4_000)
+                : "Action recommendation recorded; no action was executed.",
             recordedAt: new Date().toISOString(),
         };
         return { ...base, hash: valueHash(base) };
@@ -850,34 +905,47 @@ function normalizeHostAssistanceResponse(record, input) {
     const retrievedAt = typeof value.retrievedAt === "string" && Number.isFinite(Date.parse(value.retrievedAt))
         ? value.retrievedAt
         : new Date().toISOString();
-    const claims = Array.isArray(value.claims) ? value.claims.flatMap((claim) => {
-        if (!claim || typeof claim !== "object" || Array.isArray(claim))
-            return [];
-        const candidate = claim;
-        if (typeof candidate.claim !== "string")
-            return [];
-        return [{
-                claim: candidate.claim.slice(0, 8_000),
-                evidenceIds: stringList(candidate.evidenceIds, 100),
-                confidence: (candidate.confidence === "high" || candidate.confidence === "low" ? candidate.confidence : "medium"),
-            }];
-    }) : [];
-    const citations = Array.isArray(value.citations) ? value.citations.flatMap((citation) => {
-        if (!citation || typeof citation !== "object" || Array.isArray(citation))
-            return [];
-        const candidate = citation;
-        if (typeof candidate.id !== "string" || typeof candidate.title !== "string")
-            return [];
-        return [{
-                id: candidate.id.slice(0, 200),
-                title: candidate.title.slice(0, 1_000),
-                ...(typeof candidate.url === "string" ? { url: candidate.url.slice(0, 4_000) } : {}),
-                ...(typeof candidate.version === "string" ? { version: candidate.version.slice(0, 500) } : {}),
-                retrievedAt: typeof candidate.retrievedAt === "string" && Number.isFinite(Date.parse(candidate.retrievedAt))
-                    ? candidate.retrievedAt
-                    : retrievedAt,
-            }];
-    }) : [];
+    const claims = Array.isArray(value.claims)
+        ? value.claims.flatMap((claim) => {
+            if (!claim || typeof claim !== "object" || Array.isArray(claim))
+                return [];
+            const candidate = claim;
+            if (typeof candidate.claim !== "string")
+                return [];
+            return [
+                {
+                    claim: candidate.claim.slice(0, 8_000),
+                    evidenceIds: stringList(candidate.evidenceIds, 100),
+                    confidence: (candidate.confidence === "high" || candidate.confidence === "low"
+                        ? candidate.confidence
+                        : "medium"),
+                },
+            ];
+        })
+        : [];
+    const citations = Array.isArray(value.citations)
+        ? value.citations.flatMap((citation) => {
+            if (!citation || typeof citation !== "object" || Array.isArray(citation))
+                return [];
+            const candidate = citation;
+            if (typeof candidate.id !== "string" || typeof candidate.title !== "string")
+                return [];
+            return [
+                {
+                    id: candidate.id.slice(0, 200),
+                    title: candidate.title.slice(0, 1_000),
+                    ...(typeof candidate.url === "string" ? { url: candidate.url.slice(0, 4_000) } : {}),
+                    ...(typeof candidate.version === "string"
+                        ? { version: candidate.version.slice(0, 500) }
+                        : {}),
+                    retrievedAt: typeof candidate.retrievedAt === "string" &&
+                        Number.isFinite(Date.parse(candidate.retrievedAt))
+                        ? candidate.retrievedAt
+                        : retrievedAt,
+                },
+            ];
+        })
+        : [];
     const base = {
         kind: "context",
         requestId: record.id,
@@ -894,7 +962,10 @@ function normalizeHostAssistanceResponse(record, input) {
 }
 function stringList(value, limit) {
     return Array.isArray(value)
-        ? value.filter((item) => typeof item === "string").slice(0, limit).map((item) => item.slice(0, 4_000))
+        ? value
+            .filter((item) => typeof item === "string")
+            .slice(0, limit)
+            .map((item) => item.slice(0, 4_000))
         : [];
 }
 function valueHash(value) {
@@ -934,7 +1005,13 @@ async function expireHostRequest(cwd, jobId, requestId) {
         job.status = activeWaitStatus(job);
         job.updatedAt = resolvedAt;
     });
-    await writeJson(file, { ...record, status: "expired", resolvedAt, responseHash: response.hash, response });
+    await writeJson(file, {
+        ...record,
+        status: "expired",
+        resolvedAt,
+        responseHash: response.hash,
+        response,
+    });
 }
 async function ensureHostAssistanceArtifact(jobDir, requestId) {
     const directory = path.join(jobDir, "host-assistance");
@@ -961,9 +1038,16 @@ async function ensureHostAssistanceArtifact(jobDir, requestId) {
 }
 async function abortableDelay(ms, signal, message) {
     await new Promise((resolve, reject) => {
-        const finish = () => { signal?.removeEventListener("abort", abort); resolve(); };
+        const finish = () => {
+            signal?.removeEventListener("abort", abort);
+            resolve();
+        };
         const timer = setTimeout(finish, ms);
-        const abort = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(new Error(message)); };
+        const abort = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", abort);
+            reject(new Error(message));
+        };
         signal?.addEventListener("abort", abort, { once: true });
     });
 }

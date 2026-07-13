@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 const REMOTE_ACTIONS = new Set([
-    "remote-write", "message", "deploy", "transaction",
+    "remote-write",
+    "message",
+    "deploy",
+    "transaction",
 ]);
 export function assertHostActionAllowed(options) {
     if (!options.policy.enabled)
@@ -14,18 +17,21 @@ export function assertHostActionAllowed(options) {
     if (!options.policy.allowedActionClasses.includes(options.recommendation.actionClass)) {
         throw new Error(`Host Action class is disabled: ${options.recommendation.actionClass}`);
     }
-    if (REMOTE_ACTIONS.has(options.recommendation.actionClass) && !options.policy.remoteActionsEnabled) {
+    if (REMOTE_ACTIONS.has(options.recommendation.actionClass) &&
+        !options.policy.remoteActionsEnabled) {
         throw new Error(`Remote Host Actions are disabled: ${options.recommendation.actionClass}`);
     }
 }
 export function createActionFamilyLease(options) {
     const now = options.now ?? new Date();
-    const scopeKey = createHash("sha256").update(JSON.stringify({
+    const scopeKey = createHash("sha256")
+        .update(JSON.stringify({
         actionClass: options.recommendation.actionClass,
         target: options.recommendation.target ?? null,
         policyHash: options.snapshot.hash,
         scopeHash: options.snapshot.version === 1 ? null : options.snapshot.scopeHash,
-    })).digest("hex");
+    }))
+        .digest("hex");
     return {
         id: randomUUID(),
         jobId: options.jobId,
@@ -35,7 +41,8 @@ export function createActionFamilyLease(options) {
         role: options.role,
         actionFingerprint: scopeKey,
         scope: "once",
-        capabilities: options.recommendation.actionClass === "local-mutation" || options.recommendation.actionClass === "draft"
+        capabilities: options.recommendation.actionClass === "local-mutation" ||
+            options.recommendation.actionClass === "draft"
             ? ["filesystem.write-workspace"]
             : ["network.connect"],
         createdAt: now.toISOString(),

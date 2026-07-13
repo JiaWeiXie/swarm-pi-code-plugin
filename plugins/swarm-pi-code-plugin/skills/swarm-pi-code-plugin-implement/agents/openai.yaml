@@ -1,4 +1,0 @@
-interface:
-  display_name: "Swarm Pi Code Plugin Implement"
-  short_description: "Implement scoped changes with Pi"
-  default_prompt: "Use $swarm-pi-code-plugin-implement to make this approved change."

@@ -82,9 +82,11 @@ export async function startConfigurationServer(
 
   const server = http.createServer(async (request, response) => {
     applySecurityHeaders(response);
-    if (!isLoopbackRequest(request, origin)) return json(response, 403, { error: "Local request required" });
+    if (!isLoopbackRequest(request, origin))
+      return json(response, 403, { error: "Local request required" });
     const url = new URL(request.url ?? "/", origin);
-    if (!validToken(request, url, token)) return json(response, 403, { error: "Invalid setup session" });
+    if (!validToken(request, url, token))
+      return json(response, 403, { error: "Invalid setup session" });
     resetTimer();
     try {
       if (request.method === "GET" && url.pathname === "/") {
@@ -135,7 +137,11 @@ export async function startConfigurationServer(
       if (request.method === "POST" && url.pathname === "/api/providers/discover") {
         assertJsonRequest(request, origin);
         const discovery = normalizeDiscoveryRequest(await readJsonBody(request));
-        json(response, 200, await discoverConfigurationEndpoint(cwd, discovery, credentialVault, env));
+        json(
+          response,
+          200,
+          await discoverConfigurationEndpoint(cwd, discovery, credentialVault, env),
+        );
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/providers/local") {
@@ -148,13 +154,24 @@ export async function startConfigurationServer(
       }
       if (request.method === "POST" && url.pathname === "/api/providers/custom/manual") {
         assertJsonRequest(request, origin);
-        json(response, 200, await createManualCustomProvider(cwd, normalizeManualProviderRequest(await readJsonBody(request))));
+        json(
+          response,
+          200,
+          await createManualCustomProvider(
+            cwd,
+            normalizeManualProviderRequest(await readJsonBody(request)),
+          ),
+        );
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/providers/verify") {
         assertJsonRequest(request, origin);
         const verification = normalizeVerificationRequest(await readJsonBody(request));
-        json(response, 200, await verifyProviderConnection(cwd, verification, credentialVault, env));
+        json(
+          response,
+          200,
+          await verifyProviderConnection(cwd, verification, credentialVault, env),
+        );
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/providers/sign-out") {
@@ -173,13 +190,21 @@ export async function startConfigurationServer(
       if (request.method === "POST" && url.pathname === "/api/oauth/status") {
         assertJsonRequest(request, origin);
         const poll = normalizeOAuthPoll(await readJsonBody(request));
-        json(response, 200, await oauthSessions.waitForStatus(poll.sessionId, poll.afterRevision, poll.waitTimeoutMs));
+        json(
+          response,
+          200,
+          await oauthSessions.waitForStatus(poll.sessionId, poll.afterRevision, poll.waitTimeoutMs),
+        );
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/oauth/respond") {
         assertJsonRequest(request, origin);
         const answer = normalizeOAuthResponse(await readJsonBody(request));
-        json(response, 200, oauthSessions.respond(answer.sessionId, answer.challengeId, answer.value));
+        json(
+          response,
+          200,
+          oauthSessions.respond(answer.sessionId, answer.challengeId, answer.value),
+        );
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/oauth/cancel") {
@@ -216,7 +241,8 @@ export async function startConfigurationServer(
   server.listen(options.port ?? 0, LOOPBACK_HOST);
   await once(server, "listening");
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("Unable to resolve configuration server address");
+  if (!address || typeof address === "string")
+    throw new Error("Unable to resolve configuration server address");
   origin = `http://${LOOPBACK_HOST}:${address.port}`;
   const url = `${origin}/?token=${encodeURIComponent(token)}`;
   resetTimer();
@@ -265,34 +291,49 @@ function setupProblem(error: unknown): {
   preserved: string[];
   nextActions: string[];
 } {
-  const message = redactSetupMessage(error instanceof Error ? error.message : "Configuration failed");
-  const code = error instanceof EndpointDiscoveryError
-    ? error.code
-    : message.includes("smoke test")
-      ? "model-smoke-test-failed"
-      : message.includes("recovery-required")
-        ? "configuration-recovery-required"
-        : /sandbox/i.test(message)
-          ? "sandbox-backend-unavailable"
-          : /model|authenticated/i.test(message)
-            ? "model-configuration-invalid"
-            : "configuration-save-failed";
-  const stage = code.includes("sandbox") ? "execution-safety" : code.includes("model") ? "models" : code.includes("recovery") ? "recovery" : "workspace";
+  const message = redactSetupMessage(
+    error instanceof Error ? error.message : "Configuration failed",
+  );
+  const code =
+    error instanceof EndpointDiscoveryError
+      ? error.code
+      : message.includes("smoke test")
+        ? "model-smoke-test-failed"
+        : message.includes("recovery-required")
+          ? "configuration-recovery-required"
+          : /sandbox/i.test(message)
+            ? "sandbox-backend-unavailable"
+            : /model|authenticated/i.test(message)
+              ? "model-configuration-invalid"
+              : "configuration-save-failed";
+  const stage = code.includes("sandbox")
+    ? "execution-safety"
+    : code.includes("model")
+      ? "models"
+      : code.includes("recovery")
+        ? "recovery"
+        : "workspace";
   return {
     code,
     stage,
     recoverable: true,
     message,
     preserved: ["form input", "previous saved configuration"],
-    nextActions: code === "sandbox-backend-unavailable" ? ["use-strict", "doctor"] : ["review-current-step", "doctor"],
+    nextActions:
+      code === "sandbox-backend-unavailable"
+        ? ["use-strict", "doctor"]
+        : ["review-current-step", "doctor"],
   };
 }
 
 function redactSetupMessage(value: string): string {
   return value
-    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [redacted]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+/gi, "Bearer [redacted]")
     .replace(/\bsk-[A-Za-z0-9_-]+/gi, "[redacted]")
-    .replace(/\b(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+    .replace(
+      /\b(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[:=]\s*[^\s,;]+/gi,
+      "$1=[redacted]",
+    )
     .slice(0, 2_000);
 }
 
@@ -317,14 +358,29 @@ function normalizeProjectSubmission(value: unknown): ProjectSettingsSubmission {
       ? { adaptivePolicy: record.adaptivePolicy as ProjectSettingsSubmission["adaptivePolicy"] }
       : {}),
     ...(record.backgroundRolePolicy !== undefined
-      ? { backgroundRolePolicy: record.backgroundRolePolicy as ProjectSettingsSubmission["backgroundRolePolicy"] }
+      ? {
+          backgroundRolePolicy:
+            record.backgroundRolePolicy as ProjectSettingsSubmission["backgroundRolePolicy"],
+        }
       : {}),
-    ...(record.decisionMode !== undefined ? { decisionMode: record.decisionMode as ProjectSettingsSubmission["decisionMode"] } : {}),
-    ...(record.hostAssistance !== undefined ? { hostAssistance: record.hostAssistance as ProjectSettingsSubmission["hostAssistance"] } : {}),
-    ...(record.contextBudget !== undefined ? { contextBudget: record.contextBudget as ProjectSettingsSubmission["contextBudget"] } : {}),
-    ...(record.advisor !== undefined ? { advisor: record.advisor as ProjectSettingsSubmission["advisor"] } : {}),
-    ...(record.doctrine !== undefined ? { doctrine: record.doctrine as ProjectSettingsSubmission["doctrine"] } : {}),
-    ...(record.hostActions !== undefined ? { hostActions: record.hostActions as ProjectSettingsSubmission["hostActions"] } : {}),
+    ...(record.decisionMode !== undefined
+      ? { decisionMode: record.decisionMode as ProjectSettingsSubmission["decisionMode"] }
+      : {}),
+    ...(record.hostAssistance !== undefined
+      ? { hostAssistance: record.hostAssistance as ProjectSettingsSubmission["hostAssistance"] }
+      : {}),
+    ...(record.contextBudget !== undefined
+      ? { contextBudget: record.contextBudget as ProjectSettingsSubmission["contextBudget"] }
+      : {}),
+    ...(record.advisor !== undefined
+      ? { advisor: record.advisor as ProjectSettingsSubmission["advisor"] }
+      : {}),
+    ...(record.doctrine !== undefined
+      ? { doctrine: record.doctrine as ProjectSettingsSubmission["doctrine"] }
+      : {}),
+    ...(record.hostActions !== undefined
+      ? { hostActions: record.hostActions as ProjectSettingsSubmission["hostActions"] }
+      : {}),
   };
 }
 
@@ -334,29 +390,50 @@ function normalizeDiscoveryRequest(value: unknown): Omit<EndpointDiscoveryReques
 } {
   const record = objectRequest(value, "Discovery request");
   if (typeof record.baseUrl !== "string") throw new HttpError(400, "Server URL is required");
-  if (record.protocol !== "openai-chat-completions" && record.protocol !== "openai-responses" && record.protocol !== "anthropic-messages") {
+  if (
+    record.protocol !== "openai-chat-completions" &&
+    record.protocol !== "openai-responses" &&
+    record.protocol !== "anthropic-messages"
+  ) {
     throw new HttpError(400, "A supported API protocol is required");
   }
-  if ("apiKey" in record || "secret" in record) throw new HttpError(400, "Use a credential draft for discovery");
+  if ("apiKey" in record || "secret" in record)
+    throw new HttpError(400, "Use a credential draft for discovery");
   const provider = providerId(record.provider);
-  const reservedProviderIds = record.reservedProviderIds === undefined
-    ? []
-    : normalizeReservedProviderIds(record.reservedProviderIds);
+  const reservedProviderIds =
+    record.reservedProviderIds === undefined
+      ? []
+      : normalizeReservedProviderIds(record.reservedProviderIds);
   return {
     baseUrl: record.baseUrl,
     provider,
     protocol: record.protocol,
-    ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint ? { modelsEndpoint: record.modelsEndpoint } : {}),
-    ...(record.authMethod === "api-key" || record.authMethod === "none" || record.authMethod === "custom-header" ? { authMethod: record.authMethod } : {}),
-    ...(record.headerName === "authorization" || record.headerName === "x-api-key" || record.headerName === "api-key" ? { headerName: record.headerName } : {}),
-    ...(typeof record.credentialDraftId === "string" ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") } : {}),
+    ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint
+      ? { modelsEndpoint: record.modelsEndpoint }
+      : {}),
+    ...(record.authMethod === "api-key" ||
+    record.authMethod === "none" ||
+    record.authMethod === "custom-header"
+      ? { authMethod: record.authMethod }
+      : {}),
+    ...(record.headerName === "authorization" ||
+    record.headerName === "x-api-key" ||
+    record.headerName === "api-key"
+      ? { headerName: record.headerName }
+      : {}),
+    ...(typeof record.credentialDraftId === "string"
+      ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") }
+      : {}),
     ...(reservedProviderIds.length > 0 ? { reservedProviderIds } : {}),
   };
 }
 
 function normalizeReservedProviderIds(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > 512) {
-    throw new HttpError(400, "Reserved provider identifiers must be an array of at most 512 values");
+    throw new HttpError(
+      400,
+      "Reserved provider identifiers must be an array of at most 512 values",
+    );
   }
   const identifiers = value.map((entry) => {
     if (typeof entry !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(entry)) {
@@ -371,7 +448,13 @@ function normalizeBuiltInConnectionRequest(value: unknown): BuiltInProviderConne
   const record = objectRequest(value, "Connection request");
   const provider = providerId(record.provider);
   const authMethod = record.authMethod;
-  if (authMethod !== "api-key" && authMethod !== "oauth" && authMethod !== "ambient" && authMethod !== "none" && authMethod !== "custom-header") {
+  if (
+    authMethod !== "api-key" &&
+    authMethod !== "oauth" &&
+    authMethod !== "ambient" &&
+    authMethod !== "none" &&
+    authMethod !== "custom-header"
+  ) {
     throw new HttpError(400, "A supported authentication method is required");
   }
   const fields = stringFields(record.fields, "Provider fields");
@@ -379,11 +462,15 @@ function normalizeBuiltInConnectionRequest(value: unknown): BuiltInProviderConne
     provider,
     authMethod,
     fields,
-    ...(typeof record.credentialDraftId === "string" ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") } : {}),
+    ...(typeof record.credentialDraftId === "string"
+      ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") }
+      : {}),
   };
 }
 
-function normalizeCustomCredentialRequest(value: unknown): Parameters<typeof stageCustomProviderCredential>[2] {
+function normalizeCustomCredentialRequest(
+  value: unknown,
+): Parameters<typeof stageCustomProviderCredential>[2] {
   const record = objectRequest(value, "Custom credential request");
   const protocol = wireProtocol(record.protocol);
   const authMethod = record.authMethod;
@@ -394,19 +481,32 @@ function normalizeCustomCredentialRequest(value: unknown): Parameters<typeof sta
     baseUrl: requiredText(record.baseUrl, "Server URL"),
     protocol,
     authMethod,
-    ...(typeof record.secret === "string" ? { secret: boundedTextField(record.secret, "Credential", 16_384) } : {}),
-    ...(record.headerName === "authorization" || record.headerName === "x-api-key" || record.headerName === "api-key" ? { headerName: record.headerName } : {}),
-    ...(typeof record.existingProvider === "string" ? { existingProvider: providerId(record.existingProvider) } : {}),
+    ...(typeof record.secret === "string"
+      ? { secret: boundedTextField(record.secret, "Credential", 16_384) }
+      : {}),
+    ...(record.headerName === "authorization" ||
+    record.headerName === "x-api-key" ||
+    record.headerName === "api-key"
+      ? { headerName: record.headerName }
+      : {}),
+    ...(typeof record.existingProvider === "string"
+      ? { existingProvider: providerId(record.existingProvider) }
+      : {}),
   };
 }
 
-function normalizeManualProviderRequest(value: unknown): Parameters<typeof createManualCustomProvider>[1] {
+function normalizeManualProviderRequest(
+  value: unknown,
+): Parameters<typeof createManualCustomProvider>[1] {
   const record = objectRequest(value, "Manual provider request");
   const authMethod = record.authMethod;
   if (authMethod !== "api-key" && authMethod !== "none" && authMethod !== "custom-header") {
     throw new HttpError(400, "A supported custom authentication method is required");
   }
-  if (!Array.isArray(record.modelIds) || !record.modelIds.every((entry) => typeof entry === "string")) {
+  if (
+    !Array.isArray(record.modelIds) ||
+    !record.modelIds.every((entry) => typeof entry === "string")
+  ) {
     throw new HttpError(400, "Manual model identifiers must be a string array");
   }
   return {
@@ -414,10 +514,18 @@ function normalizeManualProviderRequest(value: unknown): Parameters<typeof creat
     protocol: wireProtocol(record.protocol),
     authMethod,
     modelIds: record.modelIds,
-    ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint ? { modelsEndpoint: record.modelsEndpoint } : {}),
+    ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint
+      ? { modelsEndpoint: record.modelsEndpoint }
+      : {}),
     ...(typeof record.name === "string" && record.name ? { name: record.name } : {}),
-    ...(record.headerName === "authorization" || record.headerName === "x-api-key" || record.headerName === "api-key" ? { headerName: record.headerName } : {}),
-    ...(typeof record.existingProvider === "string" ? { existingProvider: providerId(record.existingProvider) } : {}),
+    ...(record.headerName === "authorization" ||
+    record.headerName === "x-api-key" ||
+    record.headerName === "api-key"
+      ? { headerName: record.headerName }
+      : {}),
+    ...(typeof record.existingProvider === "string"
+      ? { existingProvider: providerId(record.existingProvider) }
+      : {}),
   };
 }
 
@@ -433,7 +541,8 @@ function normalizeVerificationRequest(value: unknown): {
     throw new HttpError(400, "Verification requires provider configuration and profiles");
   }
   const drafts = record.credentialDrafts;
-  if (drafts !== undefined && !Array.isArray(drafts)) throw new HttpError(400, "Credential drafts must be an array");
+  if (drafts !== undefined && !Array.isArray(drafts))
+    throw new HttpError(400, "Credential drafts must be an array");
   return {
     model: requiredText(record.model, "Model"),
     customProviders: record.customProviders as CustomProviderConfiguration[],
@@ -442,29 +551,49 @@ function normalizeVerificationRequest(value: unknown): {
   };
 }
 
-function normalizeOAuthStart(value: unknown): { provider: string; preferredMethod?: string | undefined } {
+function normalizeOAuthStart(value: unknown): {
+  provider: string;
+  preferredMethod?: string | undefined;
+} {
   const record = objectRequest(value, "OAuth start request");
   return {
     provider: providerId(record.provider),
-    ...(typeof record.preferredMethod === "string" && record.preferredMethod ? { preferredMethod: boundedTextField(record.preferredMethod, "OAuth method", 128) } : {}),
+    ...(typeof record.preferredMethod === "string" && record.preferredMethod
+      ? { preferredMethod: boundedTextField(record.preferredMethod, "OAuth method", 128) }
+      : {}),
   };
 }
 
-function normalizeOAuthPoll(value: unknown): { sessionId: string; afterRevision: number; waitTimeoutMs: number } {
+function normalizeOAuthPoll(value: unknown): {
+  sessionId: string;
+  afterRevision: number;
+  waitTimeoutMs: number;
+} {
   const record = objectRequest(value, "OAuth status request");
   return {
     sessionId: uuid(record.sessionId, "OAuth session"),
-    afterRevision: boundedInteger(record.afterRevision, "OAuth revision", 0, Number.MAX_SAFE_INTEGER),
+    afterRevision: boundedInteger(
+      record.afterRevision,
+      "OAuth revision",
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
     waitTimeoutMs: boundedInteger(record.waitTimeoutMs ?? 20_000, "OAuth wait timeout", 0, 25_000),
   };
 }
 
-function normalizeOAuthResponse(value: unknown): { sessionId: string; challengeId: string; value?: string | undefined } {
+function normalizeOAuthResponse(value: unknown): {
+  sessionId: string;
+  challengeId: string;
+  value?: string | undefined;
+} {
   const record = objectRequest(value, "OAuth response");
   return {
     sessionId: uuid(record.sessionId, "OAuth session"),
     challengeId: uuid(record.challengeId, "OAuth challenge"),
-    ...(typeof record.value === "string" ? { value: boundedTextField(record.value, "OAuth response", 16_384, true) } : {}),
+    ...(typeof record.value === "string"
+      ? { value: boundedTextField(record.value, "OAuth response", 16_384, true) }
+      : {}),
   };
 }
 
@@ -485,7 +614,8 @@ function objectRequest(value: unknown, label: string): Record<string, unknown> {
 
 function stringFields(value: unknown, label: string): Record<string, string> {
   const record = objectRequest(value, label);
-  if (Object.keys(record).length > 64) throw new HttpError(400, `${label} contains too many entries`);
+  if (Object.keys(record).length > 64)
+    throw new HttpError(400, `${label} contains too many entries`);
   const fields: Record<string, string> = {};
   for (const [key, raw] of Object.entries(record)) {
     if (typeof raw !== "string") throw new HttpError(400, `${label}.${key} must be text`);
@@ -502,14 +632,21 @@ function providerId(value: unknown): string {
 }
 
 function uuid(value: unknown, label: string): string {
-  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+  if (
+    typeof value !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  ) {
     throw new HttpError(400, `${label} identifier is invalid`);
   }
   return value;
 }
 
 function wireProtocol(value: unknown): EndpointDiscoveryRequest["protocol"] {
-  if (value !== "openai-chat-completions" && value !== "openai-responses" && value !== "anthropic-messages") {
+  if (
+    value !== "openai-chat-completions" &&
+    value !== "openai-responses" &&
+    value !== "anthropic-messages"
+  ) {
     throw new HttpError(400, "A supported API protocol is required");
   }
   return value;
@@ -520,7 +657,12 @@ function requiredText(value: unknown, label: string): string {
   return boundedTextField(value, label, 16_384);
 }
 
-function boundedTextField(value: string, label: string, maximum: number, allowEmpty = false): string {
+function boundedTextField(
+  value: string,
+  label: string,
+  maximum: number,
+  allowEmpty = false,
+): string {
   const normalized = value.trim();
   if (!allowEmpty && !normalized) throw new HttpError(400, `${label} is required`);
   if (value.length > maximum) throw new HttpError(400, `${label} is too long`);
@@ -543,7 +685,11 @@ function assertNoRawCredentials(value: unknown): void {
     }
     if (typeof current !== "object" || current === null) return;
     for (const [key, nested] of Object.entries(current as Record<string, unknown>)) {
-      if (forbidden.has(key.toLowerCase())) throw new HttpError(400, "Raw credentials are only accepted by the credential draft endpoint");
+      if (forbidden.has(key.toLowerCase()))
+        throw new HttpError(
+          400,
+          "Raw credentials are only accepted by the credential draft endpoint",
+        );
       visit(nested);
     }
   };
@@ -552,7 +698,8 @@ function assertNoRawCredentials(value: unknown): void {
 
 function isLoopbackRequest(request: IncomingMessage, origin: string): boolean {
   const remote = request.socket.remoteAddress;
-  if (remote !== LOOPBACK_HOST && remote !== `::ffff:${LOOPBACK_HOST}` && remote !== "::1") return false;
+  if (remote !== LOOPBACK_HOST && remote !== `::ffff:${LOOPBACK_HOST}` && remote !== "::1")
+    return false;
   if (!origin) return true;
   const expected = new URL(origin).host;
   return request.headers.host === expected;
@@ -571,9 +718,11 @@ function assertJsonRequest(request: IncomingMessage, origin: string): void {
     throw new HttpError(415, "JSON request required");
   }
   const requestOrigin = request.headers.origin;
-  if (requestOrigin && requestOrigin !== origin) throw new HttpError(403, "Cross-origin request rejected");
+  if (requestOrigin && requestOrigin !== origin)
+    throw new HttpError(403, "Cross-origin request rejected");
   const fetchSite = request.headers["sec-fetch-site"];
-  if (fetchSite && fetchSite !== "same-origin") throw new HttpError(403, "Cross-site request rejected");
+  if (fetchSite && fetchSite !== "same-origin")
+    throw new HttpError(403, "Cross-site request rejected");
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -612,7 +761,10 @@ function statusForError(error: unknown): number {
 }
 
 class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -624,7 +776,8 @@ async function closeServer(server: http.Server): Promise<void> {
 }
 
 function openSystemBrowser(url: string): void {
-  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+  const command =
+    process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
   const child = spawn(command, args, { detached: true, stdio: "ignore" });
   child.on("error", () => {});

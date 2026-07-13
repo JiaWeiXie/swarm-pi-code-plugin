@@ -91,7 +91,9 @@ export interface JobHumanDecisionRequiredEvent extends JobEventBase<"human-decis
   expiresAt: string;
 }
 
-export interface JobHostAssistanceResolvedEvent extends JobEventBase<"host-assistance-resolved" | "human-decision-resolved"> {
+export interface JobHostAssistanceResolvedEvent extends JobEventBase<
+  "host-assistance-resolved" | "human-decision-resolved"
+> {
   jobId: string;
   notificationId: string;
   requestId: string;
@@ -155,9 +157,14 @@ export function projectJobEvents(
 
     const notifications = job.notifications ?? [];
     const approvals = job.approvals ?? [];
-    const terminalNotification = notifications.find((notification) => notification.kind === "terminal");
-    const terminalPending = terminalNotification?.status === "pending" ||
-      (terminalNotification === undefined && job.notification === "pending" && isTerminalStatus(job.status));
+    const terminalNotification = notifications.find(
+      (notification) => notification.kind === "terminal",
+    );
+    const terminalPending =
+      terminalNotification?.status === "pending" ||
+      (terminalNotification === undefined &&
+        job.notification === "pending" &&
+        isTerminalStatus(job.status));
 
     if (terminalPending && isTerminalStatus(job.status)) {
       const notificationId = terminalNotification?.id ?? `terminal:${job.id}`;
@@ -180,15 +187,13 @@ export function projectJobEvents(
 
     for (const approval of approvals) {
       const notification = findApprovalNotification(notifications, approval);
-      const notificationPending = notification?.status === "pending" ||
+      const notificationPending =
+        notification?.status === "pending" ||
         (notification === undefined && approval.notification === "pending");
       const sortAt = time(approval.resolvedAt ?? approval.requestedAt);
 
       if (approval.status === "pending" && notificationPending) {
-        push(
-          approvalRequiredEvent(job, approval, emittedAt),
-          time(approval.requestedAt),
-        );
+        push(approvalRequiredEvent(job, approval, emittedAt), time(approval.requestedAt));
         continue;
       }
 
@@ -199,19 +204,27 @@ export function projectJobEvents(
       // For a live watcher, includeResolved + since surfaces resolutions whose
       // state transition happened after the watcher started, including the
       // new atomically-acknowledged approval flow.
-      const recentlyResolved = includeResolved &&
-        (since === undefined || sortAt >= since);
+      const recentlyResolved = includeResolved && (since === undefined || sortAt >= since);
       if (!notificationPending && !recentlyResolved) continue;
-      if (since !== undefined && notificationPending && sortAt < since && !includeResolved) continue;
+      if (since !== undefined && notificationPending && sortAt < since && !includeResolved)
+        continue;
 
       push(
-        approvalResolvedEvent(job, approval, notification?.id ?? approval.notificationId, emittedAt),
+        approvalResolvedEvent(
+          job,
+          approval,
+          notification?.id ?? approval.notificationId,
+          emittedAt,
+        ),
         sortAt,
       );
     }
 
     for (const request of job.hostAssistanceRequests ?? []) {
-      const notification = notifications.find((candidate) => candidate.hostRequestId === request.id || candidate.id === request.notificationId);
+      const notification = notifications.find(
+        (candidate) =>
+          candidate.hostRequestId === request.id || candidate.id === request.notificationId,
+      );
       const notificationPending = notification?.status === "pending";
       if (request.status === "pending" && notificationPending) {
         const base = {
@@ -233,11 +246,14 @@ export function projectJobEvents(
         if (request.kind === "decision") {
           push({ ...base, event: "human-decision-required" }, time(request.requestedAt));
         } else {
-          push({
-            ...base,
-            event: "host-assistance-required",
-            ...(request.contextClass ? { contextClass: request.contextClass } : {}),
-          }, time(request.requestedAt));
+          push(
+            {
+              ...base,
+              event: "host-assistance-required",
+              ...(request.contextClass ? { contextClass: request.contextClass } : {}),
+            },
+            time(request.requestedAt),
+          );
         }
         continue;
       }
@@ -245,19 +261,23 @@ export function projectJobEvents(
       const resolvedAt = time(request.resolvedAt);
       const recentlyResolved = includeResolved && (since === undefined || resolvedAt >= since);
       if (!notificationPending && !recentlyResolved) continue;
-      push({
-        schema: JOB_EVENT_SCHEMA,
-        version: JOB_EVENT_VERSION,
-        eventId: `host-resolved:${request.id}:${request.resolvedAt}`,
-        event: request.kind === "decision" ? "human-decision-resolved" : "host-assistance-resolved",
-        emittedAt,
-        jobId: job.id,
-        notificationId: request.notificationId,
-        requestId: request.id,
-        generation: request.generation,
-        status: request.status,
-        resolvedAt: request.resolvedAt,
-      }, resolvedAt);
+      push(
+        {
+          schema: JOB_EVENT_SCHEMA,
+          version: JOB_EVENT_VERSION,
+          eventId: `host-resolved:${request.id}:${request.resolvedAt}`,
+          event:
+            request.kind === "decision" ? "human-decision-resolved" : "host-assistance-resolved",
+          emittedAt,
+          jobId: job.id,
+          notificationId: request.notificationId,
+          requestId: request.id,
+          generation: request.generation,
+          status: request.status,
+          resolvedAt: request.resolvedAt,
+        },
+        resolvedAt,
+      );
     }
 
     if (includeProgress && !isTerminalStatus(job.status)) {
@@ -274,7 +294,9 @@ export function projectJobEvents(
             jobId: job.id,
             status: String(job.status),
             ...(job.phase ? { phase: job.phase } : {}),
-            ...(job.progressMessage ? { progressMessage: publicText(job.progressMessage, 500) } : {}),
+            ...(job.progressMessage
+              ? { progressMessage: publicText(job.progressMessage, 500) }
+              : {}),
             ...(job.updatedAt ? { updatedAt: job.updatedAt } : {}),
             ...(job.lastProgressAt ? { lastProgressAt: job.lastProgressAt } : {}),
           },
@@ -304,11 +326,24 @@ export function createJobEventSnapshot(
   const snapshotAt = iso(options.now ?? new Date());
   const events = projectJobEvents(state, { ...options, now: snapshotAt });
   const pendingCount = events.filter((event) => {
-    if (event.event === "approval-required" || event.event === "host-assistance-required" || event.event === "human-decision-required") return true;
-    if (event.event !== "approval-resolved" && event.event !== "host-assistance-resolved" && event.event !== "human-decision-resolved" && event.event !== "job-terminal") return false;
+    if (
+      event.event === "approval-required" ||
+      event.event === "host-assistance-required" ||
+      event.event === "human-decision-required"
+    )
+      return true;
+    if (
+      event.event !== "approval-resolved" &&
+      event.event !== "host-assistance-resolved" &&
+      event.event !== "human-decision-resolved" &&
+      event.event !== "job-terminal"
+    )
+      return false;
     const job = state.jobs.find((candidate) => candidate.id === event.jobId);
     const notificationId = "notificationId" in event ? event.notificationId : undefined;
-    const notification = notificationId ? job?.notifications?.find((candidate) => candidate.id === notificationId) : undefined;
+    const notification = notificationId
+      ? job?.notifications?.find((candidate) => candidate.id === notificationId)
+      : undefined;
     // Missing notification metadata is a legacy pending notification when the
     // event was projected from the Job-level pending marker.
     return notification?.status === "pending" || notification === undefined;
@@ -350,7 +385,11 @@ export function createWatchReadyEvent(
   };
 }
 
-function approvalRequiredEvent(job: JobRecord, approval: ApprovalRequest, emittedAt: string): JobApprovalRequiredEvent {
+function approvalRequiredEvent(
+  job: JobRecord,
+  approval: ApprovalRequest,
+  emittedAt: string,
+): JobApprovalRequiredEvent {
   const decision = approval.decision;
   return {
     schema: JOB_EVENT_SCHEMA,
@@ -366,7 +405,10 @@ function approvalRequiredEvent(job: JobRecord, approval: ApprovalRequest, emitte
     actionSummary: publicText(approval.actionSummary, 2_000),
     risk: safeRisk(decision),
     capabilities: safeCapabilities(decision),
-    reason: typeof decision.reason === "string" ? publicText(decision.reason, 2_000) : "Approval required.",
+    reason:
+      typeof decision.reason === "string"
+        ? publicText(decision.reason, 2_000)
+        : "Approval required.",
     requestedAt: approval.requestedAt,
     expiresAt: approval.expiresAt,
   };
@@ -394,7 +436,12 @@ function approvalResolvedEvent(
 }
 
 function resolvedStatus(approval: ApprovalRequest): JobApprovalResolvedEvent["status"] {
-  if (approval.status === "approved" || approval.status === "denied" || approval.status === "expired" || approval.status === "consumed") {
+  if (
+    approval.status === "approved" ||
+    approval.status === "denied" ||
+    approval.status === "expired" ||
+    approval.status === "consumed"
+  ) {
     return approval.status;
   }
   // This helper is only called after the projection has ruled out pending.
@@ -406,9 +453,10 @@ function findApprovalNotification(
   notifications: NonNullable<JobRecord["notifications"]>,
   approval: ApprovalRequest,
 ): NonNullable<JobRecord["notifications"]>[number] | undefined {
-  return notifications.find((notification) =>
-    notification.kind === "approval" &&
-    (notification.approvalId === approval.id || notification.id === approval.notificationId),
+  return notifications.find(
+    (notification) =>
+      notification.kind === "approval" &&
+      (notification.approvalId === approval.id || notification.id === approval.notificationId),
   );
 }
 
@@ -419,7 +467,10 @@ function isResolvedApproval(approval: ApprovalRequest): approval is ApprovalRequ
 }
 
 function safeRisk(decision: PolicyDecision): RiskLevel {
-  return decision.risk === "low" || decision.risk === "medium" || decision.risk === "high" || decision.risk === "critical"
+  return decision.risk === "low" ||
+    decision.risk === "medium" ||
+    decision.risk === "high" ||
+    decision.risk === "critical"
     ? decision.risk
     : "high";
 }
@@ -435,7 +486,9 @@ const CAPABILITIES = new Set<Capability>([
 
 function safeCapabilities(decision: PolicyDecision): Capability[] {
   return Array.isArray(decision.capabilities)
-    ? decision.capabilities.filter((capability): capability is Capability => CAPABILITIES.has(capability))
+    ? decision.capabilities.filter((capability): capability is Capability =>
+        CAPABILITIES.has(capability),
+      )
     : [];
 }
 
@@ -443,7 +496,7 @@ function safeCapabilities(decision: PolicyDecision): Capability[] {
 // value-level mask here so an otherwise allowlisted command cannot carry a
 // bearer token, provider key, JWT, or URL userinfo across the Host boundary.
 const EVENT_SECRET_PATTERNS: RegExp[] = [
-  /\bBearer\s+[A-Za-z0-9._~+\/-]+/gi,
+  /\bBearer\s+[A-Za-z0-9._~+/-]+/gi,
   /\bBasic\s+[A-Za-z0-9+/=]+/gi,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   /\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9-]+|AIza[0-9A-Za-z_-]{20,}|ya29\.[A-Za-z0-9._-]+|(?:AKIA|ASIA)[A-Z0-9]{16}|hf_[A-Za-z0-9]{20,}|pplx-[A-Za-z0-9-]{20,}|npm_[A-Za-z0-9]{20,}|lin_[A-Za-z0-9]{20,})\b/g,
@@ -461,14 +514,19 @@ function publicText(value: string, limit: number): string {
     output = output.replace(pattern, "[redacted]");
   }
   EVENT_URL_USERINFO.lastIndex = 0;
-  output = output.replace(EVENT_URL_USERINFO, (_match, protocol: string) => `${protocol}[redacted]@`);
+  output = output.replace(
+    EVENT_URL_USERINFO,
+    (_match, protocol: string) => `${protocol}[redacted]@`,
+  );
   EVENT_ABSOLUTE_PATH.lastIndex = 0;
   output = output.replace(EVENT_ABSOLUTE_PATH, "[path]");
   return output.slice(0, limit);
 }
 
 function isTerminalStatus(status: string): boolean {
-  return ["succeeded", "failed", "cancelled", "timed-out", "orphaned", "not-implemented"].includes(status);
+  return ["succeeded", "failed", "cancelled", "timed-out", "orphaned", "not-implemented"].includes(
+    status,
+  );
 }
 
 function iso(value: string | Date): string {

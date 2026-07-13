@@ -42,14 +42,22 @@ export const DEFAULT_BACKGROUND_ROLE_POLICY = {
 };
 export function defaultRoleForTask(kind) {
     switch (kind) {
-        case "ask": return "scout";
-        case "plan": return "planner";
-        case "review": return "reviewer";
-        case "orchestrate": return "analyst";
-        case "implement": return "executor";
-        case "scaffold": return "scaffolder";
-        case "setup": return "environment-engineer";
-        case "discover": return "analyst";
+        case "ask":
+            return "scout";
+        case "plan":
+            return "planner";
+        case "review":
+            return "reviewer";
+        case "orchestrate":
+            return "analyst";
+        case "implement":
+            return "executor";
+        case "scaffold":
+            return "scaffolder";
+        case "setup":
+            return "environment-engineer";
+        case "discover":
+            return "analyst";
     }
 }
 export function resolveRolePolicy(roleId, overrides = {}, globalModels = [], background = DEFAULT_BACKGROUND_ROLE_POLICY) {
@@ -138,7 +146,9 @@ export function policySnapshotHash(snapshot) {
         rolePolicy: snapshot.rolePolicy,
         ...(snapshot.escalationPolicy ? { escalationPolicy: snapshot.escalationPolicy } : {}),
         adaptivePolicy: snapshot.adaptivePolicy,
-        ...("effectiveProjectPolicy" in snapshot ? { effectiveProjectPolicy: snapshot.effectiveProjectPolicy } : {}),
+        ...("effectiveProjectPolicy" in snapshot
+            ? { effectiveProjectPolicy: snapshot.effectiveProjectPolicy }
+            : {}),
         ...("scopeHash" in snapshot ? { scopeHash: snapshot.scopeHash } : {}),
         ...("decisionMode" in snapshot ? { decisionMode: snapshot.decisionMode } : {}),
         ...("hostAssistance" in snapshot ? { hostAssistance: snapshot.hostAssistance } : {}),
@@ -171,34 +181,73 @@ export function assertPolicySnapshotValid(snapshot) {
     }
     if (candidate.hash !== policySnapshotHash(candidate))
         throw invalidSnapshot("Policy snapshot hash is invalid");
-    if (candidate.version === 3 && (!isDecisionMode(candidate.decisionMode) || !isHostAssistancePolicy(candidate.hostAssistance) || !isAdvisorPolicy(candidate.advisor)
-        || !Number.isInteger(candidate.contextBudget) || candidate.contextBudget < 0 || candidate.contextBudget > 64
-        || (candidate.doctrine !== undefined && candidate.doctrine !== "first-principles-qds-v1"))) {
+    if (candidate.version === 3 &&
+        (!isDecisionMode(candidate.decisionMode) ||
+            !isHostAssistancePolicy(candidate.hostAssistance) ||
+            !isAdvisorPolicy(candidate.advisor) ||
+            !Number.isInteger(candidate.contextBudget) ||
+            candidate.contextBudget < 0 ||
+            candidate.contextBudget > 64 ||
+            (candidate.doctrine !== undefined && candidate.doctrine !== "first-principles-qds-v1"))) {
         throw invalidSnapshot("Policy snapshot v3 controls are malformed");
     }
 }
 export function defaultHostAssistancePolicy() {
-    return { enabled: true, mode: "on", contextClasses: ["workspace", "web", "docs", "paper", "connector", "skill"], privateConnector: "ask", maxRequests: 4, maxFanOut: 2 };
+    return {
+        enabled: true,
+        mode: "on",
+        contextClasses: ["workspace", "web", "docs", "paper", "connector", "skill"],
+        privateConnector: "ask",
+        maxRequests: 4,
+        maxFanOut: 2,
+    };
 }
 export function defaultAdvisorPolicy() {
-    return { enabled: false, targets: ["discover", "plan", "review", "orchestrate"], maxRequests: 2, maxPerspectives: 3 };
+    return {
+        enabled: false,
+        targets: ["discover", "plan", "review", "orchestrate"],
+        maxRequests: 2,
+        maxPerspectives: 3,
+    };
 }
 function isDecisionMode(value) {
     return value === "cost" || value === "balance" || value === "power";
 }
 function isHostAssistancePolicy(value) {
-    return isRecord(value) && typeof value.enabled === "boolean" && ["inherit", "on", "off"].includes(value.mode)
-        && (value.mode !== "off" || value.enabled === false)
-        && Array.isArray(value.contextClasses) && value.contextClasses.every((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item))
-        && (value.privateConnector === "ask" || value.privateConnector === "deny")
-        && Number.isInteger(value.maxRequests) && value.maxRequests >= 0 && value.maxRequests <= MAX_HOST_ASSISTANCE_REQUESTS
-        && Number.isInteger(value.maxFanOut) && value.maxFanOut >= 0 && value.maxFanOut <= MAX_HOST_ASSISTANCE_FAN_OUT;
+    return (isRecord(value) &&
+        typeof value.enabled === "boolean" &&
+        ["inherit", "on", "off"].includes(value.mode) &&
+        (value.mode !== "off" || value.enabled === false) &&
+        Array.isArray(value.contextClasses) &&
+        value.contextClasses.every((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item)) &&
+        (value.privateConnector === "ask" || value.privateConnector === "deny") &&
+        Number.isInteger(value.maxRequests) &&
+        value.maxRequests >= 0 &&
+        value.maxRequests <= MAX_HOST_ASSISTANCE_REQUESTS &&
+        Number.isInteger(value.maxFanOut) &&
+        value.maxFanOut >= 0 &&
+        value.maxFanOut <= MAX_HOST_ASSISTANCE_FAN_OUT);
 }
 function isAdvisorPolicy(value) {
-    return isRecord(value) && typeof value.enabled === "boolean" && Array.isArray(value.targets)
-        && value.targets.every((item) => ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"].includes(item))
-        && Number.isInteger(value.maxRequests) && value.maxRequests >= 0 && value.maxRequests <= MAX_ADVISOR_REQUESTS
-        && Number.isInteger(value.maxPerspectives) && value.maxPerspectives >= 0 && value.maxPerspectives <= MAX_ADVISOR_PERSPECTIVES;
+    return (isRecord(value) &&
+        typeof value.enabled === "boolean" &&
+        Array.isArray(value.targets) &&
+        value.targets.every((item) => [
+            "ask",
+            "review",
+            "plan",
+            "implement",
+            "orchestrate",
+            "scaffold",
+            "setup",
+            "discover",
+        ].includes(item)) &&
+        Number.isInteger(value.maxRequests) &&
+        value.maxRequests >= 0 &&
+        value.maxRequests <= MAX_ADVISOR_REQUESTS &&
+        Number.isInteger(value.maxPerspectives) &&
+        value.maxPerspectives >= 0 &&
+        value.maxPerspectives <= MAX_ADVISOR_PERSPECTIVES);
 }
 function isEffectiveProjectPolicyShape(input) {
     if (!isRecord(input))
@@ -208,24 +257,29 @@ function isEffectiveProjectPolicyShape(input) {
     if (!isRecord(value.roots))
         return false;
     const roots = value.roots;
-    return value.version === 1
-        && value.workspaceRoot === "."
-        && Array.isArray(value.allowedTaskKinds)
-        && value.allowedTaskKinds.every((kind) => typeof kind === "string")
-        && operations.every((operation) => Array.isArray(roots[operation])
-            && roots[operation].every((root) => isCanonicalPolicyRoot(root)))
-        && Array.isArray(value.repositoryDenyRules)
-        && typeof value.scopeHash === "string"
-        && typeof value.hash === "string";
+    return (value.version === 1 &&
+        value.workspaceRoot === "." &&
+        Array.isArray(value.allowedTaskKinds) &&
+        value.allowedTaskKinds.every((kind) => typeof kind === "string") &&
+        operations.every((operation) => Array.isArray(roots[operation]) &&
+            roots[operation].every((root) => isCanonicalPolicyRoot(root))) &&
+        Array.isArray(value.repositoryDenyRules) &&
+        typeof value.scopeHash === "string" &&
+        typeof value.hash === "string");
 }
 function isCanonicalPolicyRoot(value) {
     if (value === ".")
         return true;
-    if (typeof value !== "string" || value.length === 0 || value.includes("\\") || value.includes("\0"))
+    if (typeof value !== "string" ||
+        value.length === 0 ||
+        value.includes("\\") ||
+        value.includes("\0"))
         return false;
     if (value.startsWith("/") || /^[A-Za-z]:/.test(value))
         return false;
-    return value.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
+    return value
+        .split("/")
+        .every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
 }
 function isRecord(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -255,18 +309,39 @@ export function listDefaultRoles() {
     return Object.keys(DEFAULT_ROLES).map((id) => structuredClone(DEFAULT_ROLES[id]));
 }
 export function isWorkerRole(value) {
-    return ["scout", "planner", "reviewer", "analyst", "mechanical-executor", "executor", "security-executor",
-        "project-architect", "scaffolder", "environment-engineer", "experimenter"]
-        .includes(value);
+    return [
+        "scout",
+        "planner",
+        "reviewer",
+        "analyst",
+        "mechanical-executor",
+        "executor",
+        "security-executor",
+        "project-architect",
+        "scaffolder",
+        "environment-engineer",
+        "experimenter",
+    ].includes(value);
 }
 export function isThinkingLevel(value) {
     return ["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value);
 }
 function role(id, taskKinds, executionModes, capabilities, thinkingLevel, verification) {
-    return { role: id, taskKinds, executionModes, capabilities, thinkingLevel, models: [], maxAttempts: 2, verification };
+    return {
+        role: id,
+        taskKinds,
+        executionModes,
+        capabilities,
+        thinkingLevel,
+        models: [],
+        maxAttempts: 2,
+        verification,
+    };
 }
 function strings(value) {
-    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+    return Array.isArray(value)
+        ? value.filter((item) => typeof item === "string")
+        : [];
 }
 function thinking(value, fallback) {
     return typeof value === "string" && isThinkingLevel(value) ? value : fallback;

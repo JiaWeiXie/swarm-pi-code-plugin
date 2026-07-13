@@ -30,8 +30,13 @@ export class PiPolicyClassifier implements PolicyClassifier {
     this.options = options;
   }
 
-  async classify(action: PolicyAction, snapshot: PolicySnapshot, signal?: AbortSignal): Promise<PolicyDecision> {
-    if (this.options.models.length === 0) throw new Error("No configured classifier model is available");
+  async classify(
+    action: PolicyAction,
+    snapshot: PolicySnapshot,
+    signal?: AbortSignal,
+  ): Promise<PolicyDecision> {
+    if (this.options.models.length === 0)
+      throw new Error("No configured classifier model is available");
     let lastError = "Classifier did not return a decision";
     for (const model of this.options.models) {
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -116,9 +121,11 @@ function classifierPrompt(action: PolicyAction, snapshot: PolicySnapshot, repair
     `Path: ${action.path ?? ""}`,
     `Network: ${action.domain ? `${action.domain}:${action.port ?? ""}` : ""}`,
     `Input: ${actionInput}`,
-    "Schema: {\"decision\":\"allow|deny|require-approval\",\"risk\":\"low|medium|high|critical\",\"capabilities\":[],\"reason\":\"...\",\"constraints\":[],\"policyHash\":\"...\"}",
+    'Schema: {"decision":"allow|deny|require-approval","risk":"low|medium|high|critical","capabilities":[],"reason":"...","constraints":[],"policyHash":"..."}',
     "Use require-approval for high-risk but bounded actions. Use deny for critical, ambiguous privilege expansion, or policy violations.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function parseDecision(output: string, snapshot: PolicySnapshot, model: string): PolicyDecision {
@@ -126,15 +133,22 @@ function parseDecision(output: string, snapshot: PolicySnapshot, model: string):
   const end = output.lastIndexOf("}");
   if (start < 0 || end < start) throw new Error("Classifier did not return JSON");
   const value = JSON.parse(output.slice(start, end + 1)) as Record<string, unknown>;
-  if (typeof value.decision !== "string" || typeof value.risk !== "string" ||
-      typeof value.reason !== "string" || value.policyHash !== snapshot.hash ||
-      !Array.isArray(value.capabilities) || !Array.isArray(value.constraints)) {
+  if (
+    typeof value.decision !== "string" ||
+    typeof value.risk !== "string" ||
+    typeof value.reason !== "string" ||
+    value.policyHash !== snapshot.hash ||
+    !Array.isArray(value.capabilities) ||
+    !Array.isArray(value.constraints)
+  ) {
     throw new Error("Classifier JSON does not match the decision schema");
   }
   return {
     decision: value.decision as PolicyDecision["decision"],
     risk: value.risk as PolicyDecision["risk"],
-    capabilities: value.capabilities.filter((item): item is PolicyDecision["capabilities"][number] => typeof item === "string") as never,
+    capabilities: value.capabilities.filter(
+      (item): item is PolicyDecision["capabilities"][number] => typeof item === "string",
+    ) as never,
     reason: value.reason,
     constraints: value.constraints.filter((item): item is string => typeof item === "string"),
     policyHash: snapshot.hash,
@@ -144,9 +158,14 @@ function parseDecision(output: string, snapshot: PolicySnapshot, model: string):
 
 function redact(value: unknown): unknown {
   if (Array.isArray(value)) return value.slice(0, 50).map(redact);
-  if (!value || typeof value !== "object") return typeof value === "string" ? value.slice(0, 4_000) : value;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-    key,
-    /(token|secret|password|api.?key|authorization|cookie)/i.test(key) ? "[redacted]" : redact(item),
-  ]));
+  if (!value || typeof value !== "object")
+    return typeof value === "string" ? value.slice(0, 4_000) : value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      /(token|secret|password|api.?key|authorization|cookie)/i.test(key)
+        ? "[redacted]"
+        : redact(item),
+    ]),
+  );
 }

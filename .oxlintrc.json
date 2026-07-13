@@ -1,0 +1,11 @@
+{
+  "categories": {
+    "correctness": "error"
+  },
+  "ignorePatterns": [
+    "node_modules/**",
+    "dist/**",
+    ".test-dist/**",
+    "plugins/**/runtime/**"
+  ]
+}

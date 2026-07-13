@@ -1,4 +1,0 @@
-interface:
-  display_name: "Swarm Pi Code Plugin Scaffold"
-  short_description: "Create a verified project with Pi"
-  default_prompt: "Use $swarm-pi-code-plugin-scaffold to design and create this project."

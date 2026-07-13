@@ -15,9 +15,14 @@ function json(value: unknown, status = 200): Response {
   });
 }
 
-function mockedFetch(handler: (url: URL, init: RequestInit) => Response | Promise<Response>): typeof fetch {
+function mockedFetch(
+  handler: (url: URL, init: RequestInit) => Response | Promise<Response>,
+): typeof fetch {
   return (async (input: URL | RequestInfo, init: RequestInit = {}) =>
-    handler(new URL(input instanceof Request ? input.url : input.toString()), init)) as typeof fetch;
+    handler(
+      new URL(input instanceof Request ? input.url : input.toString()),
+      init,
+    )) as typeof fetch;
 }
 
 const catalogModel = {
@@ -84,16 +89,18 @@ test("Anthropic discovery keeps endpoint-reported capabilities and limits", asyn
     if (url.pathname === "/v1/models") {
       assert.equal(new Headers(init.headers).get("x-api-key"), "anthropic-key");
       return json({
-        data: [{
-          id: "claude-test",
-          display_name: "Claude Test",
-          max_input_tokens: 180_000,
-          max_tokens: 12_000,
-          capabilities: {
-            thinking: { supported: true },
-            image_input: { supported: true },
+        data: [
+          {
+            id: "claude-test",
+            display_name: "Claude Test",
+            max_input_tokens: 180_000,
+            max_tokens: 12_000,
+            capabilities: {
+              thinking: { supported: true },
+              image_input: { supported: true },
+            },
           },
-        }],
+        ],
       });
     }
     return json({}, 404);
@@ -144,34 +151,38 @@ test("Ollama discovery uses native model details without requiring an API key", 
 
 test("endpoint discovery reports actionable security and connection failures", async () => {
   await assert.rejects(
-    () => discoverEndpoint({
-      baseUrl: "http://169.254.169.254/latest",
-      protocol: "openai-chat-completions",
-    }),
+    () =>
+      discoverEndpoint({
+        baseUrl: "http://169.254.169.254/latest",
+        protocol: "openai-chat-completions",
+      }),
     (error: unknown) => error instanceof EndpointDiscoveryError && error.code === "invalid-url",
   );
 
   const unauthorized = mockedFetch(() => json({ error: "invalid key" }, 401));
   await assert.rejects(
-    () => discoverEndpoint(
-      {
-        baseUrl: "https://models.example.test",
-        protocol: "openai-chat-completions",
-        apiKey: "wrong",
-      },
-      [],
-      { fetchImpl: unauthorized },
-    ),
+    () =>
+      discoverEndpoint(
+        {
+          baseUrl: "https://models.example.test",
+          protocol: "openai-chat-completions",
+          apiKey: "wrong",
+        },
+        [],
+        { fetchImpl: unauthorized },
+      ),
     (error: unknown) => error instanceof EndpointDiscoveryError && error.code === "authentication",
   );
 
   const malformed = mockedFetch(() => new Response("not-json", { status: 200 }));
   await assert.rejects(
-    () => discoverEndpoint(
-      { baseUrl: "https://models.example.test", protocol: "openai-responses" },
-      [],
-      { fetchImpl: malformed },
-    ),
-    (error: unknown) => error instanceof EndpointDiscoveryError && error.code === "malformed-response",
+    () =>
+      discoverEndpoint(
+        { baseUrl: "https://models.example.test", protocol: "openai-responses" },
+        [],
+        { fetchImpl: malformed },
+      ),
+    (error: unknown) =>
+      error instanceof EndpointDiscoveryError && error.code === "malformed-response",
   );
 });

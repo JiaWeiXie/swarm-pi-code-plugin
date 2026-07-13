@@ -92,6 +92,8 @@ Run the checks that match the changed surface:
 
 ```bash
 npm run check
+npm run lint
+npm run fmt:check
 claude plugin validate plugins/swarm-pi-code-plugin
 ```
 

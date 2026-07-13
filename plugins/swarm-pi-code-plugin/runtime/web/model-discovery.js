@@ -49,7 +49,9 @@ export async function discoverEndpoint(request, catalogModels = [], options = {}
         timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxResponseBytes: options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
     };
-    const result = await (request.protocol === "anthropic-messages" ? probeAnthropic(context) : probeOpenAi(context));
+    const result = await (request.protocol === "anthropic-messages"
+        ? probeAnthropic(context)
+        : probeOpenAi(context));
     const id = stableCustomProviderId(normalizedRoot, request.protocol);
     const secretHeader = authMethod === "custom-header" && request.headerName
         ? [{ name: request.headerName, secretRef: providerHeaderSecretRef(id, request.headerName) }]
@@ -76,11 +78,7 @@ export async function discoverEndpoint(request, catalogModels = [], options = {}
     };
 }
 export async function discoverLocalEndpoints(catalogModels = [], options = {}) {
-    const candidates = [
-        "http://127.0.0.1:11434",
-        "http://127.0.0.1:1234",
-        "http://127.0.0.1:1337",
-    ];
+    const candidates = ["http://127.0.0.1:11434", "http://127.0.0.1:1234", "http://127.0.0.1:1337"];
     const results = await Promise.allSettled(candidates.map((baseUrl) => discoverLocalEndpoint(baseUrl, catalogModels, {
         ...options,
         timeoutMs: Math.min(options.timeoutMs ?? 1_200, 1_200),
@@ -146,13 +144,15 @@ async function probeLmStudio(context) {
                 return [];
             const capabilities = objectField(entry, "capabilities");
             const contextWindow = positiveIntegerField(entry, "max_context_length");
-            return [model({
+            return [
+                model({
                     id,
                     name: stringField(entry, "display_name") ?? id,
                     reasoning: Boolean(objectField(capabilities, "reasoning")),
                     input: booleanField(capabilities, "vision") ? ["text", "image"] : ["text"],
                     contextWindow,
-                })];
+                }),
+            ];
         }),
     };
 }
@@ -224,7 +224,8 @@ async function probeAnthropic(context) {
             if (!id)
                 return [];
             const capabilities = objectField(entry, "capabilities");
-            return [model({
+            return [
+                model({
                     id,
                     name: stringField(entry, "display_name") ?? id,
                     reasoning: booleanField(objectField(capabilities, "thinking"), "supported"),
@@ -233,41 +234,8 @@ async function probeAnthropic(context) {
                         : ["text"],
                     contextWindow: positiveIntegerField(entry, "max_input_tokens"),
                     maxTokens: positiveIntegerField(entry, "max_tokens"),
-                })];
-        }),
-    };
-}
-async function probeGemini(context) {
-    const url = versionedEndpoint(context.base, "v1beta", "models");
-    const headers = context.apiKey ? { "x-goog-api-key": context.apiKey } : {};
-    const payload = await requestJson(context, url, headers);
-    const entries = arrayField(payload, "models");
-    if (!entries.some((entry) => stringField(entry, "name")?.startsWith("models/")))
-        throw unsupported();
-    return {
-        adapter: "gemini",
-        id: context.base.hostname === "generativelanguage.googleapis.com" ? "google" : slug(context.base.hostname),
-        name: context.base.hostname === "generativelanguage.googleapis.com" ? "Google Gemini" : displayHost(context.base),
-        baseUrl: apiRoot(context.base, "v1beta"),
-        api: "google-generative-ai",
-        authHeader: false,
-        preferredProvider: "google",
-        models: entries.slice(0, MAX_DISCOVERED_MODELS).flatMap((entry) => {
-            const rawId = stringField(entry, "name");
-            if (!rawId)
-                return [];
-            const methods = arrayField(entry, "supportedGenerationMethods");
-            if (methods.length > 0 && !methods.includes("generateContent"))
-                return [];
-            const id = rawId.replace(/^models\//, "");
-            return [model({
-                    id,
-                    name: stringField(entry, "displayName") ?? id,
-                    reasoning: id.includes("thinking"),
-                    input: ["text", "image"],
-                    contextWindow: positiveIntegerField(entry, "inputTokenLimit"),
-                    maxTokens: positiveIntegerField(entry, "outputTokenLimit"),
-                })];
+                }),
+            ];
         }),
     };
 }
@@ -299,14 +267,16 @@ async function probeOpenAi(context) {
             const modalities = arrayField(architecture, "input_modalities");
             const parameters = arrayField(entry, "supported_parameters");
             const topProvider = objectField(entry, "top_provider");
-            return [model({
+            return [
+                model({
                     id,
                     name: stringField(entry, "name") ?? id,
                     reasoning: parameters.includes("reasoning") || parameters.includes("include_reasoning"),
                     input: modalities.includes("image") ? ["text", "image"] : ["text"],
                     contextWindow: positiveIntegerField(entry, "context_length"),
                     maxTokens: positiveIntegerField(topProvider, "max_completion_tokens"),
-                })];
+                }),
+            ];
         }),
     };
 }
@@ -326,32 +296,44 @@ function enrichModels(models, catalogModels, preferredProvider) {
                 : ["text", "image"],
             ...(contextWindow ? { contextWindow } : {}),
             ...(maxTokens ? { maxTokens } : {}),
-            ...((contextWindow || maxTokens) ? {
-                metadata: {
-                    ...(contextWindow ? {
-                        contextWindow: entry.contextWindow ? "endpoint" : "pi-catalog",
-                    } : {}),
-                    ...(maxTokens ? {
-                        maxTokens: entry.maxTokens ? "endpoint" : "pi-catalog",
-                    } : {}),
-                },
-            } : {}),
+            ...(contextWindow || maxTokens
+                ? {
+                    metadata: {
+                        ...(contextWindow
+                            ? {
+                                contextWindow: entry.contextWindow
+                                    ? "endpoint"
+                                    : "pi-catalog",
+                            }
+                            : {}),
+                        ...(maxTokens
+                            ? {
+                                maxTokens: entry.maxTokens ? "endpoint" : "pi-catalog",
+                            }
+                            : {}),
+                    },
+                }
+                : {}),
         };
     });
 }
 function consensus(models, field) {
-    const values = [...new Set(models.map((entry) => entry[field]).filter((value) => Number.isInteger(value)))];
+    const values = [
+        ...new Set(models.map((entry) => entry[field]).filter((value) => Number.isInteger(value))),
+    ];
     return values.length === 1 ? values[0] : undefined;
 }
 function model(value) {
     return {
         ...value,
-        ...(value.contextWindow || value.maxTokens ? {
-            metadata: {
-                ...(value.contextWindow ? { contextWindow: "endpoint" } : {}),
-                ...(value.maxTokens ? { maxTokens: "endpoint" } : {}),
-            },
-        } : {}),
+        ...(value.contextWindow || value.maxTokens
+            ? {
+                metadata: {
+                    ...(value.contextWindow ? { contextWindow: "endpoint" } : {}),
+                    ...(value.maxTokens ? { maxTokens: "endpoint" } : {}),
+                },
+            }
+            : {}),
     };
 }
 async function requestJson(context, url, headers, init = {}) {
@@ -504,22 +486,19 @@ function bestDiscoveryError(errors) {
     }
     return unsupported();
 }
-function uniqueProviderId(base, reserved) {
-    const ids = new Set(reserved);
-    if (!ids.has(base))
-        return base;
-    let suffix = 2;
-    while (ids.has(`${base}-${suffix}`))
-        suffix++;
-    return `${base}-${suffix}`;
-}
 function slug(value) {
-    const normalized = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+    const normalized = value
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, "-")
+        .replace(/^-+|-+$/g, "");
     return (normalized || "custom-endpoint").slice(0, 64);
 }
 function displayHost(url) {
     return url.port ? `${url.hostname}:${url.port}` : url.hostname;
 }
 function isLoopback(hostname) {
-    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]";
+    return (hostname === "127.0.0.1" ||
+        hostname === "localhost" ||
+        hostname === "::1" ||
+        hostname === "[::1]");
 }

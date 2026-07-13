@@ -10,7 +10,9 @@ export interface SpawnBackgroundWorkerOptions {
   workerToken: string;
 }
 
-export async function spawnBackgroundWorker(options: SpawnBackgroundWorkerOptions): Promise<number> {
+export async function spawnBackgroundWorker(
+  options: SpawnBackgroundWorkerOptions,
+): Promise<number> {
   const runner = process.argv[1];
   if (!runner) throw new Error("Cannot resolve the Pi runner entry point for background execution");
   const directory = await jobDirectory(options.cwd, options.jobId);

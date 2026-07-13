@@ -2,10 +2,23 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 const CAPABILITIES = new Set([
-    "filesystem.read-workspace", "filesystem.write-workspace", "filesystem.write-temp",
-    "git.read", "shell.execute", "network.connect",
+    "filesystem.read-workspace",
+    "filesystem.write-workspace",
+    "filesystem.write-temp",
+    "git.read",
+    "shell.execute",
+    "network.connect",
 ]);
-const TASK_KINDS = ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"];
+const TASK_KINDS = [
+    "ask",
+    "review",
+    "plan",
+    "implement",
+    "orchestrate",
+    "scaffold",
+    "setup",
+    "discover",
+];
 const OPERATIONS = ["read", "search", "write", "shell"];
 const TASK_ALIASES = {
     implementation: ["implement"],
@@ -88,7 +101,8 @@ export async function assertPathAllowed(policy, operation, candidate) {
     catch {
         throw rejection("project-scope-violation", "preflight", `Path could not be resolved within an allowed ${operation} root: ${candidate}`, policy.effective, [candidate]);
     }
-    if (!isInside(policy.executionRoot, canonical) || !policy.roots[operation].some((root) => isInside(root, canonical))) {
+    if (!isInside(policy.executionRoot, canonical) ||
+        !policy.roots[operation].some((root) => isInside(root, canonical))) {
         throw rejection("project-scope-violation", "preflight", `Path escapes an allowed ${operation} root: ${candidate}`, policy.effective, [candidate]);
     }
     return canonical;
@@ -132,13 +146,17 @@ function normalizeDenyRule(value, index) {
         effect: "deny",
         capability: rule.capability,
         ...(stringArray(rule.roles) ? { roles: stringArray(rule.roles) } : {}),
-        ...(stringArray(rule.taskKinds) ? { taskKinds: stringArray(rule.taskKinds) } : {}),
+        ...(stringArray(rule.taskKinds)
+            ? { taskKinds: stringArray(rule.taskKinds) }
+            : {}),
         ...(typeof rule.pathPrefix === "string" ? { pathPrefix: rule.pathPrefix } : {}),
         ...(typeof rule.domain === "string" ? { domain: rule.domain } : {}),
     };
 }
 function stringArray(value) {
-    return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
+    return Array.isArray(value) && value.every((item) => typeof item === "string")
+        ? value
+        : undefined;
 }
 function normalizeTaskKinds(tasks) {
     if (!tasks)
@@ -157,7 +175,8 @@ function normalizeTaskKinds(tasks) {
 function normalizeRoots(dirs) {
     if (dirs === undefined)
         return ["."];
-    const roots = dirs.map((dir) => {
+    const roots = dirs
+        .map((dir) => {
         if (typeof dir !== "string" || dir.includes("\0") || dir.includes("\\"))
             throw invalidRoot("contains an invalid value");
         const normalized = dir.replace(/\/+$/, "");
@@ -169,8 +188,11 @@ function normalizeRoots(dirs) {
         if (segments.some((segment) => segment === ".") && normalized !== ".")
             throw invalidRoot(`'${dir}' contains an invalid dot segment`);
         return normalized;
-    }).sort();
-    return roots.filter((root, index) => !roots.slice(0, index).some((parent) => parent === root || parent === "." || root.startsWith(`${parent}/`)));
+    })
+        .sort();
+    return roots.filter((root, index) => !roots
+        .slice(0, index)
+        .some((parent) => parent === root || parent === "." || root.startsWith(`${parent}/`)));
 }
 function operationRoots(roots) {
     return { read: [...roots], search: [...roots], write: [...roots], shell: [...roots] };
@@ -206,28 +228,46 @@ async function canonicalPath(candidate) {
 }
 function isInside(root, candidate) {
     const relative = path.relative(root, candidate);
-    return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+    return (relative === "" ||
+        (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)));
 }
 function compareCodePoints(a, b) {
     return a < b ? -1 : a > b ? 1 : 0;
 }
 function canonicalRules(rules) {
-    return rules.map((rule) => canonicalValue(rule)).sort((a, b) => compareCodePoints(JSON.stringify(a), JSON.stringify(b)));
+    return rules
+        .map((rule) => canonicalValue(rule))
+        .sort((a, b) => compareCodePoints(JSON.stringify(a), JSON.stringify(b)));
 }
 function canonicalValue(value) {
     if (Array.isArray(value))
-        return value.map(canonicalValue).sort((a, b) => compareCodePoints(JSON.stringify(a), JSON.stringify(b)));
+        return value
+            .map(canonicalValue)
+            .sort((a, b) => compareCodePoints(JSON.stringify(a), JSON.stringify(b)));
     if (value && typeof value === "object")
-        return Object.fromEntries(Object.entries(value).sort(([a], [b]) => compareCodePoints(a, b)).map(([key, item]) => [key, canonicalValue(item)]));
+        return Object.fromEntries(Object.entries(value)
+            .sort(([a], [b]) => compareCodePoints(a, b))
+            .map(([key, item]) => [key, canonicalValue(item)]));
     return value;
 }
 function hash(value) {
-    return createHash("sha256").update(JSON.stringify(canonicalValue(value))).digest("hex");
+    return createHash("sha256")
+        .update(JSON.stringify(canonicalValue(value)))
+        .digest("hex");
 }
 function validatePolicy(policy) {
-    const expectedScope = hash({ allowedTaskKinds: [...policy.allowedTaskKinds].sort(), roots: canonicalValue(policy.roots) });
-    const expectedHash = hash({ scopeHash: expectedScope, repositoryDenyRules: canonicalRules(policy.repositoryDenyRules) });
-    if (policy.version !== 1 || policy.workspaceRoot !== "." || expectedScope !== policy.scopeHash || expectedHash !== policy.hash) {
+    const expectedScope = hash({
+        allowedTaskKinds: [...policy.allowedTaskKinds].sort(),
+        roots: canonicalValue(policy.roots),
+    });
+    const expectedHash = hash({
+        scopeHash: expectedScope,
+        repositoryDenyRules: canonicalRules(policy.repositoryDenyRules),
+    });
+    if (policy.version !== 1 ||
+        policy.workspaceRoot !== "." ||
+        expectedScope !== policy.scopeHash ||
+        expectedHash !== policy.hash) {
         throw rejection("policy-snapshot-invalid", "materialization", "Project policy snapshot is invalid", policy);
     }
 }
@@ -236,7 +276,12 @@ function invalidRoot(message) {
 }
 function rejection(errorCode, stage, message, policy, violatingPaths) {
     return new ProjectPolicyError({
-        event: "policy-rejected", errorCode, stage, recoverable: false, message, preserved: [],
+        event: "policy-rejected",
+        errorCode,
+        stage,
+        recoverable: false,
+        message,
+        preserved: [],
         nextActions: [{ action: "review-project-policy", label: "Review project policy" }],
         ...(policy ? { policyHash: policy.hash, scopeHash: policy.scopeHash } : {}),
         ...(violatingPaths?.length ? { violatingPaths } : {}),

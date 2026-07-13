@@ -3,10 +3,7 @@ import test from "node:test";
 
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
-import {
-  CredentialDraftVault,
-  OAuthSessionManager,
-} from "../src/providers/credentials.js";
+import { CredentialDraftVault, OAuthSessionManager } from "../src/providers/credentials.js";
 import { customProviderHeaderVariable } from "../src/pi/environment.js";
 
 test("credential drafts expose only opaque metadata", () => {
@@ -87,16 +84,14 @@ test("OAuth prompts use revision-fenced responses and cancellation", async () =>
     },
   });
   const started = manager.start("anthropic");
-  const waiting = started.status === "awaiting-input"
-    ? started
-    : await manager.waitForStatus(started.id, started.revision, 1_000);
+  const waiting =
+    started.status === "awaiting-input"
+      ? started
+      : await manager.waitForStatus(started.id, started.revision, 1_000);
 
   assert.equal(waiting.status, "awaiting-input");
   assert.equal(waiting.challenge?.type, "text");
-  assert.throws(
-    () => manager.respond(started.id, "stale-challenge", "value"),
-    /stale/,
-  );
+  assert.throws(() => manager.respond(started.id, "stale-challenge", "value"), /stale/);
   const cancelled = manager.cancel(started.id);
   assert.equal(cancelled.status, "cancelled");
   manager.dispose();

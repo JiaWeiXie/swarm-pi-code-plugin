@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ApprovalRequest } from "../src/core/contracts.js";
-import { createJobEventSnapshot, dedupeJobEvents, projectJobEvents } from "../src/state/job-events.js";
+import {
+  createJobEventSnapshot,
+  dedupeJobEvents,
+  projectJobEvents,
+} from "../src/state/job-events.js";
 import { defaultState, type JobRecord, type SwarmState } from "../src/state/state.js";
 
 const first = "2026-07-12T01:00:00.000Z";
@@ -41,7 +45,8 @@ function stateWith(...jobs: JobRecord[]): SwarmState {
 
 test("projects only the public allowlist for approval and terminal notifications", () => {
   const pending = approval({
-    actionSummary: "curl -H 'Authorization: Bearer sk-test-secret' https://user:password@example.test",
+    actionSummary:
+      "curl -H 'Authorization: Bearer sk-test-secret' https://user:password@example.test",
   });
   const job: JobRecord = {
     id: "job-1",
@@ -51,7 +56,15 @@ test("projects only the public allowlist for approval and terminal notifications
     executionMode: "supervised",
     workerToken: "worker-secret",
     approvals: [pending],
-    notifications: [{ id: pending.notificationId, kind: "approval", status: "pending", createdAt: first, approvalId: pending.id }],
+    notifications: [
+      {
+        id: pending.notificationId,
+        kind: "approval",
+        status: "pending",
+        createdAt: first,
+        approvalId: pending.id,
+      },
+    ],
     pendingApprovalId: pending.id,
     phase: "preflight",
     progressMessage: "not emitted for this allowlist assertion",
@@ -62,20 +75,42 @@ test("projects only the public allowlist for approval and terminal notifications
     status: "succeeded",
     workerToken: "terminal-worker-secret",
     finishedAt: second,
-    notifications: [{ id: "terminal-notification", kind: "terminal", status: "pending", createdAt: second }],
+    notifications: [
+      { id: "terminal-notification", kind: "terminal", status: "pending", createdAt: second },
+    ],
   };
 
   const events = projectJobEvents(stateWith(job, terminal), {
     includeProgress: false,
     now: second,
   });
-  assert.deepEqual(events.map((event) => event.event), ["approval-required", "job-terminal"]);
+  assert.deepEqual(
+    events.map((event) => event.event),
+    ["approval-required", "job-terminal"],
+  );
   assert.equal(events[0]?.eventId, "notification-1");
   assert.equal(events[1]?.eventId, "terminal-notification");
-  assert.deepEqual(Object.keys(events[0]!).sort(), [
-    "actionSummary", "approvalId", "capabilities", "emittedAt", "event", "eventId", "expiresAt",
-    "generation", "jobId", "notificationId", "reason", "requestedAt", "risk", "schema", "toolName", "version",
-  ].sort());
+  assert.deepEqual(
+    Object.keys(events[0]!).sort(),
+    [
+      "actionSummary",
+      "approvalId",
+      "capabilities",
+      "emittedAt",
+      "event",
+      "eventId",
+      "expiresAt",
+      "generation",
+      "jobId",
+      "notificationId",
+      "reason",
+      "requestedAt",
+      "risk",
+      "schema",
+      "toolName",
+      "version",
+    ].sort(),
+  );
   const serialized = JSON.stringify(events);
   assert.equal(serialized.includes("worker-secret"), false);
   assert.equal(serialized.includes("fingerprint-is-not-public"), false);
@@ -91,7 +126,15 @@ test("replays a resolved legacy pending notification and can stream acknowledged
     id: "job-1",
     status: "running",
     approvals: [resolved],
-    notifications: [{ id: resolved.notificationId, kind: "approval", status: "pending", createdAt: first, approvalId: resolved.id }],
+    notifications: [
+      {
+        id: resolved.notificationId,
+        kind: "approval",
+        status: "pending",
+        createdAt: first,
+        approvalId: resolved.id,
+      },
+    ],
     updatedAt: second,
   };
   const legacy = projectJobEvents(stateWith(job), { includeProgress: false, now: second });
@@ -115,12 +158,15 @@ test("replays a resolved legacy pending notification and can stream acknowledged
   });
   assert.equal(after.length, 1);
   assert.equal(after[0]?.event, "approval-resolved");
-  assert.equal(createJobEventSnapshot(stateWith(acknowledged), {
-    includeProgress: false,
-    includeResolved: true,
-    since: first,
-    now: second,
-  }).pendingCount, 0);
+  assert.equal(
+    createJobEventSnapshot(stateWith(acknowledged), {
+      includeProgress: false,
+      includeResolved: true,
+      since: first,
+      now: second,
+    }).pendingCount,
+    0,
+  );
 });
 
 test("progress events have stable IDs and are deduplicated across polling passes", () => {
@@ -150,18 +196,32 @@ test("progress events have stable IDs and are deduplicated across polling passes
 
 test("snapshot filters by Job and reports only actionable notification count", () => {
   const pending = approval({ id: "approval-2", jobId: "job-2", notificationId: "notification-2" });
-  const snapshot = createJobEventSnapshot(stateWith(
-    { id: "job-1", status: "running", updatedAt: first },
-    {
-      id: "job-2",
-      status: "awaiting-approval",
-      approvals: [pending],
-      pendingApprovalId: pending.id,
-      notifications: [{ id: pending.notificationId, kind: "approval", status: "pending", createdAt: first, approvalId: pending.id }],
-    },
-  ), { jobId: "job-2", includeProgress: false, now: second });
+  const snapshot = createJobEventSnapshot(
+    stateWith(
+      { id: "job-1", status: "running", updatedAt: first },
+      {
+        id: "job-2",
+        status: "awaiting-approval",
+        approvals: [pending],
+        pendingApprovalId: pending.id,
+        notifications: [
+          {
+            id: pending.notificationId,
+            kind: "approval",
+            status: "pending",
+            createdAt: first,
+            approvalId: pending.id,
+          },
+        ],
+      },
+    ),
+    { jobId: "job-2", includeProgress: false, now: second },
+  );
   assert.equal(snapshot.snapshotAt, second);
   assert.equal(snapshot.pendingCount, 1);
-  assert.deepEqual(snapshot.events.map((event) => event.event), ["approval-required"]);
+  assert.deepEqual(
+    snapshot.events.map((event) => event.event),
+    ["approval-required"],
+  );
   assert.equal((snapshot.events[0] as { jobId: string }).jobId, "job-2");
 });

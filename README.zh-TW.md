@@ -75,16 +75,16 @@ codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 請開啟新的 Codex task，讓 skill 重新載入。可用的 skills 如下：
 
 ```text
-$swarm-pi-code-plugin-configure
-$swarm-pi-code-plugin-project
-$swarm-pi-code-plugin-ask
-$swarm-pi-code-plugin-review
-$swarm-pi-code-plugin-plan
-$swarm-pi-code-plugin-implement
-$swarm-pi-code-plugin-orchestrate
-$swarm-pi-code-plugin-discover
-$swarm-pi-code-plugin-scaffold
-$swarm-pi-code-plugin-setup
+$swarm-pi-configure
+$swarm-pi-project
+$swarm-pi-ask
+$swarm-pi-review
+$swarm-pi-plan
+$swarm-pi-implement
+$swarm-pi-orchestrate
+$swarm-pi-discover
+$swarm-pi-scaffold
+$swarm-pi-setup
 ```
 
 ## 使用方式
@@ -93,17 +93,17 @@ $swarm-pi-code-plugin-setup
 
 | 情境 | Claude Code | Codex |
 | --- | --- | --- |
-| 第一次設定 Provider、模型與專案 | `/swarm-pi-code-plugin:init` | `$swarm-pi-code-plugin-configure` |
-| 重新設定 Provider 或模型優先順序 | `/swarm-pi-code-plugin:init --reconfigure` | `$swarm-pi-code-plugin-configure` |
-| 修改專案目標、資料夾或任務類型 | `/swarm-pi-code-plugin:project` | `$swarm-pi-code-plugin-project` |
-| 詢問 repository 問題或要求分析 | `/swarm-pi-code-plugin:ask` | `$swarm-pi-code-plugin-ask` |
-| 建立唯讀實作計畫 | `/swarm-pi-code-plugin:plan` | `$swarm-pi-code-plugin-plan` |
-| Review 工作樹或 branch 變更 | `/swarm-pi-code-plugin:review` | `$swarm-pi-code-plugin-review` |
-| 執行明確且受限的程式修改 | `/swarm-pi-code-plugin:implement` | `$swarm-pi-code-plugin-implement` |
-| 執行多個唯讀觀點 | `/swarm-pi-code-plugin:orchestrate` | `$swarm-pi-code-plugin-orchestrate` |
-| 以證據、實驗與閘門收斂未知需求 | `/swarm-pi-code-plugin:discover` | `$swarm-pi-code-plugin-discover` |
-| 設計並建立新專案 | `/swarm-pi-code-plugin:scaffold` | `$swarm-pi-code-plugin-scaffold` |
-| 設定專案內的開發工具 | `/swarm-pi-code-plugin:setup` | `$swarm-pi-code-plugin-setup` |
+| 第一次設定 Provider、模型與專案 | `/swarm-pi-code-plugin:swarm-pi-configure` | `$swarm-pi-configure` |
+| 重新設定 Provider 或模型優先順序 | `/swarm-pi-code-plugin:swarm-pi-configure --reconfigure` | `$swarm-pi-configure` |
+| 修改專案目標、資料夾或任務類型 | `/swarm-pi-code-plugin:swarm-pi-project` | `$swarm-pi-project` |
+| 詢問 repository 問題或要求分析 | `/swarm-pi-code-plugin:swarm-pi-ask` | `$swarm-pi-ask` |
+| 建立唯讀實作計畫 | `/swarm-pi-code-plugin:swarm-pi-plan` | `$swarm-pi-plan` |
+| Review 工作樹或 branch 變更 | `/swarm-pi-code-plugin:swarm-pi-review` | `$swarm-pi-review` |
+| 執行明確且受限的程式修改 | `/swarm-pi-code-plugin:swarm-pi-implement` | `$swarm-pi-implement` |
+| 執行多個唯讀觀點 | `/swarm-pi-code-plugin:swarm-pi-orchestrate` | `$swarm-pi-orchestrate` |
+| 以證據、實驗與閘門收斂未知需求 | `/swarm-pi-code-plugin:swarm-pi-discover` | `$swarm-pi-discover` |
+| 設計並建立新專案 | `/swarm-pi-code-plugin:swarm-pi-scaffold` | `$swarm-pi-scaffold` |
+| 設定專案內的開發工具 | `/swarm-pi-code-plugin:swarm-pi-setup` | `$swarm-pi-setup` |
 
 Claude Code commands 與 Codex skills 使用相同的 Host protocol：委派前檢查 readiness 與待通知事項、在設定失敗時保留原始請求、預設使用 supervised 執行，並要求使用者明確決定核准、adoption、artifact materialization 與 Git delivery。
 
@@ -140,8 +140,8 @@ ChatGPT Plus/Pro 是獨立的 **ChatGPT 訂閱**連線，透過 Pi 的 `openai-c
 Provider 與模型設定可以使用 `--reconfigure` 或 Codex configure skill 重新開啟。專案設定則有獨立且可重複執行的流程：
 
 ```text
-/swarm-pi-code-plugin:project
-$swarm-pi-code-plugin-project
+/swarm-pi-code-plugin:swarm-pi-project
+$swarm-pi-project
 ```
 
 專案流程會讀取目前的角色、安全性與 profile 設定，並只更新 `state.json`，不會改寫模型設定、憑證或工作歷程。

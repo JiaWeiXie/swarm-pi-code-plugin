@@ -32,20 +32,18 @@ process.exit(${options.exitCode ?? 0});
       "utf8",
     );
     writeFileSync(path.join(tempRoot, "package.json"), '{"type":"module"}\n', "utf8");
-    const output = execFileSync(
-      process.execPath,
-      [hookPath],
-      {
-        cwd: tempRoot,
-        env: {
-          ...process.env,
-          CLAUDE_PLUGIN_ROOT: tempRoot,
-          PLUGIN_ROOT: tempRoot,
-        },
-        input: JSON.stringify(options.hookInput ?? { cwd: tempRoot, hook_event_name: "SessionStart" }),
-        encoding: "utf8",
+    const output = execFileSync(process.execPath, [hookPath], {
+      cwd: tempRoot,
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_ROOT: tempRoot,
+        PLUGIN_ROOT: tempRoot,
       },
-    );
+      input: JSON.stringify(
+        options.hookInput ?? { cwd: tempRoot, hook_event_name: "SessionStart" },
+      ),
+      encoding: "utf8",
+    });
     return { output, tempRoot };
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
@@ -53,7 +51,13 @@ process.exit(${options.exitCode ?? 0});
 }
 
 function event(event: Record<string, unknown>) {
-  return JSON.stringify({ schema: "swarm-pi-code-plugin/job-event", version: 1, eventId: "event-1", emittedAt: "2026-07-12T00:00:00.000Z", ...event });
+  return JSON.stringify({
+    schema: "swarm-pi-code-plugin/job-event",
+    version: 1,
+    eventId: "event-1",
+    emittedAt: "2026-07-12T00:00:00.000Z",
+    ...event,
+  });
 }
 
 test("SessionStart hook renders allowlisted Job events as host context without deciding", () => {
@@ -64,7 +68,8 @@ test("SessionStart hook renders allowlisted Job events as host context without d
       jobId: "job-123",
       approvalId: "approval-456",
       toolName: "shell",
-      actionSummary: "run tests in /Users/alice/project and /opt/private/build token=sk-super-secret-value-123456789",
+      actionSummary:
+        "run tests in /Users/alice/project and /opt/private/build token=sk-super-secret-value-123456789",
       risk: "high",
       capabilities: ["mutation", "shell"],
       reason: "Host must decide",

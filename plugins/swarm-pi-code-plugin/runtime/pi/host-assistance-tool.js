@@ -16,28 +16,48 @@ export function createHostAssistanceTool(requestHostAssistance) {
             additionalProperties: false,
             properties: {
                 kind: { type: "string", enum: ["context", "decision", "action-recommendation"] },
-                contextClass: { type: "string", enum: ["workspace", "web", "docs", "paper", "connector", "skill"] },
+                contextClass: {
+                    type: "string",
+                    enum: ["workspace", "web", "docs", "paper", "connector", "skill"],
+                },
                 question: { type: "string", maxLength: 12000 },
                 unknowns: { type: "array", items: { type: "string", maxLength: 2000 }, maxItems: 50 },
-                acceptanceCriteria: { type: "array", items: { type: "string", maxLength: 2000 }, maxItems: 50 },
+                acceptanceCriteria: {
+                    type: "array",
+                    items: { type: "string", maxLength: 2000 },
+                    maxItems: 50,
+                },
                 freshness: { type: "string", maxLength: 1000 },
                 versionConstraint: { type: "string", maxLength: 1000 },
-                dataClassification: { type: "string", enum: ["public", "project-internal", "private", "secret"] },
+                dataClassification: {
+                    type: "string",
+                    enum: ["public", "project-internal", "private", "secret"],
+                },
                 egressAllowed: { type: "boolean" },
                 budget: { type: "integer", minimum: 1, maximum: 64 },
                 options: { type: "array", items: { type: "string", maxLength: 2000 }, maxItems: 20 },
                 context: { type: "string", maxLength: 12000 },
-                actionClass: { type: "string", enum: ["local-mutation", "draft", "remote-write", "message", "deploy", "transaction"] },
+                actionClass: {
+                    type: "string",
+                    enum: ["local-mutation", "draft", "remote-write", "message", "deploy", "transaction"],
+                },
                 summary: { type: "string", maxLength: 4000 },
                 target: { type: "string", maxLength: 4000 },
                 rationale: { type: "string", maxLength: 8000 },
-                expectedEvidence: { type: "array", items: { type: "string", maxLength: 2000 }, maxItems: 50 },
+                expectedEvidence: {
+                    type: "array",
+                    items: { type: "string", maxLength: 2000 },
+                    maxItems: 50,
+                },
             },
         },
         executionMode: "sequential",
         async execute(_toolCallId, params, signal) {
             if (active) {
-                return toolResult({ error: "host-assistance-request-active", message: "This session already has an active Host Assistance request." }, true);
+                return toolResult({
+                    error: "host-assistance-request-active",
+                    message: "This session already has an active Host Assistance request.",
+                }, true);
             }
             active = true;
             try {
@@ -70,8 +90,12 @@ export function parseHostAssistanceRequest(input) {
             question,
             unknowns: strings(value.unknowns, 50),
             acceptanceCriteria: strings(value.acceptanceCriteria, 50),
-            ...(optionalString(value.freshness, 1_000) ? { freshness: optionalString(value.freshness, 1_000) } : {}),
-            ...(optionalString(value.versionConstraint, 1_000) ? { versionConstraint: optionalString(value.versionConstraint, 1_000) } : {}),
+            ...(optionalString(value.freshness, 1_000)
+                ? { freshness: optionalString(value.freshness, 1_000) }
+                : {}),
+            ...(optionalString(value.versionConstraint, 1_000)
+                ? { versionConstraint: optionalString(value.versionConstraint, 1_000) }
+                : {}),
             dataClassification: classification,
             egressAllowed: value.egressAllowed === true,
             budget: integer(value.budget, 1, 64, 1),
@@ -97,7 +121,9 @@ export function parseHostAssistanceRequest(input) {
             kind: "action-recommendation",
             actionClass: actionClass,
             summary: requiredString(value.summary, "summary", 4_000),
-            ...(optionalString(value.target, 4_000) ? { target: optionalString(value.target, 4_000) } : {}),
+            ...(optionalString(value.target, 4_000)
+                ? { target: optionalString(value.target, 4_000) }
+                : {}),
             rationale: requiredString(value.rationale, "rationale", 8_000),
             expectedEvidence: strings(value.expectedEvidence, 50),
             dataClassification: classification,
@@ -107,7 +133,11 @@ export function parseHostAssistanceRequest(input) {
     throw new Error("Host Assistance request kind is invalid");
 }
 function toolResult(value, isError) {
-    return { content: [{ type: "text", text: JSON.stringify(value) }], details: undefined, isError };
+    return {
+        content: [{ type: "text", text: JSON.stringify(value) }],
+        details: undefined,
+        isError,
+    };
 }
 function hostContextClass(value) {
     if (["workspace", "web", "docs", "paper", "connector", "skill"].includes(String(value)))
@@ -129,7 +159,10 @@ function optionalString(value, limit) {
 }
 function strings(value, limit) {
     return Array.isArray(value)
-        ? value.filter((item) => typeof item === "string" && Boolean(item.trim())).slice(0, limit).map((item) => item.slice(0, 2_000))
+        ? value
+            .filter((item) => typeof item === "string" && Boolean(item.trim()))
+            .slice(0, limit)
+            .map((item) => item.slice(0, 2_000))
         : [];
 }
 function integer(value, min, max, fallback) {

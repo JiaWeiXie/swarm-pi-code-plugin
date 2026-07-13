@@ -76,7 +76,9 @@ async function secureReadFile(cwd, candidate) {
     }
 }
 async function secureAccess(cwd, candidate, write) {
-    const absolute = write ? await assertMutationPath(cwd, candidate) : await assertReadPath(cwd, candidate);
+    const absolute = write
+        ? await assertMutationPath(cwd, candidate)
+        : await assertReadPath(cwd, candidate);
     const root = await fs.realpath(cwd);
     const identities = await captureDirectoryChain(root, path.dirname(absolute));
     const flags = (write ? constants.O_RDWR : constants.O_RDONLY) | (constants.O_NOFOLLOW ?? 0);
@@ -151,7 +153,10 @@ async function captureIdentity(candidate) {
 async function assertDirectoryChainStable(identities) {
     for (const identity of identities) {
         const current = await fs.lstat(identity.path);
-        if (current.isSymbolicLink() || !current.isDirectory() || current.dev !== identity.dev || current.ino !== identity.ino) {
+        if (current.isSymbolicLink() ||
+            !current.isDirectory() ||
+            current.dev !== identity.dev ||
+            current.ino !== identity.ino) {
             throw new Error(`Directory identity changed during filesystem operation: ${identity.path}`);
         }
     }
@@ -246,11 +251,9 @@ function withSearchPolicy(definition, assertAllowed, onPolicyViolation, boundPro
             // SDK tool executions receive a call id before their parameter object.
             // Locate the parameter object defensively so this remains transparent to
             // SDK context arguments added after signal/onUpdate.
-            const params = args.find((value) => (typeof value === "object" && value !== null && !Array.isArray(value)));
+            const params = args.find((value) => typeof value === "object" && value !== null && !Array.isArray(value));
             const searchRoot = await assertAllowed("search", typeof params?.path === "string" ? params.path : ".");
-            const selectorKeys = tool.name === "grep"
-                ? ["glob"]
-                : tool.name === "find" ? ["pattern"] : [];
+            const selectorKeys = tool.name === "grep" ? ["glob"] : tool.name === "find" ? ["pattern"] : [];
             for (const key of selectorKeys) {
                 const selector = params?.[key];
                 if (typeof selector === "string" && isUnsafeSearchSelector(selector)) {
@@ -262,7 +265,12 @@ function withSearchPolicy(definition, assertAllowed, onPolicyViolation, boundPro
                         message: `Search selector is outside the execution workspace: ${selector}`,
                         preserved: [],
                         nextActions: [{ action: "review-project-policy", label: "Review project policy" }],
-                        ...(boundProjectPolicy ? { policyHash: boundProjectPolicy.effective.hash, scopeHash: boundProjectPolicy.effective.scopeHash } : {}),
+                        ...(boundProjectPolicy
+                            ? {
+                                policyHash: boundProjectPolicy.effective.hash,
+                                scopeHash: boundProjectPolicy.effective.scopeHash,
+                            }
+                            : {}),
                         violatingPaths: [selector],
                     });
                     try {
@@ -285,8 +293,8 @@ function isUnsafeSearchSelector(selector) {
     // Check every glob alternative boundary, not only the first character. This
     // rejects `{../outside/**,**/*.ts}` and `{src/**,/etc/**}` while allowing
     // harmless names such as `*..test.ts`.
-    return /(?:^|[,{(|])\s*(?:[\\/]|[A-Za-z]:)/.test(selector)
-        || /(?:^|[\\/{(|])\.\.(?:[\\/]|$)/.test(selector);
+    return (/(?:^|[,{(|])\s*(?:[\\/]|[A-Za-z]:)/.test(selector) ||
+        /(?:^|[\\/{(|])\.\.(?:[\\/]|$)/.test(selector));
 }
 export function createScopedMutationTools(cwd) {
     const write = createWriteToolDefinition(cwd, {
@@ -316,7 +324,8 @@ export function createScopedMutationTools(cwd) {
 }
 function assertInside(root, candidate) {
     const relative = path.relative(root, candidate);
-    if (relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))) {
+    if (relative === "" ||
+        (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))) {
         return;
     }
     throw new Error(`Mutation path is outside the assigned worktree: ${candidate}`);

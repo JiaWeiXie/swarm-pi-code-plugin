@@ -26,9 +26,18 @@ test("prompt cache capability metadata reflects pinned provider behavior", () =>
   assert.equal(vertex.promptCaching?.support, "implicit-only");
   assert.equal(custom.promptCaching?.support, "protocol-dependent");
   assert.equal(codex.promptCaching?.extendedRetention, undefined);
-  assert.equal(codex.fields.some((field) => field.id === "promptCacheRetention"), false);
-  assert.equal(google.fields.some((field) => field.id === "promptCacheRetention"), false);
-  assert.equal(anthropic.fields.find((field) => field.id === "promptCacheRetention")?.visibleWhen?.equals, "api-key");
+  assert.equal(
+    codex.fields.some((field) => field.id === "promptCacheRetention"),
+    false,
+  );
+  assert.equal(
+    google.fields.some((field) => field.id === "promptCacheRetention"),
+    false,
+  );
+  assert.equal(
+    anthropic.fields.find((field) => field.id === "promptCacheRetention")?.visibleWhen?.equals,
+    "api-key",
+  );
 });
 
 test("long prompt cache retention is provider-scoped and does not mutate process.env", () => {
@@ -37,49 +46,61 @@ test("long prompt cache retention is provider-scoped and does not mutate process
     primary: null,
     fallbacks: [],
     customProviders: [],
-    providerProfiles: [{
-      id: "openai",
-      provider: "openai",
-      name: "OpenAI",
-      connectionKind: "builtin",
-      auth: { method: "api-key", secretRef: "auth:openai" },
-      protocol: "openai-responses",
-      runtimeApi: "openai-responses",
-      readiness: "configured",
-      settings: { promptCacheRetention: "long" },
-      headers: [],
-    }],
+    providerProfiles: [
+      {
+        id: "openai",
+        provider: "openai",
+        name: "OpenAI",
+        connectionKind: "builtin",
+        auth: { method: "api-key", secretRef: "auth:openai" },
+        protocol: "openai-responses",
+        runtimeApi: "openai-responses",
+        readiness: "configured",
+        settings: { promptCacheRetention: "long" },
+        headers: [],
+      },
+    ],
     updatedAt: null,
   });
   const before = process.env.PI_CACHE_RETENTION;
-  const environment = createPiEnvironment(configuration, {}, {
-    authStorage: AuthStorage.inMemory({ openai: { type: "api_key", key: "secret" } }),
-  });
+  const environment = createPiEnvironment(
+    configuration,
+    {},
+    {
+      authStorage: AuthStorage.inMemory({ openai: { type: "api_key", key: "secret" } }),
+    },
+  );
   assert.equal(environment.authStorage.getProviderEnv("openai")?.PI_CACHE_RETENTION, "long");
   assert.equal(process.env.PI_CACHE_RETENTION, before);
   assert.equal(environment.authStorage.getProviderEnv("anthropic"), undefined);
 });
 
 test("extended retention is rejected for OAuth profiles", () => {
-  assert.throws(() => parseModelConfiguration({
-    version: 1,
-    primary: null,
-    fallbacks: [],
-    customProviders: [],
-    providerProfiles: [{
-      id: "anthropic",
-      provider: "anthropic",
-      name: "Anthropic",
-      connectionKind: "builtin",
-      auth: { method: "oauth", secretRef: "auth:anthropic" },
-      protocol: "anthropic-messages",
-      runtimeApi: "anthropic-messages",
-      readiness: "configured",
-      settings: { promptCacheRetention: "long" },
-      headers: [],
-    }],
-    updatedAt: null,
-  }), /unavailable/);
+  assert.throws(
+    () =>
+      parseModelConfiguration({
+        version: 1,
+        primary: null,
+        fallbacks: [],
+        customProviders: [],
+        providerProfiles: [
+          {
+            id: "anthropic",
+            provider: "anthropic",
+            name: "Anthropic",
+            connectionKind: "builtin",
+            auth: { method: "oauth", secretRef: "auth:anthropic" },
+            protocol: "anthropic-messages",
+            runtimeApi: "anthropic-messages",
+            readiness: "configured",
+            settings: { promptCacheRetention: "long" },
+            headers: [],
+          },
+        ],
+        updatedAt: null,
+      }),
+    /unavailable/,
+  );
 });
 
 test("worker prompt has a versioned stable prefix and request last", () => {
@@ -88,7 +109,8 @@ test("worker prompt has a versioned stable prefix and request last", () => {
     kind: "review",
     perspective: "security",
     projectGoal: "ship",
-    renderedProjectPolicy: "Project policy abc123: tasks [review]; roots [read: src; search: src; write: src; shell: src]",
+    renderedProjectPolicy:
+      "Project policy abc123: tasks [review]; roots [read: src; search: src; write: src; shell: src]",
     prompt: "Inspect the request.",
   });
   assert.match(prompt, new RegExp(`^\\[PROMPT\\]\\nversion=${WORKER_PROMPT_VERSION}`));

@@ -24,7 +24,9 @@ export function projectJobEvents(state, options = {}) {
         const approvals = job.approvals ?? [];
         const terminalNotification = notifications.find((notification) => notification.kind === "terminal");
         const terminalPending = terminalNotification?.status === "pending" ||
-            (terminalNotification === undefined && job.notification === "pending" && isTerminalStatus(job.status));
+            (terminalNotification === undefined &&
+                job.notification === "pending" &&
+                isTerminalStatus(job.status));
         if (terminalPending && isTerminalStatus(job.status)) {
             const notificationId = terminalNotification?.id ?? `terminal:${job.id}`;
             const finishedAt = job.finishedAt ?? job.updatedAt ?? job.createdAt ?? emittedAt;
@@ -56,8 +58,7 @@ export function projectJobEvents(state, options = {}) {
             // For a live watcher, includeResolved + since surfaces resolutions whose
             // state transition happened after the watcher started, including the
             // new atomically-acknowledged approval flow.
-            const recentlyResolved = includeResolved &&
-                (since === undefined || sortAt >= since);
+            const recentlyResolved = includeResolved && (since === undefined || sortAt >= since);
             if (!notificationPending && !recentlyResolved)
                 continue;
             if (since !== undefined && notificationPending && sortAt < since && !includeResolved)
@@ -129,7 +130,9 @@ export function projectJobEvents(state, options = {}) {
                     jobId: job.id,
                     status: String(job.status),
                     ...(job.phase ? { phase: job.phase } : {}),
-                    ...(job.progressMessage ? { progressMessage: publicText(job.progressMessage, 500) } : {}),
+                    ...(job.progressMessage
+                        ? { progressMessage: publicText(job.progressMessage, 500) }
+                        : {}),
                     ...(job.updatedAt ? { updatedAt: job.updatedAt } : {}),
                     ...(job.lastProgressAt ? { lastProgressAt: job.lastProgressAt } : {}),
                 }, progressAt);
@@ -151,13 +154,20 @@ export function createJobEventSnapshot(state, options = {}) {
     const snapshotAt = iso(options.now ?? new Date());
     const events = projectJobEvents(state, { ...options, now: snapshotAt });
     const pendingCount = events.filter((event) => {
-        if (event.event === "approval-required" || event.event === "host-assistance-required" || event.event === "human-decision-required")
+        if (event.event === "approval-required" ||
+            event.event === "host-assistance-required" ||
+            event.event === "human-decision-required")
             return true;
-        if (event.event !== "approval-resolved" && event.event !== "host-assistance-resolved" && event.event !== "human-decision-resolved" && event.event !== "job-terminal")
+        if (event.event !== "approval-resolved" &&
+            event.event !== "host-assistance-resolved" &&
+            event.event !== "human-decision-resolved" &&
+            event.event !== "job-terminal")
             return false;
         const job = state.jobs.find((candidate) => candidate.id === event.jobId);
         const notificationId = "notificationId" in event ? event.notificationId : undefined;
-        const notification = notificationId ? job?.notifications?.find((candidate) => candidate.id === notificationId) : undefined;
+        const notification = notificationId
+            ? job?.notifications?.find((candidate) => candidate.id === notificationId)
+            : undefined;
         // Missing notification metadata is a legacy pending notification when the
         // event was projected from the Job-level pending marker.
         return notification?.status === "pending" || notification === undefined;
@@ -206,7 +216,9 @@ function approvalRequiredEvent(job, approval, emittedAt) {
         actionSummary: publicText(approval.actionSummary, 2_000),
         risk: safeRisk(decision),
         capabilities: safeCapabilities(decision),
-        reason: typeof decision.reason === "string" ? publicText(decision.reason, 2_000) : "Approval required.",
+        reason: typeof decision.reason === "string"
+            ? publicText(decision.reason, 2_000)
+            : "Approval required.",
         requestedAt: approval.requestedAt,
         expiresAt: approval.expiresAt,
     };
@@ -227,7 +239,10 @@ function approvalResolvedEvent(job, approval, notificationId, emittedAt) {
     };
 }
 function resolvedStatus(approval) {
-    if (approval.status === "approved" || approval.status === "denied" || approval.status === "expired" || approval.status === "consumed") {
+    if (approval.status === "approved" ||
+        approval.status === "denied" ||
+        approval.status === "expired" ||
+        approval.status === "consumed") {
         return approval.status;
     }
     // This helper is only called after the projection has ruled out pending.
@@ -242,7 +257,10 @@ function isResolvedApproval(approval) {
     return approval.status !== "pending";
 }
 function safeRisk(decision) {
-    return decision.risk === "low" || decision.risk === "medium" || decision.risk === "high" || decision.risk === "critical"
+    return decision.risk === "low" ||
+        decision.risk === "medium" ||
+        decision.risk === "high" ||
+        decision.risk === "critical"
         ? decision.risk
         : "high";
 }
@@ -263,7 +281,7 @@ function safeCapabilities(decision) {
 // value-level mask here so an otherwise allowlisted command cannot carry a
 // bearer token, provider key, JWT, or URL userinfo across the Host boundary.
 const EVENT_SECRET_PATTERNS = [
-    /\bBearer\s+[A-Za-z0-9._~+\/-]+/gi,
+    /\bBearer\s+[A-Za-z0-9._~+/-]+/gi,
     /\bBasic\s+[A-Za-z0-9+/=]+/gi,
     /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
     /\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9-]+|AIza[0-9A-Za-z_-]{20,}|ya29\.[A-Za-z0-9._-]+|(?:AKIA|ASIA)[A-Z0-9]{16}|hf_[A-Za-z0-9]{20,}|pplx-[A-Za-z0-9-]{20,}|npm_[A-Za-z0-9]{20,}|lin_[A-Za-z0-9]{20,})\b/g,

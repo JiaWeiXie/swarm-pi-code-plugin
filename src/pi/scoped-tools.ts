@@ -42,7 +42,11 @@ interface PathIdentity {
   ino: number;
 }
 
-export async function secureWriteFile(cwd: string, candidate: string, content: string | Uint8Array): Promise<void> {
+export async function secureWriteFile(
+  cwd: string,
+  candidate: string,
+  content: string | Uint8Array,
+): Promise<void> {
   const absolute = await assertMutationPath(cwd, candidate);
   const root = await fs.realpath(cwd);
   const parent = path.dirname(absolute);
@@ -53,7 +57,11 @@ export async function secureWriteFile(cwd: string, candidate: string, content: s
     handle = await fs.open(absolute, constants.O_WRONLY | noFollow);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    handle = await fs.open(absolute, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600);
+    handle = await fs.open(
+      absolute,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow,
+      0o600,
+    );
   }
   try {
     await assertDirectoryChainStable(identities);
@@ -92,7 +100,9 @@ async function secureReadFile(cwd: string, candidate: string): Promise<Buffer> {
 }
 
 async function secureAccess(cwd: string, candidate: string, write: boolean): Promise<void> {
-  const absolute = write ? await assertMutationPath(cwd, candidate) : await assertReadPath(cwd, candidate);
+  const absolute = write
+    ? await assertMutationPath(cwd, candidate)
+    : await assertReadPath(cwd, candidate);
   const root = await fs.realpath(cwd);
   const identities = await captureDirectoryChain(root, path.dirname(absolute));
   const flags = (write ? constants.O_RDWR : constants.O_RDONLY) | (constants.O_NOFOLLOW ?? 0);
@@ -130,14 +140,16 @@ async function secureMkdir(cwd: string, candidate: string): Promise<void> {
     const next = path.join(current, component);
     try {
       const existing = await fs.lstat(next);
-      if (existing.isSymbolicLink() || !existing.isDirectory()) throw new Error(`Directory component is not a stable directory: ${next}`);
+      if (existing.isSymbolicLink() || !existing.isDirectory())
+        throw new Error(`Directory component is not a stable directory: ${next}`);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       await fs.mkdir(next, { mode: 0o700 });
     }
     await assertDirectoryChainStable([parentIdentity]);
     const created = await fs.lstat(next);
-    if (created.isSymbolicLink() || !created.isDirectory()) throw new Error(`Directory component changed during creation: ${next}`);
+    if (created.isSymbolicLink() || !created.isDirectory())
+      throw new Error(`Directory component changed during creation: ${next}`);
     current = next;
   }
 }
@@ -150,7 +162,8 @@ async function captureDirectoryChain(root: string, target: string): Promise<Path
   for (const component of relative.split(path.sep).filter(Boolean)) {
     current = path.join(current, component);
     const stat = await fs.lstat(current);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Path component is not a stable directory: ${current}`);
+    if (stat.isSymbolicLink() || !stat.isDirectory())
+      throw new Error(`Path component is not a stable directory: ${current}`);
     identities.push({ path: current, dev: stat.dev, ino: stat.ino });
   }
   return identities;
@@ -158,14 +171,20 @@ async function captureDirectoryChain(root: string, target: string): Promise<Path
 
 async function captureIdentity(candidate: string): Promise<PathIdentity> {
   const stat = await fs.lstat(candidate);
-  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Path component is not a stable directory: ${candidate}`);
+  if (stat.isSymbolicLink() || !stat.isDirectory())
+    throw new Error(`Path component is not a stable directory: ${candidate}`);
   return { path: candidate, dev: stat.dev, ino: stat.ino };
 }
 
 async function assertDirectoryChainStable(identities: PathIdentity[]): Promise<void> {
   for (const identity of identities) {
     const current = await fs.lstat(identity.path);
-    if (current.isSymbolicLink() || !current.isDirectory() || current.dev !== identity.dev || current.ino !== identity.ino) {
+    if (
+      current.isSymbolicLink() ||
+      !current.isDirectory() ||
+      current.dev !== identity.dev ||
+      current.ino !== identity.ino
+    ) {
       throw new Error(`Directory identity changed during filesystem operation: ${identity.path}`);
     }
   }
@@ -223,12 +242,29 @@ export function createScopedFilesystemTools(
       },
     },
   });
-  const grep = withSearchPolicy(createGrepToolDefinition(options.cwd), assertAllowed, options.onPolicyViolation, options.boundProjectPolicy);
-  const find = withSearchPolicy(createFindToolDefinition(options.cwd), assertAllowed, options.onPolicyViolation, options.boundProjectPolicy);
-  const ls = withSearchPolicy(createLsToolDefinition(options.cwd), assertAllowed, options.onPolicyViolation, options.boundProjectPolicy);
+  const grep = withSearchPolicy(
+    createGrepToolDefinition(options.cwd),
+    assertAllowed,
+    options.onPolicyViolation,
+    options.boundProjectPolicy,
+  );
+  const find = withSearchPolicy(
+    createFindToolDefinition(options.cwd),
+    assertAllowed,
+    options.onPolicyViolation,
+    options.boundProjectPolicy,
+  );
+  const ls = withSearchPolicy(
+    createLsToolDefinition(options.cwd),
+    assertAllowed,
+    options.onPolicyViolation,
+    options.boundProjectPolicy,
+  );
 
   if (options.mode === "readonly") {
-    return [read, grep, find, ls] as unknown as NonNullable<CreateAgentSessionOptions["customTools"]>;
+    return [read, grep, find, ls] as unknown as NonNullable<
+      CreateAgentSessionOptions["customTools"]
+    >;
   }
 
   const write = createWriteToolDefinition(options.cwd, {
@@ -270,7 +306,10 @@ export function createScopedFilesystemTools(
   >;
 }
 
-type PolicyAssertion = (operation: "read" | "search" | "write", candidate: string) => Promise<string>;
+type PolicyAssertion = (
+  operation: "read" | "search" | "write",
+  candidate: string,
+) => Promise<string>;
 type ExecutableTool = { name?: string; execute: (...args: unknown[]) => unknown };
 
 function withSearchPolicy(
@@ -286,13 +325,16 @@ function withSearchPolicy(
       // SDK tool executions receive a call id before their parameter object.
       // Locate the parameter object defensively so this remains transparent to
       // SDK context arguments added after signal/onUpdate.
-      const params = args.find((value): value is { path?: unknown; glob?: unknown; pattern?: unknown } => (
-        typeof value === "object" && value !== null && !Array.isArray(value)
-      ));
-      const searchRoot = await assertAllowed("search", typeof params?.path === "string" ? params.path : ".");
-      const selectorKeys: Array<"glob" | "pattern"> = tool.name === "grep"
-        ? ["glob"]
-        : tool.name === "find" ? ["pattern"] : [];
+      const params = args.find(
+        (value): value is { path?: unknown; glob?: unknown; pattern?: unknown } =>
+          typeof value === "object" && value !== null && !Array.isArray(value),
+      );
+      const searchRoot = await assertAllowed(
+        "search",
+        typeof params?.path === "string" ? params.path : ".",
+      );
+      const selectorKeys: Array<"glob" | "pattern"> =
+        tool.name === "grep" ? ["glob"] : tool.name === "find" ? ["pattern"] : [];
       for (const key of selectorKeys) {
         const selector = params?.[key];
         if (typeof selector === "string" && isUnsafeSearchSelector(selector)) {
@@ -304,7 +346,12 @@ function withSearchPolicy(
             message: `Search selector is outside the execution workspace: ${selector}`,
             preserved: [],
             nextActions: [{ action: "review-project-policy", label: "Review project policy" }],
-            ...(boundProjectPolicy ? { policyHash: boundProjectPolicy.effective.hash, scopeHash: boundProjectPolicy.effective.scopeHash } : {}),
+            ...(boundProjectPolicy
+              ? {
+                  policyHash: boundProjectPolicy.effective.hash,
+                  scopeHash: boundProjectPolicy.effective.scopeHash,
+                }
+              : {}),
             violatingPaths: [selector],
           });
           try {
@@ -327,8 +374,10 @@ function isUnsafeSearchSelector(selector: string): boolean {
   // Check every glob alternative boundary, not only the first character. This
   // rejects `{../outside/**,**/*.ts}` and `{src/**,/etc/**}` while allowing
   // harmless names such as `*..test.ts`.
-  return /(?:^|[,{(|])\s*(?:[\\/]|[A-Za-z]:)/.test(selector)
-    || /(?:^|[\\/{(|])\.\.(?:[\\/]|$)/.test(selector);
+  return (
+    /(?:^|[,{(|])\s*(?:[\\/]|[A-Za-z]:)/.test(selector) ||
+    /(?:^|[\\/{(|])\.\.(?:[\\/]|$)/.test(selector)
+  );
 }
 
 export function createScopedMutationTools(
@@ -362,7 +411,10 @@ export function createScopedMutationTools(
 
 function assertInside(root: string, candidate: string): void {
   const relative = path.relative(root, candidate);
-  if (relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))) {
+  if (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+  ) {
     return;
   }
   throw new Error(`Mutation path is outside the assigned worktree: ${candidate}`);
@@ -385,7 +437,8 @@ async function closestExistingPath(candidate: string): Promise<string> {
 
 async function assertSearchTreeHasNoSymlinks(root: string): Promise<PathIdentity[]> {
   const rootStat = await fs.lstat(root);
-  if (rootStat.isSymbolicLink()) throw new Error(`Recursive search refuses symlinked root: ${root}`);
+  if (rootStat.isSymbolicLink())
+    throw new Error(`Recursive search refuses symlinked root: ${root}`);
   if (!rootStat.isDirectory()) return [];
   const pending = [root];
   const identities: PathIdentity[] = [];
@@ -397,7 +450,8 @@ async function assertSearchTreeHasNoSymlinks(root: string): Promise<PathIdentity
     for (const entry of entries) {
       const candidate = path.join(directory, entry.name);
       const stat = await fs.lstat(candidate);
-      if (stat.isSymbolicLink()) throw new Error(`Recursive search refuses symlinked entries: ${candidate}`);
+      if (stat.isSymbolicLink())
+        throw new Error(`Recursive search refuses symlinked entries: ${candidate}`);
       if (stat.isDirectory()) pending.push(candidate);
     }
   }

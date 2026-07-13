@@ -27,7 +27,11 @@ export function parseDiscoveryStageOutput(stage, output) {
     const decisionLedger = parseDecisionLedger(value.decisionLedger);
     return {
         artifact: { stage, featureDefinition, decisionLedger },
-        verification: ["feature-definition-valid", "acceptance-criteria-present", "decision-ledger-present"],
+        verification: [
+            "feature-definition-valid",
+            "acceptance-criteria-present",
+            "decision-ledger-present",
+        ],
     };
 }
 function parseObject(output) {

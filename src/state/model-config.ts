@@ -34,11 +34,7 @@ export const CONTROLLED_LITERAL_HEADER_NAMES = [
   "x-title",
 ] as const;
 
-export const CONTROLLED_SECRET_HEADER_NAMES = [
-  "api-key",
-  "authorization",
-  "x-api-key",
-] as const;
+export const CONTROLLED_SECRET_HEADER_NAMES = ["api-key", "authorization", "x-api-key"] as const;
 
 export type ControlledLiteralHeaderName = (typeof CONTROLLED_LITERAL_HEADER_NAMES)[number];
 export type ControlledSecretHeaderName = (typeof CONTROLLED_SECRET_HEADER_NAMES)[number];
@@ -195,9 +191,7 @@ export async function clearModelConfiguration(cwd: string): Promise<void> {
 }
 
 export function modelPriority(configuration: ModelConfiguration): string[] {
-  return configuration.primary
-    ? unique([configuration.primary, ...configuration.fallbacks])
-    : [];
+  return configuration.primary ? unique([configuration.primary, ...configuration.fallbacks]) : [];
 }
 
 export function parseModelConfiguration(value: unknown): ModelConfiguration {
@@ -227,7 +221,9 @@ export function parseModelConfiguration(value: unknown): ModelConfiguration {
   const customIds = new Set(providerIds);
   for (const profile of providerProfiles) {
     if (profile.connectionKind === "custom" && !customIds.has(profile.provider)) {
-      throw new Error(`provider profile references an unknown custom provider: ${profile.provider}`);
+      throw new Error(
+        `provider profile references an unknown custom provider: ${profile.provider}`,
+      );
     }
   }
   return {
@@ -236,7 +232,8 @@ export function parseModelConfiguration(value: unknown): ModelConfiguration {
     fallbacks: filteredFallbacks,
     customProviders,
     providerProfiles,
-    updatedAt: record.updatedAt === null ? null : optionalString(record.updatedAt, "updatedAt") ?? null,
+    updatedAt:
+      record.updatedAt === null ? null : (optionalString(record.updatedAt, "updatedAt") ?? null),
   };
 }
 
@@ -262,9 +259,10 @@ function parseCustomProvider(value: unknown): CustomProviderConfiguration {
   if (!SUPPORTED_PROVIDER_APIS.includes(api as SupportedProviderApi)) {
     throw new Error(`unsupported API type for ${id}: ${api}`);
   }
-  const wireProtocol = record.wireProtocol === undefined
-    ? wireProtocolForRuntimeApi(api as SupportedProviderApi)
-    : parseWireProtocol(record.wireProtocol, `wireProtocol for ${id}`);
+  const wireProtocol =
+    record.wireProtocol === undefined
+      ? wireProtocolForRuntimeApi(api as SupportedProviderApi)
+      : parseWireProtocol(record.wireProtocol, `wireProtocol for ${id}`);
   if (wireProtocol && runtimeApiForWireProtocol(wireProtocol) !== api) {
     throw new Error(`wireProtocol for ${id} does not match API type ${api}`);
   }
@@ -272,10 +270,15 @@ function parseCustomProvider(value: unknown): CustomProviderConfiguration {
     ? normalizeProtocolRoot(parsedUrl.toString(), wireProtocol)
     : parsedUrl.toString().replace(/\/$/, "");
   const modelsEndpoint = optionalString(record.modelsEndpoint, `modelsEndpoint for ${id}`);
-  const legacyRequiresApiKey = optionalBoolean(record.requiresApiKey, `requiresApiKey for ${id}`) ?? true;
-  const auth = parseProviderAuth(record.auth, id, legacyRequiresApiKey
-    ? { method: "api-key", secretRef: providerSecretRef(id) }
-    : { method: "none" });
+  const legacyRequiresApiKey =
+    optionalBoolean(record.requiresApiKey, `requiresApiKey for ${id}`) ?? true;
+  const auth = parseProviderAuth(
+    record.auth,
+    id,
+    legacyRequiresApiKey
+      ? { method: "api-key", secretRef: providerSecretRef(id) }
+      : { method: "none" },
+  );
   if (auth.method === "oauth" || auth.method === "ambient") {
     throw new Error(`custom provider ${id} cannot use ${auth.method} authentication`);
   }
@@ -323,18 +326,28 @@ function parseProviderProfile(value: unknown): ProviderProfile {
   if (definition && !definition.authMethods.includes(auth.method)) {
     throw new Error(`provider ${provider} does not support ${auth.method} authentication`);
   }
-  const protocol = record.protocol === undefined
-    ? definition?.wireProtocol
-    : parseWireProtocol(record.protocol, `protocol for ${id}`);
+  const protocol =
+    record.protocol === undefined
+      ? definition?.wireProtocol
+      : parseWireProtocol(record.protocol, `protocol for ${id}`);
   const runtimeApi = requiredString(record.runtimeApi, `runtimeApi for ${id}`);
   if (runtimeApi !== "managed-per-model" && !isProviderRuntimeApi(runtimeApi)) {
     throw new Error(`unsupported runtime API for ${id}: ${runtimeApi}`);
   }
-  if (definition && !definition.runtimeApis.includes(runtimeApi as ProviderRuntimeApi) && runtimeApi !== "managed-per-model") {
+  if (
+    definition &&
+    !definition.runtimeApis.includes(runtimeApi as ProviderRuntimeApi) &&
+    runtimeApi !== "managed-per-model"
+  ) {
     throw new Error(`runtime API for ${id} is not supported by ${provider}`);
   }
   const readiness = record.readiness;
-  if (readiness !== "configured" && readiness !== "discovered" && readiness !== "verified" && readiness !== "blocked") {
+  if (
+    readiness !== "configured" &&
+    readiness !== "discovered" &&
+    readiness !== "verified" &&
+    readiness !== "blocked"
+  ) {
     throw new Error(`invalid readiness for ${id}`);
   }
   const settings = stringRecord(record.settings, `settings for ${id}`);
@@ -345,13 +358,19 @@ function parseProviderProfile(value: unknown): ProviderProfile {
     if (definition) {
       const field = definition.fields.find((candidate) => candidate.id === key);
       if (!field || field.secret) throw new Error(`unsupported setting for ${provider}: ${key}`);
-      if (field.type === "select" && !field.options?.some((option) => option.value === settings[key])) {
+      if (
+        field.type === "select" &&
+        !field.options?.some((option) => option.value === settings[key])
+      ) {
         throw new Error(`invalid option for ${provider}: ${key}`);
       }
       if (field.visibleWhen?.field === "authMethod" && field.visibleWhen.equals !== auth.method) {
-        throw new Error(`setting ${key} is unavailable for ${provider} authentication method ${auth.method}`);
+        throw new Error(
+          `setting ${key} is unavailable for ${provider} authentication method ${auth.method}`,
+        );
       }
-      if (field.type === "url") settings[key] = safeProfileUrl(settings[key]!, provider, auth.method);
+      if (field.type === "url")
+        settings[key] = safeProfileUrl(settings[key]!, provider, auth.method);
     }
   }
   const headers = optionalArrayValue(record.headers, `headers for ${id}`).map((header) =>
@@ -394,8 +413,14 @@ function parseProviderAuth(
   if (secretRef && !/^auth:[a-z0-9][a-z0-9._-]{0,63}(?::header:[a-z0-9-]+)?$/.test(secretRef)) {
     throw new Error(`invalid secretRef for ${provider}`);
   }
-  const rawHeaderName = optionalString(record.headerName, `headerName for ${provider}`)?.toLowerCase();
-  if (rawHeaderName && !CONTROLLED_SECRET_HEADER_NAMES.includes(rawHeaderName as ControlledSecretHeaderName)) {
+  const rawHeaderName = optionalString(
+    record.headerName,
+    `headerName for ${provider}`,
+  )?.toLowerCase();
+  if (
+    rawHeaderName &&
+    !CONTROLLED_SECRET_HEADER_NAMES.includes(rawHeaderName as ControlledSecretHeaderName)
+  ) {
     throw new Error(`unsupported secret header for ${provider}: ${rawHeaderName}`);
   }
   if (method === "custom-header" && !rawHeaderName) {
@@ -411,7 +436,11 @@ function parseProviderAuth(
 function parseControlledHeader(value: unknown, provider: string): ControlledProviderHeader {
   const record = asRecord(value, `controlled header for ${provider}`);
   const name = requiredString(record.name, `header name for ${provider}`).toLowerCase();
-  if (![...CONTROLLED_LITERAL_HEADER_NAMES, ...CONTROLLED_SECRET_HEADER_NAMES].includes(name as ControlledHeaderName)) {
+  if (
+    ![...CONTROLLED_LITERAL_HEADER_NAMES, ...CONTROLLED_SECRET_HEADER_NAMES].includes(
+      name as ControlledHeaderName,
+    )
+  ) {
     throw new Error(`unsupported controlled header for ${provider}: ${name}`);
   }
   const literal = optionalString(record.value, `header value for ${provider}`);
@@ -419,13 +448,16 @@ function parseControlledHeader(value: unknown, provider: string): ControlledProv
   if (Boolean(literal) === Boolean(secretRef)) {
     throw new Error(`controlled header for ${provider} requires exactly one value or secretRef`);
   }
+  // oxlint-disable-next-line no-control-regex -- intentionally rejects ASCII control characters in header values
   if (literal && /[\u0000-\u001f\u007f]/.test(literal)) {
     throw new Error(`controlled header for ${provider} contains control characters`);
   }
   if (literal && name === "http-referer") safeProfileUrl(literal, provider, "none");
   const secret = CONTROLLED_SECRET_HEADER_NAMES.includes(name as ControlledSecretHeaderName);
-  if (secret && literal) throw new Error(`secret header ${name} for ${provider} must use secretRef`);
-  if (!secret && secretRef) throw new Error(`literal header ${name} for ${provider} may not use secretRef`);
+  if (secret && literal)
+    throw new Error(`secret header ${name} for ${provider} must use secretRef`);
+  if (!secret && secretRef)
+    throw new Error(`literal header ${name} for ${provider} may not use secretRef`);
   if (secretRef && !/^auth:[a-z0-9][a-z0-9._-]{0,63}:header:[a-z0-9-]+$/.test(secretRef)) {
     throw new Error(`invalid header secretRef for ${provider}`);
   }
@@ -439,17 +471,19 @@ function parseControlledHeader(value: unknown, provider: string): ControlledProv
 function parseCustomModel(value: unknown, provider: string): CustomModelConfiguration {
   const record = asRecord(value, `model for ${provider}`);
   const id = requiredString(record.id, `model id for ${provider}`);
+  // oxlint-disable-next-line no-control-regex -- intentionally rejects ASCII control characters in model id
   if (/[\u0000-\u001f\u007f]/.test(id)) {
     throw new Error(`invalid model id for ${provider}: ${id}`);
   }
-  const input = record.input === undefined
-    ? ["text" as const]
-    : stringArray(record.input, `input for ${provider}/${id}`).map((entry) => {
-        if (entry !== "text" && entry !== "image") {
-          throw new Error(`invalid input type for ${provider}/${id}: ${entry}`);
-        }
-        return entry;
-      });
+  const input =
+    record.input === undefined
+      ? ["text" as const]
+      : stringArray(record.input, `input for ${provider}/${id}`).map((entry) => {
+          if (entry !== "text" && entry !== "image") {
+            throw new Error(`invalid input type for ${provider}/${id}: ${entry}`);
+          }
+          return entry;
+        });
   if (!input.includes("text")) input.unshift("text");
   const contextWindow = optionalInteger(
     record.contextWindow,
@@ -482,7 +516,10 @@ function parseModelMetadata(
 ): CustomModelMetadata | undefined {
   if (value === undefined) return undefined;
   const record = asRecord(value, `metadata for ${provider}/${model}`);
-  const contextWindow = metadataSource(record.contextWindow, `contextWindow metadata for ${provider}/${model}`);
+  const contextWindow = metadataSource(
+    record.contextWindow,
+    `contextWindow metadata for ${provider}/${model}`,
+  );
   const maxTokens = metadataSource(record.maxTokens, `maxTokens metadata for ${provider}/${model}`);
   if (!contextWindow && !maxTokens) return undefined;
   return {
@@ -505,7 +542,8 @@ function modelReference(value: unknown): string {
   if (separator < 1 || separator === reference.length - 1) {
     throw new Error(`model reference must use provider/model: ${reference}`);
   }
-  if (/\s/.test(reference)) throw new Error(`model reference may not contain whitespace: ${reference}`);
+  if (/\s/.test(reference))
+    throw new Error(`model reference may not contain whitespace: ${reference}`);
   return reference;
 }
 
@@ -534,7 +572,8 @@ function stringArray(value: unknown, label: string): string[] {
 }
 
 function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${label} must be a non-empty string`);
+  if (typeof value !== "string" || !value.trim())
+    throw new Error(`${label} must be a non-empty string`);
   if (value.length > 2048) throw new Error(`${label} is too long`);
   return value.trim();
 }
@@ -562,7 +601,8 @@ function stringRecord(value: unknown, label: string): Record<string, string> {
   const record = asRecord(value, label);
   const result: Record<string, string> = {};
   for (const [key, raw] of Object.entries(record)) {
-    if (!/^[A-Za-z][A-Za-z0-9._-]{0,63}$/.test(key)) throw new Error(`invalid key in ${label}: ${key}`);
+    if (!/^[A-Za-z][A-Za-z0-9._-]{0,63}$/.test(key))
+      throw new Error(`invalid key in ${label}: ${key}`);
     result[key] = requiredString(raw, `${label}.${key}`);
   }
   return result;
@@ -570,7 +610,11 @@ function stringRecord(value: unknown, label: string): Record<string, string> {
 
 function parseWireProtocol(value: unknown, label: string): WireProtocol {
   const protocol = requiredString(value, label);
-  if (protocol !== "openai-chat-completions" && protocol !== "openai-responses" && protocol !== "anthropic-messages") {
+  if (
+    protocol !== "openai-chat-completions" &&
+    protocol !== "openai-responses" &&
+    protocol !== "anthropic-messages"
+  ) {
     throw new Error(`${label} must be a supported wire protocol`);
   }
   return protocol;
@@ -592,9 +636,15 @@ function isProviderRuntimeApi(value: string): value is ProviderRuntimeApi {
 
 function safeProfileUrl(value: string, provider: string, authMethod: ProviderAuthMethod): string {
   const url = new URL(value);
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`URL setting for ${provider} must use HTTP or HTTPS`);
-  if (url.username || url.password) throw new Error(`URL setting for ${provider} may not contain credentials`);
-  if (authMethod !== "none" && url.protocol === "http:" && !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    throw new Error(`URL setting for ${provider} must use HTTP or HTTPS`);
+  if (url.username || url.password)
+    throw new Error(`URL setting for ${provider} may not contain credentials`);
+  if (
+    authMethod !== "none" &&
+    url.protocol === "http:" &&
+    !["127.0.0.1", "localhost", "::1"].includes(url.hostname)
+  ) {
     throw new Error(`URL setting for ${provider} must use HTTPS with credentials`);
   }
   url.hash = "";

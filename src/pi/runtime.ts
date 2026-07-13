@@ -1,6 +1,20 @@
-import { createAgentSession, SessionManager, SettingsManager, type AuthStorage, type ModelRegistry, type CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
+import {
+  createAgentSession,
+  SessionManager,
+  SettingsManager,
+  type AuthStorage,
+  type ModelRegistry,
+  type CreateAgentSessionOptions,
+} from "@earendil-works/pi-coding-agent";
 
-import type { BoundProjectPolicy, HostAssistanceRequest, HostAssistanceResult, PolicyDecision, ThinkingLevel, WorkerMode } from "../core/contracts.js";
+import type {
+  BoundProjectPolicy,
+  HostAssistanceRequest,
+  HostAssistanceResult,
+  PolicyDecision,
+  ThinkingLevel,
+  WorkerMode,
+} from "../core/contracts.js";
 import type { PolicyAction, PolicyEngine } from "../policy/engine.js";
 import type { ProjectPolicyError } from "../policy/project-policy.js";
 import { createTrustedResourceLoader } from "../policy/extension.js";
@@ -27,15 +41,19 @@ export interface CreateWorkerSessionOptions {
     fingerprint: string,
     signal?: AbortSignal,
   ) => Promise<"approved" | "denied" | "expired">;
-  requestHostAssistance?: (request: HostAssistanceRequest, signal?: AbortSignal) => Promise<HostAssistanceResult>;
+  requestHostAssistance?: (
+    request: HostAssistanceRequest,
+    signal?: AbortSignal,
+  ) => Promise<HostAssistanceResult>;
   authStorage?: AuthStorage;
   modelRegistry?: ModelRegistry;
 }
 
 export async function createWorkerSession(options: CreateWorkerSessionOptions) {
-  const environment = options.authStorage && options.modelRegistry
-    ? { authStorage: options.authStorage, modelRegistry: options.modelRegistry }
-    : createPiEnvironment(options.modelConfiguration);
+  const environment =
+    options.authStorage && options.modelRegistry
+      ? { authStorage: options.authStorage, modelRegistry: options.modelRegistry }
+      : createPiEnvironment(options.modelConfiguration);
   const { authStorage, modelRegistry } = environment;
   const settingsManager = SettingsManager.inMemory();
   const resourceLoader = await createTrustedResourceLoader({
@@ -48,14 +66,18 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
   const customTools = [
     ...(options.boundProjectPolicy
       ? createScopedFilesystemTools({
-        cwd: options.cwd,
-        mode: options.mode,
-        boundProjectPolicy: options.boundProjectPolicy,
-        ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
-      })
-      : options.mode === "implement" ? createScopedMutationTools(options.cwd) : []),
+          cwd: options.cwd,
+          mode: options.mode,
+          boundProjectPolicy: options.boundProjectPolicy,
+          ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+        })
+      : options.mode === "implement"
+        ? createScopedMutationTools(options.cwd)
+        : []),
     ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
-    ...(options.requestHostAssistance ? [createHostAssistanceTool(options.requestHostAssistance)] : []),
+    ...(options.requestHostAssistance
+      ? [createHostAssistanceTool(options.requestHostAssistance)]
+      : []),
   ];
 
   // `tools` is the SDK's allow-list of tool names, not a set of built-in

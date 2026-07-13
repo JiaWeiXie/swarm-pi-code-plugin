@@ -29,7 +29,7 @@ If a task returns `setup-required`, retain the continuation ID and original requ
 - Never approve a capability lease, choose adoption, materialize an artifact, stash, discard, commit, merge, push, or deploy without the user's explicit decision.
 - Never auto-approve because a timeout elapsed, a hook fired, or a notification was replayed.
 
-Do not ask the user to choose between internal roles, Pi, or direct Host execution. Route the stated intent to the narrowest matching workflow and ask only for a decision that changes files, grants a capability, adopts content, or delivers an artifact. Use the canonical short Claude command names such as `/swarm-pi-code-plugin:orchestrate`; never expose duplicated internal skill names.
+Do not ask the user to choose between internal roles, Pi, or direct Host execution. Route the stated intent to the narrowest matching workflow and ask only for a decision that changes files, grants a capability, adopts content, or delivers an artifact. Use the canonical skill invocations such as `/swarm-pi-code-plugin:swarm-pi-orchestrate`; there is one entry per capability, so do not invent alternate names.
 
 When external facts are known to be required before delegation, prefetch one cited context file as the initial `EvidencePack` through the Host and pass it with `--host-context-file`. Include source URLs, retrieval date, verified claims, unknowns, and version constraints. When the unknown emerges during the Pi session, use live Host Assistance instead of restarting or asking the worker to choose a retrieval tool. If evidence cannot be obtained, return a typed unavailable result rather than presenting speculation as verified research.
 

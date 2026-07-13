@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import {
-  AuthStorage,
-  type AuthCredential,
-} from "@earendil-works/pi-coding-agent";
+import { AuthStorage, type AuthCredential } from "@earendil-works/pi-coding-agent";
 
 import { getProviderDefinition } from "./capabilities.js";
 import { customProviderHeaderVariable } from "../pi/environment.js";
@@ -68,7 +65,8 @@ export class CredentialDraftVault {
   resolve(provider: string, draftId: string): AuthCredential {
     this.prune();
     const draft = this.drafts.get(draftId);
-    if (!draft || draft.provider !== provider) throw new Error("Credential draft is missing or expired");
+    if (!draft || draft.provider !== provider)
+      throw new Error("Credential draft is missing or expired");
     return structuredClone(draft.credential);
   }
 
@@ -132,7 +130,12 @@ export type OAuthChallenge =
 
 export type OAuthNotice =
   | { type: "auth-url"; url: string; instructions?: string | undefined }
-  | { type: "device-code"; userCode: string; verificationUri: string; expiresInSeconds?: number | undefined }
+  | {
+      type: "device-code";
+      userCode: string;
+      verificationUri: string;
+      expiresInSeconds?: number | undefined;
+    }
   | { type: "progress"; message: string };
 
 export interface OAuthSessionView {
@@ -177,15 +180,18 @@ export class OAuthSessionManager {
     private readonly persistentAuth: AuthStorage,
     options: {
       timeoutMs?: number | undefined;
-      login?: ((
-        storage: AuthStorage,
-        provider: string,
-        callbacks: Parameters<AuthStorage["login"]>[1],
-      ) => Promise<void>) | undefined;
+      login?:
+        | ((
+            storage: AuthStorage,
+            provider: string,
+            callbacks: Parameters<AuthStorage["login"]>[1],
+          ) => Promise<void>)
+        | undefined;
     } = {},
   ) {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_OAUTH_TIMEOUT_MS;
-    this.login = options.login ?? ((storage, provider, callbacks) => storage.login(provider, callbacks));
+    this.login =
+      options.login ?? ((storage, provider, callbacks) => storage.login(provider, callbacks));
   }
 
   start(provider: string, preferredMethod?: string): OAuthSessionView {
@@ -217,20 +223,29 @@ export class OAuthSessionManager {
 
     const callbacks: Parameters<AuthStorage["login"]>[1] = {
       signal: controller.signal,
-      onAuth: (info) => this.update(record, {
-        notice: { type: "auth-url", url: safeOAuthUrl(info.url), ...(info.instructions ? { instructions: info.instructions } : {}) },
-      }),
-      onDeviceCode: (info) => this.update(record, {
-        notice: {
-          type: "device-code",
-          userCode: info.userCode,
-          verificationUri: safeOAuthUrl(info.verificationUri),
-          ...(info.expiresInSeconds === undefined ? {} : { expiresInSeconds: info.expiresInSeconds }),
-        },
-      }),
-      onProgress: (message) => this.update(record, {
-        notice: { type: "progress", message: safeOAuthMessage(message) },
-      }),
+      onAuth: (info) =>
+        this.update(record, {
+          notice: {
+            type: "auth-url",
+            url: safeOAuthUrl(info.url),
+            ...(info.instructions ? { instructions: info.instructions } : {}),
+          },
+        }),
+      onDeviceCode: (info) =>
+        this.update(record, {
+          notice: {
+            type: "device-code",
+            userCode: info.userCode,
+            verificationUri: safeOAuthUrl(info.verificationUri),
+            ...(info.expiresInSeconds === undefined
+              ? {}
+              : { expiresInSeconds: info.expiresInSeconds }),
+          },
+        }),
+      onProgress: (message) =>
+        this.update(record, {
+          notice: { type: "progress", message: safeOAuthMessage(message) },
+        }),
       onSelect: async (prompt) => {
         if (preferredMethod && prompt.options.some((option) => option.id === preferredMethod)) {
           const selected = preferredMethod;
@@ -244,38 +259,43 @@ export class OAuthSessionManager {
           options: prompt.options.map((option) => ({ id: option.id, label: option.label })),
         });
       },
-      onPrompt: (prompt) => this.awaitInput(record, {
-        id: randomUUID(),
-        type: "text",
-        message: safeOAuthMessage(prompt.message),
-        ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}),
-        ...(prompt.allowEmpty === undefined ? {} : { allowEmpty: prompt.allowEmpty }),
-      }).then((value) => value ?? ""),
-      onManualCodeInput: () => this.awaitInput(record, {
-        id: randomUUID(),
-        type: "manual-code",
-        message: "Complete login in the browser or paste the authorization code.",
-      }).then((value) => value ?? ""),
+      onPrompt: (prompt) =>
+        this.awaitInput(record, {
+          id: randomUUID(),
+          type: "text",
+          message: safeOAuthMessage(prompt.message),
+          ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}),
+          ...(prompt.allowEmpty === undefined ? {} : { allowEmpty: prompt.allowEmpty }),
+        }).then((value) => value ?? ""),
+      onManualCodeInput: () =>
+        this.awaitInput(record, {
+          id: randomUUID(),
+          type: "manual-code",
+          message: "Complete login in the browser or paste the authorization code.",
+        }).then((value) => value ?? ""),
     };
 
-    void this.login(staging, definition.oauthProvider, callbacks).then(() => {
-      if (isOAuthTerminal(record.status)) return;
-      const credential = staging.get(provider);
-      if (!credential || credential.type !== "oauth") throw new Error("OAuth completed without credentials");
-      const credentialDraft = this.vault.stageOAuth(provider, credential);
-      this.releasePending(record, new Error("OAuth flow completed"));
-      clearTimeout(record.timer);
-      this.update(record, { status: "completed", challenge: null, credentialDraft });
-    }).catch((error: unknown) => {
-      if (isOAuthTerminal(record.status)) return;
-      this.releasePending(record, new Error("OAuth flow stopped"));
-      clearTimeout(record.timer);
-      this.update(record, {
-        status: controller.signal.aborted ? "cancelled" : "failed",
-        challenge: null,
-        error: safeOAuthError(error),
+    void this.login(staging, definition.oauthProvider, callbacks)
+      .then(() => {
+        if (isOAuthTerminal(record.status)) return;
+        const credential = staging.get(provider);
+        if (!credential || credential.type !== "oauth")
+          throw new Error("OAuth completed without credentials");
+        const credentialDraft = this.vault.stageOAuth(provider, credential);
+        this.releasePending(record, new Error("OAuth flow completed"));
+        clearTimeout(record.timer);
+        this.update(record, { status: "completed", challenge: null, credentialDraft });
+      })
+      .catch((error: unknown) => {
+        if (isOAuthTerminal(record.status)) return;
+        this.releasePending(record, new Error("OAuth flow stopped"));
+        clearTimeout(record.timer);
+        this.update(record, {
+          status: controller.signal.aborted ? "cancelled" : "failed",
+          challenge: null,
+          error: safeOAuthError(error),
+        });
       });
-    });
     return publicOAuthSession(record);
   }
 
@@ -289,7 +309,8 @@ export class OAuthSessionManager {
     waitTimeoutMs: number,
   ): Promise<OAuthSessionView> {
     const record = this.requireSession(sessionId);
-    if (record.revision > afterRevision || isOAuthTerminal(record.status)) return publicOAuthSession(record);
+    if (record.revision > afterRevision || isOAuthTerminal(record.status))
+      return publicOAuthSession(record);
     const bounded = Math.max(0, Math.min(waitTimeoutMs, 25_000));
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
@@ -309,8 +330,12 @@ export class OAuthSessionManager {
   respond(sessionId: string, challengeId: string, value?: string): OAuthSessionView {
     const record = this.requireSession(sessionId);
     const pending = record.pending;
-    if (!pending || pending.challenge.id !== challengeId) throw new Error("OAuth prompt is stale or no longer active");
-    if (pending.challenge.type === "select" && !pending.challenge.options.some((option) => option.id === value)) {
+    if (!pending || pending.challenge.id !== challengeId)
+      throw new Error("OAuth prompt is stale or no longer active");
+    if (
+      pending.challenge.type === "select" &&
+      !pending.challenge.options.some((option) => option.id === value)
+    ) {
       throw new Error("Choose one of the offered OAuth options");
     }
     record.pending = undefined;
@@ -330,8 +355,12 @@ export class OAuthSessionManager {
     this.sessions.clear();
   }
 
-  private awaitInput(record: OAuthSessionRecord, challenge: OAuthChallenge): Promise<string | undefined> {
-    if (record.controller.signal.aborted) return Promise.reject(new Error("OAuth flow was cancelled"));
+  private awaitInput(
+    record: OAuthSessionRecord,
+    challenge: OAuthChallenge,
+  ): Promise<string | undefined> {
+    if (record.controller.signal.aborted)
+      return Promise.reject(new Error("OAuth flow was cancelled"));
     this.releasePending(record, new Error("OAuth prompt was replaced"));
     return new Promise<string | undefined>((resolve, reject) => {
       record.pending = { challenge, resolve, reject };
@@ -343,7 +372,10 @@ export class OAuthSessionManager {
     if (isOAuthTerminal(record.status)) return;
     clearTimeout(record.timer);
     record.controller.abort();
-    this.releasePending(record, new Error(status === "timed-out" ? "OAuth flow timed out" : "OAuth flow was cancelled"));
+    this.releasePending(
+      record,
+      new Error(status === "timed-out" ? "OAuth flow timed out" : "OAuth flow was cancelled"),
+    );
     this.update(record, {
       status,
       challenge: null,
@@ -360,11 +392,14 @@ export class OAuthSessionManager {
 
   private update(
     record: OAuthSessionRecord,
-    patch: Partial<Pick<OAuthSessionView, "status" | "challenge" | "notice" | "credentialDraft" | "error">>,
+    patch: Partial<
+      Pick<OAuthSessionView, "status" | "challenge" | "notice" | "credentialDraft" | "error">
+    >,
   ): void {
     Object.assign(record, patch);
     record.revision += 1;
     record.updatedAt = new Date().toISOString();
+    // oxlint-disable-next-line no-useless-spread -- defensive copy: callbacks may mutate record.waiters mid-iteration
     for (const waiter of [...record.waiters]) waiter();
   }
 
@@ -417,26 +452,40 @@ function providerIdentifier(value: string): string {
 
 function safeOAuthUrl(value: string): string {
   const url = new URL(value);
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname))) {
+  if (
+    url.protocol !== "https:" &&
+    !(url.protocol === "http:" && ["127.0.0.1", "localhost", "::1"].includes(url.hostname))
+  ) {
     throw new Error("OAuth provider returned an unsafe URL");
   }
   return url.toString();
 }
 
 function safeOAuthMessage(value: string): string {
-  return value.replace(/(?:access|refresh|id)_?token\s*[:=]\s*\S+/gi, "token=[redacted]").slice(0, 2_000);
+  return value
+    .replace(/(?:access|refresh|id)_?token\s*[:=]\s*\S+/gi, "token=[redacted]")
+    .slice(0, 2_000);
 }
 
 function safeOAuthError(error: unknown): string {
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("cancel")) return "OAuth sign-in was cancelled.";
-  if (message.includes("timed out") || message.includes("timeout")) return "OAuth sign-in timed out. Start a new sign-in.";
-  if (message.includes("not enabled") || message.includes("unavailable")) return "This OAuth sign-in method is unavailable for the provider.";
-  if (message.includes("unsafe url") || message.includes("untrusted")) return "The provider returned an unsafe OAuth address.";
-  if (message.includes("network") || message.includes("fetch") || message.includes("connect")) return "The OAuth provider could not be reached. Retry the sign-in.";
+  if (message.includes("timed out") || message.includes("timeout"))
+    return "OAuth sign-in timed out. Start a new sign-in.";
+  if (message.includes("not enabled") || message.includes("unavailable"))
+    return "This OAuth sign-in method is unavailable for the provider.";
+  if (message.includes("unsafe url") || message.includes("untrusted"))
+    return "The provider returned an unsafe OAuth address.";
+  if (message.includes("network") || message.includes("fetch") || message.includes("connect"))
+    return "The OAuth provider could not be reached. Retry the sign-in.";
   return "OAuth sign-in failed. Retry or choose another sign-in method.";
 }
 
 function isOAuthTerminal(status: OAuthSessionView["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled" || status === "timed-out";
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "timed-out"
+  );
 }

@@ -1,6 +1,14 @@
 export type Host = "claude" | "codex";
 
-export type TaskKind = "ask" | "review" | "plan" | "implement" | "orchestrate" | "scaffold" | "setup" | "discover";
+export type TaskKind =
+  | "ask"
+  | "review"
+  | "plan"
+  | "implement"
+  | "orchestrate"
+  | "scaffold"
+  | "setup"
+  | "discover";
 
 export type WorkerMode = "readonly" | "implement";
 
@@ -83,7 +91,10 @@ export interface ActionRecommendation {
   dataClassification: DataClassification;
 }
 
-export type HostAssistanceRequest = HostContextRequest | HumanDecisionRequest | ActionRecommendation;
+export type HostAssistanceRequest =
+  | HostContextRequest
+  | HumanDecisionRequest
+  | ActionRecommendation;
 
 export interface HostContextClaim {
   claim: string;
@@ -140,8 +151,17 @@ export interface ActionRecommendationReceipt {
   hash: string;
 }
 
-export type HostAssistanceResult = HostContextBundle | HumanDecisionResult | HostAssistanceUnavailable | ActionRecommendationReceipt;
-export type HostAssistanceRequestStatus = "pending" | "resolved" | "declined" | "expired" | "consumed";
+export type HostAssistanceResult =
+  | HostContextBundle
+  | HumanDecisionResult
+  | HostAssistanceUnavailable
+  | ActionRecommendationReceipt;
+export type HostAssistanceRequestStatus =
+  | "pending"
+  | "resolved"
+  | "declined"
+  | "expired"
+  | "consumed";
 
 export interface HostAssistanceRequestSummary {
   id: string;
@@ -204,7 +224,13 @@ export type WorkerStatus =
   | "orphaned"
   | "not-implemented";
 
-export type JobStatus = "queued" | "running" | "awaiting-approval" | "awaiting-host" | "awaiting-decision" | WorkerStatus;
+export type JobStatus =
+  | "queued"
+  | "running"
+  | "awaiting-approval"
+  | "awaiting-host"
+  | "awaiting-decision"
+  | WorkerStatus;
 
 export type NotificationStatus = "pending" | "acknowledged";
 
@@ -223,7 +249,15 @@ export type WorkspaceStrategy = "auto" | "isolated-head" | "isolated-snapshot";
 
 export interface SetupIssue {
   code: string;
-  stage: "runtime" | "state" | "connections" | "models" | "roles" | "execution-safety" | "workspace" | "recovery";
+  stage:
+    | "runtime"
+    | "state"
+    | "connections"
+    | "models"
+    | "roles"
+    | "execution-safety"
+    | "workspace"
+    | "recovery";
   severity: "warning" | "blocking";
   recoverable: boolean;
   message: string;
@@ -261,7 +295,13 @@ export interface ReadinessReport {
   issues: SetupIssue[];
 }
 
-export type JobPhase = "queued" | "preflight" | "delegating" | "postflight" | "verifying" | "checkpointing";
+export type JobPhase =
+  | "queued"
+  | "preflight"
+  | "delegating"
+  | "postflight"
+  | "verifying"
+  | "checkpointing";
 
 export interface WorkerNextAction {
   action: string;
@@ -346,8 +386,17 @@ export interface DecisionLedgerEntry {
 
 export type DiscoveryStructuredArtifact =
   | { stage: "research"; evidencePlan: EvidencePlan; evidencePack: EvidencePack }
-  | { stage: "experiment"; experimentSpec: ExperimentSpec; execution: ExperimentExecutionEvidence; conclusion: ExperimentConclusion }
-  | { stage: "convergence"; featureDefinition: FeatureDefinition; decisionLedger: DecisionLedgerEntry[] };
+  | {
+      stage: "experiment";
+      experimentSpec: ExperimentSpec;
+      execution: ExperimentExecutionEvidence;
+      conclusion: ExperimentConclusion;
+    }
+  | {
+      stage: "convergence";
+      featureDefinition: FeatureDefinition;
+      decisionLedger: DecisionLedgerEntry[];
+    };
 
 export interface DiscoveryStageReport {
   stage: DiscoveryStage;
@@ -728,7 +777,11 @@ export interface AuditResultSummary {
   effectiveThinkingLevel?: ThinkingLevel;
   orchestrationTrace?: WorkerResult["orchestrationTrace"];
   policySummary?: WorkerResult["policySummary"];
-  agentVerification?: { status: NonNullable<WorkerResult["agentVerification"]>["status"]; output: string; model: string | null };
+  agentVerification?: {
+    status: NonNullable<WorkerResult["agentVerification"]>["status"];
+    output: string;
+    model: string | null;
+  };
   artifact?: WorkerResult["artifact"];
 }
 

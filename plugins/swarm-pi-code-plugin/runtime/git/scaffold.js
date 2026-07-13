@@ -13,8 +13,12 @@ export async function prepareScaffoldWorkspace(cwd, target, jobId, spec) {
     await assertTargetIsNotLink(resolvedTarget);
     const existingParent = await nearestExistingDirectory(path.dirname(resolvedTarget));
     if (existingParent) {
-        const parentGitRoot = await git(existingParent, ["rev-parse", "--show-toplevel"]).then((value) => path.resolve(value.trim())).catch(() => undefined);
-        if (parentGitRoot && isInside(parentGitRoot, resolvedTarget) && parentGitRoot !== resolvedTarget) {
+        const parentGitRoot = await git(existingParent, ["rev-parse", "--show-toplevel"])
+            .then((value) => path.resolve(value.trim()))
+            .catch(() => undefined);
+        if (parentGitRoot &&
+            isInside(parentGitRoot, resolvedTarget) &&
+            parentGitRoot !== resolvedTarget) {
             throw new Error("Scaffold target is nested inside an existing Git repository; use that repository or choose an external target");
         }
     }
@@ -32,14 +36,18 @@ export async function prepareScaffoldWorkspace(cwd, target, jobId, spec) {
     try {
         await fs.mkdir(worktree, { recursive: true, mode: 0o700 });
         const preservedPaths = assessment.entries
-            .filter((entry) => entry.category === "runtime" || entry.category === "ephemeral" || protectedAdoptionPath(entry.path))
+            .filter((entry) => entry.category === "runtime" ||
+            entry.category === "ephemeral" ||
+            protectedAdoptionPath(entry.path))
             .map((entry) => entry.path);
         if (spec.targetMode === "adopt") {
             await copyAdoptionBaseline(resolvedTarget, worktree, preservedPaths);
         }
         await git(worktree, ["init", "-b", "main"]);
         await git(worktree, ["add", "-A"]);
-        await artifactCommit(worktree, spec.targetMode === "adopt" ? `swarm-pi: adoption baseline ${jobId}` : `swarm-pi: bootstrap baseline ${jobId}`, true);
+        await artifactCommit(worktree, spec.targetMode === "adopt"
+            ? `swarm-pi: adoption baseline ${jobId}`
+            : `swarm-pi: bootstrap baseline ${jobId}`, true);
         const base = (await git(worktree, ["rev-parse", "HEAD"])).trim();
         return {
             worktree,
@@ -64,7 +72,9 @@ export async function checkpointScaffold(workspace, jobId) {
     return (await git(workspace.worktree, ["rev-parse", "HEAD"])).trim();
 }
 export async function materializeScaffold(options) {
-    if (!options.result.success || !options.result.artifact?.deliverable || !options.result.artifact.commit) {
+    if (!options.result.success ||
+        !options.result.artifact?.deliverable ||
+        !options.result.artifact.commit) {
         throw new Error("Scaffold artifact is not verified and deliverable");
     }
     const target = path.resolve(options.target ?? options.workspace.target);
@@ -164,13 +174,18 @@ export async function materializeScaffold(options) {
 }
 export function parseScaffoldSpec(value) {
     const parsed = JSON.parse(value);
-    if (parsed.version !== 1 || typeof parsed.request !== "string" || !parsed.request.trim() ||
-        typeof parsed.projectName !== "string" || !parsed.projectName.trim()) {
+    if (parsed.version !== 1 ||
+        typeof parsed.request !== "string" ||
+        !parsed.request.trim() ||
+        typeof parsed.projectName !== "string" ||
+        !parsed.projectName.trim()) {
         throw new Error("Scaffold spec requires version 1, request, and projectName");
     }
     if (parsed.targetMode !== "empty" && parsed.targetMode !== "adopt")
         throw new Error("Scaffold targetMode must be empty or adopt");
-    const strings = (value) => Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
+    const strings = (value) => Array.isArray(value) && value.every((entry) => typeof entry === "string")
+        ? value
+        : undefined;
     const structure = strings(parsed.structure);
     const dependencies = strings(parsed.dependencies);
     const verificationCommands = strings(parsed.verificationCommands);
@@ -191,10 +206,16 @@ export function parseScaffoldSpec(value) {
 }
 async function artifactCommit(cwd, message, allowEmpty) {
     await git(cwd, [
-        "-c", `user.name=${ARTIFACT_NAME}`,
-        "-c", `user.email=${ARTIFACT_EMAIL}`,
-        "-c", "commit.gpgsign=false",
-        "commit", ...(allowEmpty ? ["--allow-empty"] : []), "-m", message,
+        "-c",
+        `user.name=${ARTIFACT_NAME}`,
+        "-c",
+        `user.email=${ARTIFACT_EMAIL}`,
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        ...(allowEmpty ? ["--allow-empty"] : []),
+        "-m",
+        message,
     ]);
 }
 async function copyAdoptionBaseline(source, destination, preserved) {
@@ -255,7 +276,9 @@ async function acquireMaterializationLock(parent, target) {
             const handle = await fs.open(file, "wx", 0o600);
             await handle.writeFile(`${JSON.stringify({ pid: process.pid, target, createdAt: new Date().toISOString() })}\n`);
             await handle.close();
-            return async () => { await fs.rm(file, { force: true }); };
+            return async () => {
+                await fs.rm(file, { force: true });
+            };
         }
         catch (error) {
             if (error.code !== "EEXIST")
@@ -274,14 +297,17 @@ async function acquireMaterializationLock(parent, target) {
 function protectedAdoptionPath(value) {
     const normalized = value.split(path.sep).join("/");
     const basename = path.posix.basename(normalized).toLowerCase();
-    return normalized === ".env" || normalized.startsWith(".env.") || normalized === ".npmrc" || normalized === ".pypirc" ||
-        normalized.startsWith(".ssh/") || normalized.startsWith(".aws/") ||
-        /^(?:id_rsa|id_ed25519|credentials|secrets?\.json|.*\.pem|.*\.key)$/.test(basename);
+    return (normalized === ".env" ||
+        normalized.startsWith(".env.") ||
+        normalized === ".npmrc" ||
+        normalized === ".pypirc" ||
+        normalized.startsWith(".ssh/") ||
+        normalized.startsWith(".aws/") ||
+        /^(?:id_rsa|id_ed25519|credentials|secrets?\.json|.*\.pem|.*\.key)$/.test(basename));
 }
 function isLegacyRuntimeStatePath(value) {
     const normalized = value.split(path.sep).join("/");
-    return [".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"]
-        .some((directory) => normalized === directory || normalized.startsWith(`${directory}/`));
+    return [".swarm-pi-code-plugin", ".swarm-pi-code", ".swarm-code"].some((directory) => normalized === directory || normalized.startsWith(`${directory}/`));
 }
 async function seedProjectState(source, destination) {
     await fs.mkdir(destination, { recursive: true, mode: 0o700 });
@@ -299,7 +325,8 @@ async function seedProjectState(source, destination) {
     }
 }
 async function git(cwd, args) {
-    return (await execFileAsync("git", args, { cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })).stdout;
+    return (await execFileAsync("git", args, { cwd, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 }))
+        .stdout;
 }
 async function nearestExistingDirectory(candidate) {
     let current = path.resolve(candidate);
@@ -314,5 +341,6 @@ async function nearestExistingDirectory(candidate) {
 }
 function isInside(root, candidate) {
     const relative = path.relative(root, candidate);
-    return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+    return (relative === "" ||
+        (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative)));
 }

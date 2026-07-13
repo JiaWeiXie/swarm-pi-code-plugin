@@ -8,7 +8,7 @@ const MAX_AUDIT_SOURCE_BYTES = 32 * 1024 * 1024;
 const SAFE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const SENSITIVE_KEY = /^(?:worker|access|refresh|id)?_?(?:token|secret|secretref|password|api.?key|authorization|cookie|credential|private.?key)$/i;
 const TOKEN_PATTERNS = [
-    /\bBearer\s+[A-Za-z0-9._~+\/-]+/gi,
+    /\bBearer\s+[A-Za-z0-9._~+/-]+/gi,
     /\bBasic\s+[A-Za-z0-9+/=]+/gi,
     /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
     /\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9-]+|AIza[0-9A-Za-z_-]{20,}|ya29\.[A-Za-z0-9._-]+|(?:AKIA|ASIA)[A-Z0-9]{16}|hf_[A-Za-z0-9]{20,}|pplx-[A-Za-z0-9-]{20,}|npm_[A-Za-z0-9]{20,}|lin_[A-Za-z0-9]{20,})\b/g,
@@ -33,7 +33,8 @@ export async function exportJobAudit(cwd, jobId) {
     const providerVerified = verifyProviderSnapshot(request);
     const policyVerified = verifyPolicySnapshot(request.policySnapshot);
     const events = parsePolicyEvents(sources.policyEvents, roots, counter);
-    if (policyVerified && events.some((event) => event.policyHash && event.policyHash !== policyVerified.hash)) {
+    if (policyVerified &&
+        events.some((event) => event.policyHash && event.policyHash !== policyVerified.hash)) {
         throw new Error("Audit export failed policy event integrity validation.");
     }
     const exported = {
@@ -43,7 +44,9 @@ export async function exportJobAudit(cwd, jobId) {
         job: summarizeJob(snapshot.job, roots, counter),
         request: summarizeRequest(request, roots, counter),
         policy: {
-            snapshot: request.policySnapshot ? redactValue(request.policySnapshot, roots, counter) : null,
+            snapshot: request.policySnapshot
+                ? redactValue(request.policySnapshot, roots, counter)
+                : null,
             events,
         },
         approvals: (snapshot.job.approvals ?? []).map((approval) => summarizeApproval(approval, roots, counter)),
@@ -211,17 +214,23 @@ function summarizeResult(result, roots, counter) {
         ...(result.error !== undefined ? { error: result.error } : {}),
         ...(result.errorCode !== undefined ? { errorCode: result.errorCode } : {}),
         ...(result.role ? { role: result.role } : {}),
-        ...(result.requestedThinkingLevel ? { requestedThinkingLevel: result.requestedThinkingLevel } : {}),
-        ...(result.effectiveThinkingLevel ? { effectiveThinkingLevel: result.effectiveThinkingLevel } : {}),
+        ...(result.requestedThinkingLevel
+            ? { requestedThinkingLevel: result.requestedThinkingLevel }
+            : {}),
+        ...(result.effectiveThinkingLevel
+            ? { effectiveThinkingLevel: result.effectiveThinkingLevel }
+            : {}),
         ...(result.orchestrationTrace ? { orchestrationTrace: result.orchestrationTrace } : {}),
         ...(result.policySummary ? { policySummary: result.policySummary } : {}),
-        ...(result.agentVerification ? {
-            agentVerification: {
-                status: result.agentVerification.status,
-                output: result.agentVerification.output.slice(0, 16_384),
-                model: result.agentVerification.model,
-            },
-        } : {}),
+        ...(result.agentVerification
+            ? {
+                agentVerification: {
+                    status: result.agentVerification.status,
+                    output: result.agentVerification.output.slice(0, 16_384),
+                    model: result.agentVerification.model,
+                },
+            }
+            : {}),
         ...(result.artifact ? { artifact: result.artifact } : {}),
     };
     return redactValue(value, roots, counter);
@@ -229,7 +238,10 @@ function summarizeResult(result, roots, counter) {
 function parsePolicyEvents(raw, roots, counter) {
     if (raw === null || raw.trim() === "")
         return [];
-    return raw.split(/\r?\n/).filter(Boolean).map((line) => {
+    return raw
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => {
         let value;
         try {
             value = JSON.parse(line);
@@ -241,7 +253,18 @@ function parsePolicyEvents(raw, roots, counter) {
             throw new Error("Audit policy events contain an invalid record.");
         }
         const record = value;
-        const allowed = Object.fromEntries(["timestamp", "tool", "fingerprint", "decision", "risk", "reason", "action", "classifierCache", "model", "policyHash"]
+        const allowed = Object.fromEntries([
+            "timestamp",
+            "tool",
+            "fingerprint",
+            "decision",
+            "risk",
+            "reason",
+            "action",
+            "classifierCache",
+            "model",
+            "policyHash",
+        ]
             .filter((key) => key in record)
             .map((key) => [key, record[key]]));
         return redactValue(allowed, roots, counter);
@@ -290,7 +313,7 @@ function redactString(value, roots, counter) {
         if (!root || root === "/")
             continue;
         const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const pattern = new RegExp(`(^|[\\s:'\"=])${escaped}(?=($|[/\\\\\\s:'\"]))`, "g");
+        const pattern = new RegExp(`(^|[\\s:'"=])${escaped}(?=($|[/\\\\\\s:'"]))`, "g");
         output = output.replace(pattern, (_match, prefix) => {
             counter.paths += 1;
             return `${prefix}${replacement}`;

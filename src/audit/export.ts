@@ -28,16 +28,18 @@ import type { JobRecord } from "../state/state.js";
 
 const MAX_AUDIT_SOURCE_BYTES = 32 * 1024 * 1024;
 const SAFE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const SENSITIVE_KEY = /^(?:worker|access|refresh|id)?_?(?:token|secret|secretref|password|api.?key|authorization|cookie|credential|private.?key)$/i;
+const SENSITIVE_KEY =
+  /^(?:worker|access|refresh|id)?_?(?:token|secret|secretref|password|api.?key|authorization|cookie|credential|private.?key)$/i;
 const TOKEN_PATTERNS = [
-  /\bBearer\s+[A-Za-z0-9._~+\/-]+/gi,
+  /\bBearer\s+[A-Za-z0-9._~+/-]+/gi,
   /\bBasic\s+[A-Za-z0-9+/=]+/gi,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   /\b(?:gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|xox[baprs]-[A-Za-z0-9-]+|AIza[0-9A-Za-z_-]{20,}|ya29\.[A-Za-z0-9._-]+|(?:AKIA|ASIA)[A-Z0-9]{16}|hf_[A-Za-z0-9]{20,}|pplx-[A-Za-z0-9-]{20,}|npm_[A-Za-z0-9]{20,}|lin_[A-Za-z0-9]{20,})\b/g,
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
   /(?:access|refresh|id)_?token\s*[:=]\s*\S+/gi,
 ];
-const URL_USERINFO_PATTERN = /\b([a-z][a-z0-9+.-]*:\/\/)(?!\[redacted\]@)[^\s/@:]+(?::[^\s/@]*)?@/gi;
+const URL_USERINFO_PATTERN =
+  /\b([a-z][a-z0-9+.-]*:\/\/)(?!\[redacted\]@)[^\s/@:]+(?::[^\s/@]*)?@/gi;
 
 interface RedactionRoots {
   workspace: string[];
@@ -76,7 +78,10 @@ export async function exportJobAudit(cwd: string, jobId: string): Promise<JobAud
   const providerVerified = verifyProviderSnapshot(request);
   const policyVerified = verifyPolicySnapshot(request.policySnapshot);
   const events = parsePolicyEvents(sources.policyEvents, roots, counter);
-  if (policyVerified && events.some((event) => event.policyHash && event.policyHash !== policyVerified.hash)) {
+  if (
+    policyVerified &&
+    events.some((event) => event.policyHash && event.policyHash !== policyVerified.hash)
+  ) {
     throw new Error("Audit export failed policy event integrity validation.");
   }
 
@@ -87,11 +92,17 @@ export async function exportJobAudit(cwd: string, jobId: string): Promise<JobAud
     job: summarizeJob(snapshot.job, roots, counter),
     request: summarizeRequest(request, roots, counter),
     policy: {
-      snapshot: request.policySnapshot ? redactValue(request.policySnapshot, roots, counter) as PolicySnapshot : null,
+      snapshot: request.policySnapshot
+        ? (redactValue(request.policySnapshot, roots, counter) as PolicySnapshot)
+        : null,
       events,
     },
-    approvals: (snapshot.job.approvals ?? []).map((approval) => summarizeApproval(approval, roots, counter)),
-    leases: (snapshot.job.leases ?? []).map((lease) => redactValue(lease, roots, counter) as AuditLease),
+    approvals: (snapshot.job.approvals ?? []).map((approval) =>
+      summarizeApproval(approval, roots, counter),
+    ),
+    leases: (snapshot.job.leases ?? []).map(
+      (lease) => redactValue(lease, roots, counter) as AuditLease,
+    ),
     result: summarizeResult(snapshot.result, roots, counter),
     changes: {
       patch: sources.patch === null ? null : redactString(sources.patch, roots, counter),
@@ -115,11 +126,14 @@ export async function exportJobAudit(cwd: string, jobId: string): Promise<JobAud
 }
 
 function assertSafeJobId(jobId: string): void {
-  if (!SAFE_JOB_ID.test(jobId) || jobId.includes("..")) throw new Error("Invalid job id for audit export.");
+  if (!SAFE_JOB_ID.test(jobId) || jobId.includes(".."))
+    throw new Error("Invalid job id for audit export.");
 }
 
 function isTerminalStatus(status: JobStatus | string): boolean {
-  return ["succeeded", "failed", "cancelled", "timed-out", "orphaned", "not-implemented"].includes(status);
+  return ["succeeded", "failed", "cancelled", "timed-out", "orphaned", "not-implemented"].includes(
+    status,
+  );
 }
 
 async function readSources(directory: string): Promise<AuditSources> {
@@ -129,7 +143,8 @@ async function readSources(directory: string): Promise<AuditSources> {
     const value = await readLimited(file, false);
     if (value === null) throw new Error(`Missing audit source: ${name}`);
     total += Buffer.byteLength(value);
-    if (total > MAX_AUDIT_SOURCE_BYTES) throw new Error("Audit export exceeds the source size limit.");
+    if (total > MAX_AUDIT_SOURCE_BYTES)
+      throw new Error("Audit export exceeds the source size limit.");
     return value;
   };
   const readOptional = async (name: string): Promise<string | null> => {
@@ -137,7 +152,8 @@ async function readSources(directory: string): Promise<AuditSources> {
     const value = await readLimited(file, true);
     if (value !== null) {
       total += Buffer.byteLength(value);
-      if (total > MAX_AUDIT_SOURCE_BYTES) throw new Error("Audit export exceeds the source size limit.");
+      if (total > MAX_AUDIT_SOURCE_BYTES)
+        throw new Error("Audit export exceeds the source size limit.");
     }
     return value;
   };
@@ -180,7 +196,11 @@ async function pathAliases(value: string): Promise<string[]> {
   return [...new Set([resolved, canonical])];
 }
 
-function summarizeJob(job: JobRecord, roots: RedactionRoots, counter: RedactionCounter): AuditJobSummary {
+function summarizeJob(
+  job: JobRecord,
+  roots: RedactionRoots,
+  counter: RedactionCounter,
+): AuditJobSummary {
   const value: AuditJobSummary = {
     id: job.id,
     status: job.status,
@@ -202,7 +222,11 @@ function summarizeJob(job: JobRecord, roots: RedactionRoots, counter: RedactionC
   return redactValue(value, roots, counter) as AuditJobSummary;
 }
 
-function summarizeRequest(request: JobRequest, roots: RedactionRoots, counter: RedactionCounter): AuditRequestSummary {
+function summarizeRequest(
+  request: JobRequest,
+  roots: RedactionRoots,
+  counter: RedactionCounter,
+): AuditRequestSummary {
   const value: AuditRequestSummary = {
     ...(request.requestVersion ? { requestVersion: request.requestVersion } : {}),
     id: request.id,
@@ -224,7 +248,11 @@ function summarizeRequest(request: JobRequest, roots: RedactionRoots, counter: R
   return redactValue(value, roots, counter) as AuditRequestSummary;
 }
 
-function summarizeApproval(approval: ApprovalRequest, roots: RedactionRoots, counter: RedactionCounter): AuditApproval {
+function summarizeApproval(
+  approval: ApprovalRequest,
+  roots: RedactionRoots,
+  counter: RedactionCounter,
+): AuditApproval {
   const value = {
     id: approval.id,
     jobId: approval.jobId,
@@ -243,7 +271,11 @@ function summarizeApproval(approval: ApprovalRequest, roots: RedactionRoots, cou
   return redactValue(value, roots, counter) as AuditApproval;
 }
 
-function summarizeResult(result: WorkerResult, roots: RedactionRoots, counter: RedactionCounter): AuditResultSummary {
+function summarizeResult(
+  result: WorkerResult,
+  roots: RedactionRoots,
+  counter: RedactionCounter,
+): AuditResultSummary {
   const value: AuditResultSummary = {
     kind: result.kind,
     status: result.status,
@@ -260,42 +292,66 @@ function summarizeResult(result: WorkerResult, roots: RedactionRoots, counter: R
     ...(result.error !== undefined ? { error: result.error } : {}),
     ...(result.errorCode !== undefined ? { errorCode: result.errorCode } : {}),
     ...(result.role ? { role: result.role } : {}),
-    ...(result.requestedThinkingLevel ? { requestedThinkingLevel: result.requestedThinkingLevel } : {}),
-    ...(result.effectiveThinkingLevel ? { effectiveThinkingLevel: result.effectiveThinkingLevel } : {}),
+    ...(result.requestedThinkingLevel
+      ? { requestedThinkingLevel: result.requestedThinkingLevel }
+      : {}),
+    ...(result.effectiveThinkingLevel
+      ? { effectiveThinkingLevel: result.effectiveThinkingLevel }
+      : {}),
     ...(result.orchestrationTrace ? { orchestrationTrace: result.orchestrationTrace } : {}),
     ...(result.policySummary ? { policySummary: result.policySummary } : {}),
-    ...(result.agentVerification ? {
-      agentVerification: {
-        status: result.agentVerification.status,
-        output: result.agentVerification.output.slice(0, 16_384),
-        model: result.agentVerification.model,
-      },
-    } : {}),
+    ...(result.agentVerification
+      ? {
+          agentVerification: {
+            status: result.agentVerification.status,
+            output: result.agentVerification.output.slice(0, 16_384),
+            model: result.agentVerification.model,
+          },
+        }
+      : {}),
     ...(result.artifact ? { artifact: result.artifact } : {}),
   };
   return redactValue(value, roots, counter) as AuditResultSummary;
 }
 
-function parsePolicyEvents(raw: string | null, roots: RedactionRoots, counter: RedactionCounter): AuditPolicyEvent[] {
+function parsePolicyEvents(
+  raw: string | null,
+  roots: RedactionRoots,
+  counter: RedactionCounter,
+): AuditPolicyEvent[] {
   if (raw === null || raw.trim() === "") return [];
-  return raw.split(/\r?\n/).filter(Boolean).map((line) => {
-    let value: unknown;
-    try {
-      value = JSON.parse(line);
-    } catch {
-      throw new Error("Audit policy events contain malformed JSON.");
-    }
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error("Audit policy events contain an invalid record.");
-    }
-    const record = value as Record<string, unknown>;
-    const allowed = Object.fromEntries(
-      ["timestamp", "tool", "fingerprint", "decision", "risk", "reason", "action", "classifierCache", "model", "policyHash"]
-        .filter((key) => key in record)
-        .map((key) => [key, record[key]]),
-    );
-    return redactValue(allowed, roots, counter) as AuditPolicyEvent;
-  });
+  return raw
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        throw new Error("Audit policy events contain malformed JSON.");
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("Audit policy events contain an invalid record.");
+      }
+      const record = value as Record<string, unknown>;
+      const allowed = Object.fromEntries(
+        [
+          "timestamp",
+          "tool",
+          "fingerprint",
+          "decision",
+          "risk",
+          "reason",
+          "action",
+          "classifierCache",
+          "model",
+          "policyHash",
+        ]
+          .filter((key) => key in record)
+          .map((key) => [key, record[key]]),
+      );
+      return redactValue(allowed, roots, counter) as AuditPolicyEvent;
+    });
 }
 
 function verifyProviderSnapshot(request: JobRequest): { hash: string; verified: true } | null {
@@ -306,7 +362,9 @@ function verifyProviderSnapshot(request: JobRequest): { hash: string; verified: 
   return { hash: request.providerSnapshotHash, verified: true };
 }
 
-function verifyPolicySnapshot(snapshot: PolicySnapshot | undefined): { hash: string; verified: true } | null {
+function verifyPolicySnapshot(
+  snapshot: PolicySnapshot | undefined,
+): { hash: string; verified: true } | null {
   if (!snapshot) return null;
   if (policySnapshotHash(snapshot) !== snapshot.hash) {
     throw new Error("Audit export failed policy snapshot integrity validation.");
@@ -314,7 +372,12 @@ function verifyPolicySnapshot(snapshot: PolicySnapshot | undefined): { hash: str
   return { hash: snapshot.hash, verified: true };
 }
 
-function redactValue(value: unknown, roots: RedactionRoots, counter: RedactionCounter, key?: string): unknown {
+function redactValue(
+  value: unknown,
+  roots: RedactionRoots,
+  counter: RedactionCounter,
+  key?: string,
+): unknown {
   if (key && SENSITIVE_KEY.test(key)) {
     counter.secrets += 1;
     return "[redacted]";
@@ -322,10 +385,12 @@ function redactValue(value: unknown, roots: RedactionRoots, counter: RedactionCo
   if (typeof value === "string") return redactString(value, roots, counter);
   if (Array.isArray(value)) return value.map((item) => redactValue(item, roots, counter));
   if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([entryKey, entryValue]) => [
-    entryKey,
-    redactValue(entryValue, roots, counter, entryKey),
-  ]));
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([entryKey, entryValue]) => [
+      entryKey,
+      redactValue(entryValue, roots, counter, entryKey),
+    ]),
+  );
 }
 
 function redactString(value: string, roots: RedactionRoots, counter: RedactionCounter): string {
@@ -338,7 +403,7 @@ function redactString(value: string, roots: RedactionRoots, counter: RedactionCo
   ].sort(([left], [right]) => right.length - left.length)) {
     if (!root || root === "/") continue;
     const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`(^|[\\s:'\"=])${escaped}(?=($|[/\\\\\\s:'\"]))`, "g");
+    const pattern = new RegExp(`(^|[\\s:'"=])${escaped}(?=($|[/\\\\\\s:'"]))`, "g");
     output = output.replace(pattern, (_match, prefix: string) => {
       counter.paths += 1;
       return `${prefix}${replacement}`;
@@ -359,16 +424,20 @@ function redactString(value: string, roots: RedactionRoots, counter: RedactionCo
 }
 
 function assertSafeExport(serialized: string, request: JobRequest, roots: RedactionRoots): void {
-  if (serialized.includes(request.workerToken)) throw new Error("Audit export failed secret redaction validation.");
+  if (serialized.includes(request.workerToken))
+    throw new Error("Audit export failed secret redaction validation.");
   for (const root of Object.values(roots).flat()) {
-    if (root !== "/" && serialized.includes(root)) throw new Error("Audit export failed path redaction validation.");
+    if (root !== "/" && serialized.includes(root))
+      throw new Error("Audit export failed path redaction validation.");
   }
   for (const pattern of TOKEN_PATTERNS) {
     pattern.lastIndex = 0;
-    if (pattern.test(serialized)) throw new Error("Audit export failed secret redaction validation.");
+    if (pattern.test(serialized))
+      throw new Error("Audit export failed secret redaction validation.");
   }
   URL_USERINFO_PATTERN.lastIndex = 0;
-  if (URL_USERINFO_PATTERN.test(serialized)) throw new Error("Audit export failed secret redaction validation.");
+  if (URL_USERINFO_PATTERN.test(serialized))
+    throw new Error("Audit export failed secret redaction validation.");
 }
 
 function sha256(value: string): string {

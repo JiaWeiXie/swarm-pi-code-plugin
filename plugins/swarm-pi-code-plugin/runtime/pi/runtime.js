@@ -1,4 +1,4 @@
-import { createAgentSession, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, SessionManager, SettingsManager, } from "@earendil-works/pi-coding-agent";
 import { createTrustedResourceLoader } from "../policy/extension.js";
 import { createPiEnvironment } from "./environment.js";
 import { createScopedFilesystemTools, createScopedMutationTools } from "./scoped-tools.js";
@@ -24,9 +24,13 @@ export async function createWorkerSession(options) {
                 boundProjectPolicy: options.boundProjectPolicy,
                 ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
             })
-            : options.mode === "implement" ? createScopedMutationTools(options.cwd) : []),
+            : options.mode === "implement"
+                ? createScopedMutationTools(options.cwd)
+                : []),
         ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
-        ...(options.requestHostAssistance ? [createHostAssistanceTool(options.requestHostAssistance)] : []),
+        ...(options.requestHostAssistance
+            ? [createHostAssistanceTool(options.requestHostAssistance)]
+            : []),
     ];
     // `tools` is the SDK's allow-list of tool names, not a set of built-in
     // definitions to register (core/sdk.js: allowedToolNames = options.tools).

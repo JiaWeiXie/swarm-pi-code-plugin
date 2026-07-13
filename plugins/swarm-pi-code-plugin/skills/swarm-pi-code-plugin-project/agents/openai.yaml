@@ -1,4 +1,0 @@
-interface:
-  display_name: "Swarm Pi Code Plugin Project"
-  short_description: "Adjust Pi project routing and safety"
-  default_prompt: "Use $swarm-pi-code-plugin-project to update the Pi settings for this project."

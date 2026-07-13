@@ -16,7 +16,10 @@ export interface ValidatedDiscoveryStage {
   verification: string[];
 }
 
-export function parseDiscoveryStageOutput(stage: DiscoveryStage, output: string): ValidatedDiscoveryStage {
+export function parseDiscoveryStageOutput(
+  stage: DiscoveryStage,
+  output: string,
+): ValidatedDiscoveryStage {
   const value = parseObject(output);
   if (stage === "research") {
     const evidencePlan = parseEvidencePlan(value.evidencePlan);
@@ -45,7 +48,11 @@ export function parseDiscoveryStageOutput(stage: DiscoveryStage, output: string)
   const decisionLedger = parseDecisionLedger(value.decisionLedger);
   return {
     artifact: { stage, featureDefinition, decisionLedger },
-    verification: ["feature-definition-valid", "acceptance-criteria-present", "decision-ledger-present"],
+    verification: [
+      "feature-definition-valid",
+      "acceptance-criteria-present",
+      "decision-ledger-present",
+    ],
   };
 }
 
@@ -94,18 +101,24 @@ function parseEvidencePack(input: unknown): EvidencePack {
       confidence: confidence as "low" | "medium" | "high",
     };
   });
-  const citations = array(value.citations, "evidencePack.citations", true).map((item, index): HostContextCitation => {
-    const citation = record(item, `evidencePack.citations[${index}]`);
-    const retrievedAt = text(citation.retrievedAt, `evidencePack.citations[${index}].retrievedAt`);
-    if (!Number.isFinite(Date.parse(retrievedAt))) throw new Error(`evidencePack.citations[${index}].retrievedAt is invalid`);
-    return {
-      id: text(citation.id, `evidencePack.citations[${index}].id`),
-      title: text(citation.title, `evidencePack.citations[${index}].title`),
-      ...(optionalText(citation.url) ? { url: optionalText(citation.url)! } : {}),
-      ...(optionalText(citation.version) ? { version: optionalText(citation.version)! } : {}),
-      retrievedAt,
-    };
-  });
+  const citations = array(value.citations, "evidencePack.citations", true).map(
+    (item, index): HostContextCitation => {
+      const citation = record(item, `evidencePack.citations[${index}]`);
+      const retrievedAt = text(
+        citation.retrievedAt,
+        `evidencePack.citations[${index}].retrievedAt`,
+      );
+      if (!Number.isFinite(Date.parse(retrievedAt)))
+        throw new Error(`evidencePack.citations[${index}].retrievedAt is invalid`);
+      return {
+        id: text(citation.id, `evidencePack.citations[${index}].id`),
+        title: text(citation.title, `evidencePack.citations[${index}].title`),
+        ...(optionalText(citation.url) ? { url: optionalText(citation.url)! } : {}),
+        ...(optionalText(citation.version) ? { version: optionalText(citation.version)! } : {}),
+        retrievedAt,
+      };
+    },
+  );
   return {
     claims,
     citations,
@@ -153,7 +166,11 @@ function parseFeatureDefinition(input: unknown): FeatureDefinition {
   const value = record(input, "featureDefinition");
   return {
     summary: text(value.summary, "featureDefinition.summary"),
-    acceptanceCriteria: strings(value.acceptanceCriteria, "featureDefinition.acceptanceCriteria", true),
+    acceptanceCriteria: strings(
+      value.acceptanceCriteria,
+      "featureDefinition.acceptanceCriteria",
+      true,
+    ),
     nonGoals: strings(value.nonGoals, "featureDefinition.nonGoals"),
   };
 }
@@ -170,23 +187,27 @@ function parseDecisionLedger(input: unknown): DecisionLedgerEntry[] {
 }
 
 function record(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${field} must be an object`);
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error(`${field} must be an object`);
   return value as Record<string, unknown>;
 }
 
 function array(value: unknown, field: string, nonEmpty = false): unknown[] {
-  if (!Array.isArray(value) || (nonEmpty && value.length === 0)) throw new Error(`${field} must be ${nonEmpty ? "a non-empty" : "an"} array`);
+  if (!Array.isArray(value) || (nonEmpty && value.length === 0))
+    throw new Error(`${field} must be ${nonEmpty ? "a non-empty" : "an"} array`);
   return value;
 }
 
 function strings(value: unknown, field: string, nonEmpty = false): string[] {
   const values = array(value, field, nonEmpty);
-  if (!values.every((item) => typeof item === "string" && Boolean(item.trim()))) throw new Error(`${field} must contain only non-empty strings`);
+  if (!values.every((item) => typeof item === "string" && Boolean(item.trim())))
+    throw new Error(`${field} must contain only non-empty strings`);
   return values as string[];
 }
 
 function text(value: unknown, field: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${field} must be a non-empty string`);
+  if (typeof value !== "string" || !value.trim())
+    throw new Error(`${field} must be a non-empty string`);
   return value;
 }
 
@@ -195,6 +216,7 @@ function optionalText(value: unknown): string | undefined {
 }
 
 function integer(value: unknown, field: string, min: number, max: number): number {
-  if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) throw new Error(`${field} must be an integer from ${min} to ${max}`);
+  if (!Number.isInteger(value) || (value as number) < min || (value as number) > max)
+    throw new Error(`${field} must be an integer from ${min} to ${max}`);
   return value as number;
 }

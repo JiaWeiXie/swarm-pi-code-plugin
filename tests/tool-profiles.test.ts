@@ -36,8 +36,13 @@ test("worker tool allowlists retain policy-scoped and host custom tools", () => 
 });
 
 test("policy-scoped worker sessions keep their custom filesystem tools active", async () => {
-  const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-worker-tools-")));
-  const policy = await bindProjectPolicy(await compileEffectiveProjectPolicy({ cwd: workspace }), workspace);
+  const workspace = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-worker-tools-")),
+  );
+  const policy = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd: workspace }),
+    workspace,
+  );
   const { session } = await createWorkerSession({
     cwd: workspace,
     mode: "readonly",

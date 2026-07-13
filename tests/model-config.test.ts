@@ -61,17 +61,25 @@ test("model config falls back to legacy state priority until the first save", as
 
 test("custom provider config rejects embedded secrets and invalid model references", () => {
   assert.throws(
-    () => parseModelConfiguration({
-      version: 1,
-      primary: "secret/model",
-      fallbacks: [],
-      updatedAt: null,
-      customProviders: [{ ...customProvider, apiKey: "must-not-be-here" }],
-    }),
+    () =>
+      parseModelConfiguration({
+        version: 1,
+        primary: "secret/model",
+        fallbacks: [],
+        updatedAt: null,
+        customProviders: [{ ...customProvider, apiKey: "must-not-be-here" }],
+      }),
     /may not contain apiKey/,
   );
   assert.throws(
-    () => parseModelConfiguration({ version: 1, primary: "missing-separator", fallbacks: [], customProviders: [], updatedAt: null }),
+    () =>
+      parseModelConfiguration({
+        version: 1,
+        primary: "missing-separator",
+        fallbacks: [],
+        customProviders: [],
+        updatedAt: null,
+      }),
     /provider\/model/,
   );
 });
@@ -82,15 +90,17 @@ test("custom model limits can remain automatic and retain metadata provenance", 
     primary: "local-auto/model-a",
     fallbacks: [],
     updatedAt: null,
-    customProviders: [{
-      id: "local-auto",
-      name: "Local Auto",
-      baseUrl: "http://127.0.0.1:1234/v1",
-      api: "openai-completions",
-      authHeader: false,
-      requiresApiKey: false,
-      models: [{ id: "model-a" }],
-    }],
+    customProviders: [
+      {
+        id: "local-auto",
+        name: "Local Auto",
+        baseUrl: "http://127.0.0.1:1234/v1",
+        api: "openai-completions",
+        authHeader: false,
+        requiresApiKey: false,
+        models: [{ id: "model-a" }],
+      },
+    ],
   });
   const model = configuration.customProviders[0]?.models[0];
   assert.equal(model?.contextWindow, undefined);
@@ -99,14 +109,18 @@ test("custom model limits can remain automatic and retain metadata provenance", 
 
   const withMetadata = parseModelConfiguration({
     ...configuration,
-    customProviders: [{
-      ...configuration.customProviders[0],
-      models: [{
-        id: "model-a",
-        contextWindow: 131_072,
-        metadata: { contextWindow: "endpoint" },
-      }],
-    }],
+    customProviders: [
+      {
+        ...configuration.customProviders[0],
+        models: [
+          {
+            id: "model-a",
+            contextWindow: 131_072,
+            metadata: { contextWindow: "endpoint" },
+          },
+        ],
+      },
+    ],
   });
   assert.equal(withMetadata.customProviders[0]?.models[0]?.metadata?.contextWindow, "endpoint");
 });

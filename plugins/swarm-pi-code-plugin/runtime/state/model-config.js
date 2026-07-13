@@ -17,11 +17,7 @@ export const CONTROLLED_LITERAL_HEADER_NAMES = [
     "openai-project",
     "x-title",
 ];
-export const CONTROLLED_SECRET_HEADER_NAMES = [
-    "api-key",
-    "authorization",
-    "x-api-key",
-];
+export const CONTROLLED_SECRET_HEADER_NAMES = ["api-key", "authorization", "x-api-key"];
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_MODEL_MAX_TOKENS = 16_384;
 export const MODEL_METADATA_SOURCES = [
@@ -87,9 +83,7 @@ export async function clearModelConfiguration(cwd) {
     await fs.rm(await resolveModelConfigurationFile(cwd), { force: true });
 }
 export function modelPriority(configuration) {
-    return configuration.primary
-        ? unique([configuration.primary, ...configuration.fallbacks])
-        : [];
+    return configuration.primary ? unique([configuration.primary, ...configuration.fallbacks]) : [];
 }
 export function parseModelConfiguration(value) {
     const record = asRecord(value, "model configuration");
@@ -124,7 +118,7 @@ export function parseModelConfiguration(value) {
         fallbacks: filteredFallbacks,
         customProviders,
         providerProfiles,
-        updatedAt: record.updatedAt === null ? null : optionalString(record.updatedAt, "updatedAt") ?? null,
+        updatedAt: record.updatedAt === null ? null : (optionalString(record.updatedAt, "updatedAt") ?? null),
     };
 }
 function parseCustomProvider(value) {
@@ -213,11 +207,16 @@ function parseProviderProfile(value) {
     if (runtimeApi !== "managed-per-model" && !isProviderRuntimeApi(runtimeApi)) {
         throw new Error(`unsupported runtime API for ${id}: ${runtimeApi}`);
     }
-    if (definition && !definition.runtimeApis.includes(runtimeApi) && runtimeApi !== "managed-per-model") {
+    if (definition &&
+        !definition.runtimeApis.includes(runtimeApi) &&
+        runtimeApi !== "managed-per-model") {
         throw new Error(`runtime API for ${id} is not supported by ${provider}`);
     }
     const readiness = record.readiness;
-    if (readiness !== "configured" && readiness !== "discovered" && readiness !== "verified" && readiness !== "blocked") {
+    if (readiness !== "configured" &&
+        readiness !== "discovered" &&
+        readiness !== "verified" &&
+        readiness !== "blocked") {
         throw new Error(`invalid readiness for ${id}`);
     }
     const settings = stringRecord(record.settings, `settings for ${id}`);
@@ -229,7 +228,8 @@ function parseProviderProfile(value) {
             const field = definition.fields.find((candidate) => candidate.id === key);
             if (!field || field.secret)
                 throw new Error(`unsupported setting for ${provider}: ${key}`);
-            if (field.type === "select" && !field.options?.some((option) => option.value === settings[key])) {
+            if (field.type === "select" &&
+                !field.options?.some((option) => option.value === settings[key])) {
                 throw new Error(`invalid option for ${provider}: ${key}`);
             }
             if (field.visibleWhen?.field === "authMethod" && field.visibleWhen.equals !== auth.method) {
@@ -274,7 +274,8 @@ function parseProviderAuth(value, provider, fallback) {
         throw new Error(`invalid secretRef for ${provider}`);
     }
     const rawHeaderName = optionalString(record.headerName, `headerName for ${provider}`)?.toLowerCase();
-    if (rawHeaderName && !CONTROLLED_SECRET_HEADER_NAMES.includes(rawHeaderName)) {
+    if (rawHeaderName &&
+        !CONTROLLED_SECRET_HEADER_NAMES.includes(rawHeaderName)) {
         throw new Error(`unsupported secret header for ${provider}: ${rawHeaderName}`);
     }
     if (method === "custom-header" && !rawHeaderName) {
@@ -297,6 +298,7 @@ function parseControlledHeader(value, provider) {
     if (Boolean(literal) === Boolean(secretRef)) {
         throw new Error(`controlled header for ${provider} requires exactly one value or secretRef`);
     }
+    // oxlint-disable-next-line no-control-regex -- intentionally rejects ASCII control characters in header values
     if (literal && /[\u0000-\u001f\u007f]/.test(literal)) {
         throw new Error(`controlled header for ${provider} contains control characters`);
     }
@@ -319,6 +321,7 @@ function parseControlledHeader(value, provider) {
 function parseCustomModel(value, provider) {
     const record = asRecord(value, `model for ${provider}`);
     const id = requiredString(record.id, `model id for ${provider}`);
+    // oxlint-disable-next-line no-control-regex -- intentionally rejects ASCII control characters in model id
     if (/[\u0000-\u001f\u007f]/.test(id)) {
         throw new Error(`invalid model id for ${provider}: ${id}`);
     }
@@ -437,7 +440,9 @@ function stringRecord(value, label) {
 }
 function parseWireProtocol(value, label) {
     const protocol = requiredString(value, label);
-    if (protocol !== "openai-chat-completions" && protocol !== "openai-responses" && protocol !== "anthropic-messages") {
+    if (protocol !== "openai-chat-completions" &&
+        protocol !== "openai-responses" &&
+        protocol !== "anthropic-messages") {
         throw new Error(`${label} must be a supported wire protocol`);
     }
     return protocol;
@@ -461,7 +466,9 @@ function safeProfileUrl(value, provider, authMethod) {
         throw new Error(`URL setting for ${provider} must use HTTP or HTTPS`);
     if (url.username || url.password)
         throw new Error(`URL setting for ${provider} may not contain credentials`);
-    if (authMethod !== "none" && url.protocol === "http:" && !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+    if (authMethod !== "none" &&
+        url.protocol === "http:" &&
+        !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
         throw new Error(`URL setting for ${provider} must use HTTPS with credentials`);
     }
     url.hash = "";

@@ -214,19 +214,27 @@ function setupProblem(error) {
                     : /model|authenticated/i.test(message)
                         ? "model-configuration-invalid"
                         : "configuration-save-failed";
-    const stage = code.includes("sandbox") ? "execution-safety" : code.includes("model") ? "models" : code.includes("recovery") ? "recovery" : "workspace";
+    const stage = code.includes("sandbox")
+        ? "execution-safety"
+        : code.includes("model")
+            ? "models"
+            : code.includes("recovery")
+                ? "recovery"
+                : "workspace";
     return {
         code,
         stage,
         recoverable: true,
         message,
         preserved: ["form input", "previous saved configuration"],
-        nextActions: code === "sandbox-backend-unavailable" ? ["use-strict", "doctor"] : ["review-current-step", "doctor"],
+        nextActions: code === "sandbox-backend-unavailable"
+            ? ["use-strict", "doctor"]
+            : ["review-current-step", "doctor"],
     };
 }
 function redactSetupMessage(value) {
     return value
-        .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [redacted]")
+        .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+/gi, "Bearer [redacted]")
         .replace(/\bsk-[A-Za-z0-9_-]+/gi, "[redacted]")
         .replace(/\b(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
         .slice(0, 2_000);
@@ -252,21 +260,37 @@ function normalizeProjectSubmission(value) {
             ? { adaptivePolicy: record.adaptivePolicy }
             : {}),
         ...(record.backgroundRolePolicy !== undefined
-            ? { backgroundRolePolicy: record.backgroundRolePolicy }
+            ? {
+                backgroundRolePolicy: record.backgroundRolePolicy,
+            }
             : {}),
-        ...(record.decisionMode !== undefined ? { decisionMode: record.decisionMode } : {}),
-        ...(record.hostAssistance !== undefined ? { hostAssistance: record.hostAssistance } : {}),
-        ...(record.contextBudget !== undefined ? { contextBudget: record.contextBudget } : {}),
-        ...(record.advisor !== undefined ? { advisor: record.advisor } : {}),
-        ...(record.doctrine !== undefined ? { doctrine: record.doctrine } : {}),
-        ...(record.hostActions !== undefined ? { hostActions: record.hostActions } : {}),
+        ...(record.decisionMode !== undefined
+            ? { decisionMode: record.decisionMode }
+            : {}),
+        ...(record.hostAssistance !== undefined
+            ? { hostAssistance: record.hostAssistance }
+            : {}),
+        ...(record.contextBudget !== undefined
+            ? { contextBudget: record.contextBudget }
+            : {}),
+        ...(record.advisor !== undefined
+            ? { advisor: record.advisor }
+            : {}),
+        ...(record.doctrine !== undefined
+            ? { doctrine: record.doctrine }
+            : {}),
+        ...(record.hostActions !== undefined
+            ? { hostActions: record.hostActions }
+            : {}),
     };
 }
 function normalizeDiscoveryRequest(value) {
     const record = objectRequest(value, "Discovery request");
     if (typeof record.baseUrl !== "string")
         throw new HttpError(400, "Server URL is required");
-    if (record.protocol !== "openai-chat-completions" && record.protocol !== "openai-responses" && record.protocol !== "anthropic-messages") {
+    if (record.protocol !== "openai-chat-completions" &&
+        record.protocol !== "openai-responses" &&
+        record.protocol !== "anthropic-messages") {
         throw new HttpError(400, "A supported API protocol is required");
     }
     if ("apiKey" in record || "secret" in record)
@@ -279,10 +303,22 @@ function normalizeDiscoveryRequest(value) {
         baseUrl: record.baseUrl,
         provider,
         protocol: record.protocol,
-        ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint ? { modelsEndpoint: record.modelsEndpoint } : {}),
-        ...(record.authMethod === "api-key" || record.authMethod === "none" || record.authMethod === "custom-header" ? { authMethod: record.authMethod } : {}),
-        ...(record.headerName === "authorization" || record.headerName === "x-api-key" || record.headerName === "api-key" ? { headerName: record.headerName } : {}),
-        ...(typeof record.credentialDraftId === "string" ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") } : {}),
+        ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint
+            ? { modelsEndpoint: record.modelsEndpoint }
+            : {}),
+        ...(record.authMethod === "api-key" ||
+            record.authMethod === "none" ||
+            record.authMethod === "custom-header"
+            ? { authMethod: record.authMethod }
+            : {}),
+        ...(record.headerName === "authorization" ||
+            record.headerName === "x-api-key" ||
+            record.headerName === "api-key"
+            ? { headerName: record.headerName }
+            : {}),
+        ...(typeof record.credentialDraftId === "string"
+            ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") }
+            : {}),
         ...(reservedProviderIds.length > 0 ? { reservedProviderIds } : {}),
     };
 }
@@ -302,7 +338,11 @@ function normalizeBuiltInConnectionRequest(value) {
     const record = objectRequest(value, "Connection request");
     const provider = providerId(record.provider);
     const authMethod = record.authMethod;
-    if (authMethod !== "api-key" && authMethod !== "oauth" && authMethod !== "ambient" && authMethod !== "none" && authMethod !== "custom-header") {
+    if (authMethod !== "api-key" &&
+        authMethod !== "oauth" &&
+        authMethod !== "ambient" &&
+        authMethod !== "none" &&
+        authMethod !== "custom-header") {
         throw new HttpError(400, "A supported authentication method is required");
     }
     const fields = stringFields(record.fields, "Provider fields");
@@ -310,7 +350,9 @@ function normalizeBuiltInConnectionRequest(value) {
         provider,
         authMethod,
         fields,
-        ...(typeof record.credentialDraftId === "string" ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") } : {}),
+        ...(typeof record.credentialDraftId === "string"
+            ? { credentialDraftId: uuid(record.credentialDraftId, "credential draft") }
+            : {}),
     };
 }
 function normalizeCustomCredentialRequest(value) {
@@ -324,9 +366,17 @@ function normalizeCustomCredentialRequest(value) {
         baseUrl: requiredText(record.baseUrl, "Server URL"),
         protocol,
         authMethod,
-        ...(typeof record.secret === "string" ? { secret: boundedTextField(record.secret, "Credential", 16_384) } : {}),
-        ...(record.headerName === "authorization" || record.headerName === "x-api-key" || record.headerName === "api-key" ? { headerName: record.headerName } : {}),
-        ...(typeof record.existingProvider === "string" ? { existingProvider: providerId(record.existingProvider) } : {}),
+        ...(typeof record.secret === "string"
+            ? { secret: boundedTextField(record.secret, "Credential", 16_384) }
+            : {}),
+        ...(record.headerName === "authorization" ||
+            record.headerName === "x-api-key" ||
+            record.headerName === "api-key"
+            ? { headerName: record.headerName }
+            : {}),
+        ...(typeof record.existingProvider === "string"
+            ? { existingProvider: providerId(record.existingProvider) }
+            : {}),
     };
 }
 function normalizeManualProviderRequest(value) {
@@ -335,7 +385,8 @@ function normalizeManualProviderRequest(value) {
     if (authMethod !== "api-key" && authMethod !== "none" && authMethod !== "custom-header") {
         throw new HttpError(400, "A supported custom authentication method is required");
     }
-    if (!Array.isArray(record.modelIds) || !record.modelIds.every((entry) => typeof entry === "string")) {
+    if (!Array.isArray(record.modelIds) ||
+        !record.modelIds.every((entry) => typeof entry === "string")) {
         throw new HttpError(400, "Manual model identifiers must be a string array");
     }
     return {
@@ -343,10 +394,18 @@ function normalizeManualProviderRequest(value) {
         protocol: wireProtocol(record.protocol),
         authMethod,
         modelIds: record.modelIds,
-        ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint ? { modelsEndpoint: record.modelsEndpoint } : {}),
+        ...(typeof record.modelsEndpoint === "string" && record.modelsEndpoint
+            ? { modelsEndpoint: record.modelsEndpoint }
+            : {}),
         ...(typeof record.name === "string" && record.name ? { name: record.name } : {}),
-        ...(record.headerName === "authorization" || record.headerName === "x-api-key" || record.headerName === "api-key" ? { headerName: record.headerName } : {}),
-        ...(typeof record.existingProvider === "string" ? { existingProvider: providerId(record.existingProvider) } : {}),
+        ...(record.headerName === "authorization" ||
+            record.headerName === "x-api-key" ||
+            record.headerName === "api-key"
+            ? { headerName: record.headerName }
+            : {}),
+        ...(typeof record.existingProvider === "string"
+            ? { existingProvider: providerId(record.existingProvider) }
+            : {}),
     };
 }
 function normalizeVerificationRequest(value) {
@@ -369,7 +428,9 @@ function normalizeOAuthStart(value) {
     const record = objectRequest(value, "OAuth start request");
     return {
         provider: providerId(record.provider),
-        ...(typeof record.preferredMethod === "string" && record.preferredMethod ? { preferredMethod: boundedTextField(record.preferredMethod, "OAuth method", 128) } : {}),
+        ...(typeof record.preferredMethod === "string" && record.preferredMethod
+            ? { preferredMethod: boundedTextField(record.preferredMethod, "OAuth method", 128) }
+            : {}),
     };
 }
 function normalizeOAuthPoll(value) {
@@ -385,7 +446,9 @@ function normalizeOAuthResponse(value) {
     return {
         sessionId: uuid(record.sessionId, "OAuth session"),
         challengeId: uuid(record.challengeId, "OAuth challenge"),
-        ...(typeof record.value === "string" ? { value: boundedTextField(record.value, "OAuth response", 16_384, true) } : {}),
+        ...(typeof record.value === "string"
+            ? { value: boundedTextField(record.value, "OAuth response", 16_384, true) }
+            : {}),
     };
 }
 function normalizeSessionId(value) {
@@ -419,13 +482,16 @@ function providerId(value) {
     return value;
 }
 function uuid(value, label) {
-    if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    if (typeof value !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
         throw new HttpError(400, `${label} identifier is invalid`);
     }
     return value;
 }
 function wireProtocol(value) {
-    if (value !== "openai-chat-completions" && value !== "openai-responses" && value !== "anthropic-messages") {
+    if (value !== "openai-chat-completions" &&
+        value !== "openai-responses" &&
+        value !== "anthropic-messages") {
         throw new HttpError(400, "A supported API protocol is required");
     }
     return value;

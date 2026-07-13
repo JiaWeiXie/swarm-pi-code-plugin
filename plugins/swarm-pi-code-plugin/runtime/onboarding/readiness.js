@@ -6,19 +6,14 @@ export async function inspectReadiness(options) {
     const activeModel = options.modelPriority.find((model) => options.availableModels.includes(model)) ?? null;
     const issues = [];
     if (!activeModel) {
-        issues.push(issue("no-active-model", "models", "blocking", "No configured Pi model is currently available.", [
-            { action: "configure", label: "Open model connections" },
-        ]));
+        issues.push(issue("no-active-model", "models", "blocking", "No configured Pi model is currently available.", [{ action: "configure", label: "Open model connections" }]));
     }
     if (options.registryError) {
-        issues.push(issue("model-registry-error", "connections", activeModel ? "warning" : "blocking", options.registryError, [
-            { action: "doctor", label: "Run connection diagnostics" },
-        ]));
+        issues.push(issue("model-registry-error", "connections", activeModel ? "warning" : "blocking", options.registryError, [{ action: "doctor", label: "Run connection diagnostics" }]));
     }
-    if (activeModel && options.modelPriority.filter((model) => options.availableModels.includes(model)).length < 2) {
-        issues.push(issue("no-fallback-model", "models", "warning", "The active model has no available fallback; delegated work cannot recover from a provider outage.", [
-            { action: "configure", label: "Add a fallback model" },
-        ]));
+    if (activeModel &&
+        options.modelPriority.filter((model) => options.availableModels.includes(model)).length < 2) {
+        issues.push(issue("no-fallback-model", "models", "warning", "The active model has no available fallback; delegated work cannot recover from a provider outage.", [{ action: "configure", label: "Add a fallback model" }]));
     }
     if (sandboxMode !== "strict") {
         const sandbox = detectSandboxAvailability();
@@ -32,7 +27,14 @@ export async function inspectReadiness(options) {
     if (!workspace.git) {
         issues.push(issue("workspace-not-versioned", "workspace", "warning", workspace.disposition === "non-git-empty"
             ? "This folder is not a Git repository; project creation is available."
-            : "This existing folder is not a Git repository and requires inspection before adoption.", [{ action: workspace.disposition === "non-git-empty" ? "scaffold" : "inspect-adoption", label: workspace.disposition === "non-git-empty" ? "Design a new project" : "Inspect this folder" }]));
+            : "This existing folder is not a Git repository and requires inspection before adoption.", [
+            {
+                action: workspace.disposition === "non-git-empty" ? "scaffold" : "inspect-adoption",
+                label: workspace.disposition === "non-git-empty"
+                    ? "Design a new project"
+                    : "Inspect this folder",
+            },
+        ]));
     }
     if (workspace.disposition === "git-unborn") {
         const hasUserContent = workspace.entries.some((entry) => entry.category === "user");
@@ -47,9 +49,7 @@ export async function inspectReadiness(options) {
         ]));
     }
     if (workspace.disposition === "unsafe") {
-        issues.push(issue("workspace-unsafe", "workspace", "blocking", "The workspace contains conflicts or unsafe filesystem entries.", [
-            { action: "inspect-workspace", label: "Review blocking entries" },
-        ]));
+        issues.push(issue("workspace-unsafe", "workspace", "blocking", "The workspace contains conflicts or unsafe filesystem entries.", [{ action: "inspect-workspace", label: "Review blocking entries" }]));
     }
     const status = issues.some((entry) => entry.severity === "blocking")
         ? "blocked"
@@ -68,14 +68,30 @@ export async function inspectReadiness(options) {
         workspace,
         capabilities: {
             readonly: readonlyBlocked ? "blocked" : "ready",
-            mutation: mutationBlocked ? "blocked" : workspace.disposition === "user-dirty" ? "degraded" : "ready",
-            delivery: deliveryBlocked ? "blocked" : workspace.disposition === "user-dirty" ? "degraded" : "ready",
+            mutation: mutationBlocked
+                ? "blocked"
+                : workspace.disposition === "user-dirty"
+                    ? "degraded"
+                    : "ready",
+            delivery: deliveryBlocked
+                ? "blocked"
+                : workspace.disposition === "user-dirty"
+                    ? "degraded"
+                    : "ready",
         },
         issues,
     };
 }
 function issue(code, stage, severity, message, nextActions) {
-    return { code, stage, severity, recoverable: true, message, preserved: ["existing configuration", "original request"], nextActions };
+    return {
+        code,
+        stage,
+        severity,
+        recoverable: true,
+        message,
+        preserved: ["existing configuration", "original request"],
+        nextActions,
+    };
 }
 export function sandboxModeForReport(value) {
     return value === "adaptive" || value === "lenient" ? value : "strict";

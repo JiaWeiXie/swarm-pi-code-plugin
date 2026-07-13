@@ -1,4 +1,4 @@
-import { AuthStorage, ModelRegistry, } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { getProviderDefinition } from "../providers/capabilities.js";
 import { wireProtocolForRuntimeApi } from "../providers/endpoints.js";
 import { CONTROLLED_SECRET_HEADER_NAMES, DEFAULT_MODEL_CONTEXT_WINDOW, DEFAULT_MODEL_MAX_TOKENS, } from "../state/model-config.js";
@@ -54,9 +54,7 @@ export function applyCustomProviders(registry, configuration) {
         const input = {
             name: provider.name,
             baseUrl: provider.baseUrl,
-            apiKey: authMethod !== "none"
-                ? `$${customProviderApiKeyVariable(provider.id)}`
-                : "local-no-auth",
+            apiKey: authMethod !== "none" ? `$${customProviderApiKeyVariable(provider.id)}` : "local-no-auth",
             api: provider.api,
             authHeader: authMethod === "api-key" && provider.authHeader,
             ...(Object.keys(headers).length ? { headers } : {}),
@@ -95,10 +93,12 @@ export function providerEnvironmentOverlays(configuration) {
         const overlay = {};
         for (const field of definition.fields) {
             const destination = field.destination;
-            if (!destination?.key || (destination.kind !== "profile" && destination.kind !== "credential-env")) {
+            if (!destination?.key ||
+                (destination.kind !== "profile" && destination.kind !== "credential-env")) {
                 continue;
             }
-            if (field.visibleWhen?.field === "authMethod" && field.visibleWhen.equals !== profile.auth.method) {
+            if (field.visibleWhen?.field === "authMethod" &&
+                field.visibleWhen.equals !== profile.auth.method) {
                 continue;
             }
             const value = profile.settings[field.id];
@@ -155,13 +155,17 @@ function resolvedHeaders(provider, definitions) {
             continue;
         }
         if (header.secretRef && CONTROLLED_SECRET_HEADER_NAMES.includes(header.name)) {
-            headers[canonicalHeaderName(header.name)] = `$${customProviderHeaderVariable(provider, header.name)}`;
+            headers[canonicalHeaderName(header.name)] =
+                `$${customProviderHeaderVariable(provider, header.name)}`;
         }
     }
     return headers;
 }
 function canonicalHeaderName(name) {
-    return name.split("-").map((part) => part ? `${part[0].toUpperCase()}${part.slice(1)}` : part).join("-");
+    return name
+        .split("-")
+        .map((part) => (part ? `${part[0].toUpperCase()}${part.slice(1)}` : part))
+        .join("-");
 }
 function configLiteral(value) {
     const escaped = value.split("$").join("$$");

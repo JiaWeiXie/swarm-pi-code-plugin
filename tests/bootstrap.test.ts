@@ -55,10 +55,11 @@ process.exit(process.env.SWARM_TEST_NPM_FAIL === "1" ? 1 : 0);
   const bootstrapExpression = `import(${JSON.stringify(pathToFileURL(path.join(scripts, "bootstrap.mjs")).href)}).then((module) => module.ensureRuntime())`;
 
   assert.throws(
-    () => execFileSync(process.execPath, ["--input-type=module", "--eval", bootstrapExpression], {
-      env: { ...env, SWARM_TEST_NPM_FAIL: "1" },
-      stdio: "pipe",
-    }),
+    () =>
+      execFileSync(process.execPath, ["--input-type=module", "--eval", bootstrapExpression], {
+        env: { ...env, SWARM_TEST_NPM_FAIL: "1" },
+        stdio: "pipe",
+      }),
     (error: unknown) => (error as { status?: number }).status === 1,
   );
   assert.equal(fs.existsSync(path.join(root, "node_modules", ".swarm-pi-runtime-ready")), false);
@@ -69,5 +70,8 @@ process.exit(process.env.SWARM_TEST_NPM_FAIL === "1" ? 1 : 0);
     stdio: "pipe",
   });
   assert.equal(fs.readFileSync(countFile, "utf8"), "2");
-  assert.equal(fs.readFileSync(path.join(root, "node_modules", ".swarm-pi-runtime-ready"), "utf8"), "ready\n");
+  assert.equal(
+    fs.readFileSync(path.join(root, "node_modules", ".swarm-pi-runtime-ready"), "utf8"),
+    "ready\n",
+  );
 });

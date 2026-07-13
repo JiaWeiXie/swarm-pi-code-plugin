@@ -6,7 +6,11 @@ import path from "node:path";
 import test from "node:test";
 
 import type { PiModel } from "../src/pi/models.js";
-import { createPolicySnapshot, normalizeAdaptivePolicy, resolveRolePolicy } from "../src/orchestration/roles.js";
+import {
+  createPolicySnapshot,
+  normalizeAdaptivePolicy,
+  resolveRolePolicy,
+} from "../src/orchestration/roles.js";
 import { runCommand, type RunnerDependencies } from "../src/runner/run.js";
 import {
   finishJob,
@@ -30,8 +34,24 @@ test("Host Action policy requires mutation intent and keeps remote actions disab
     expectedEvidence: ["receipt"],
     dataClassification: "project-internal" as const,
   };
-  assert.throws(() => assertHostActionAllowed({ recommendation, parentKind: "review", policy: defaultHostActionPolicy() }), /mutation intent/);
-  assert.throws(() => assertHostActionAllowed({ recommendation, parentKind: "implement", policy: defaultHostActionPolicy() }), /disabled/);
+  assert.throws(
+    () =>
+      assertHostActionAllowed({
+        recommendation,
+        parentKind: "review",
+        policy: defaultHostActionPolicy(),
+      }),
+    /mutation intent/,
+  );
+  assert.throws(
+    () =>
+      assertHostActionAllowed({
+        recommendation,
+        parentKind: "implement",
+        policy: defaultHostActionPolicy(),
+      }),
+    /disabled/,
+  );
 });
 
 test("recorded local recommendation runs once in an isolated host-broker child", async () => {
@@ -39,7 +59,21 @@ test("recorded local recommendation runs once in an isolated host-broker child",
   execFileSync("git", ["init", "-q"], { cwd: workspace });
   fs.writeFileSync(path.join(workspace, "README.md"), "base\n");
   execFileSync("git", ["add", "README.md"], { cwd: workspace });
-  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "base"], { cwd: workspace });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "base",
+    ],
+    { cwd: workspace },
+  );
   const rolePolicy = resolveRolePolicy("executor", {}, ["test-provider/test-model"]);
   const snapshot = createPolicySnapshot({
     sandboxMode: "strict",
@@ -71,7 +105,14 @@ test("recorded local recommendation runs once in an isolated host-broker child",
   const request = await requestJobHostAssistance(workspace, parent.id, parent.workerToken, {
     correlation: { jobId: parent.id, generation: 1, sessionId: "parent", attempt: 1 },
     request: recommendation,
-    policy: { enabled: true, mode: "on", contextClasses: ["workspace"], privateConnector: "deny", maxRequests: 2, maxFanOut: 1 },
+    policy: {
+      enabled: true,
+      mode: "on",
+      contextClasses: ["workspace"],
+      privateConnector: "deny",
+      maxRequests: 2,
+      maxFanOut: 1,
+    },
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   });
   await resolveJobHostRequest(workspace, parent.id, request.id, {
@@ -84,8 +125,14 @@ test("recorded local recommendation runs once in an isolated host-broker child",
   });
   await waitForHostAssistanceResolution(workspace, parent.id, parent.workerToken, request.id);
   await finishJob(workspace, parent.id, {
-    kind: "implement", status: "succeeded", success: true, output: "checkpoint", model: "test-provider/test-model",
-    changedFiles: [], diffStat: "", verification: { status: "passed", commands: [] },
+    kind: "implement",
+    status: "succeeded",
+    success: true,
+    output: "checkpoint",
+    model: "test-provider/test-model",
+    changedFiles: [],
+    diffStat: "",
+    verification: { status: "passed", commands: [] },
   });
 
   const dependencies: RunnerDependencies = {
@@ -93,8 +140,14 @@ test("recorded local recommendation runs once in an isolated host-broker child",
     readFile: async () => "",
     createSession: async ({ cwd, mode }) => ({
       subscribe(listener) {
-        const output = mode === "implement" ? "implemented" : "VERIFIED isolated action matches the recommendation";
-        listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: output } });
+        const output =
+          mode === "implement"
+            ? "implemented"
+            : "VERIFIED isolated action matches the recommendation";
+        listener({
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", delta: output },
+        });
         listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
         return () => {};
       },
@@ -104,10 +157,19 @@ test("recorded local recommendation runs once in an isolated host-broker child",
       dispose() {},
     }),
   };
-  const result = await runCommand({
-    command: "jobs", jobsAction: "action-start", jobId: parent.id, hostRequestId: request.id,
-    reconfigure: false, reset: false, json: true,
-  }, workspace, dependencies);
+  const result = await runCommand(
+    {
+      command: "jobs",
+      jobsAction: "action-start",
+      jobId: parent.id,
+      hostRequestId: request.id,
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
   assert.equal("success" in result && result.success, true);
   assert.equal("artifact" in result && result.artifact?.kind, "host-action");
   assert.equal("hostAction" in result && result.hostAction?.principal, "host-broker");
@@ -118,21 +180,47 @@ test("recorded local recommendation runs once in an isolated host-broker child",
   assert.equal(child.job.parentJobId, parent.id);
   assert.equal(child.job.recommendationId, request.id);
   assert.equal(child.job.leases?.[0]?.actionFamily?.used, 1);
-  await assert.rejects(() => runCommand({
-    command: "jobs", jobsAction: "action-start", jobId: parent.id, hostRequestId: request.id,
-    reconfigure: false, reset: false, json: true,
-  }, workspace, dependencies), /already started/);
+  await assert.rejects(
+    () =>
+      runCommand(
+        {
+          command: "jobs",
+          jobsAction: "action-start",
+          jobId: parent.id,
+          hostRequestId: request.id,
+          reconfigure: false,
+          reset: false,
+          json: true,
+        },
+        workspace,
+        dependencies,
+      ),
+    /already started/,
+  );
 });
 
 test("action-family leases are bounded by policy, scope, cost, and expiry", () => {
   const rolePolicy = resolveRolePolicy("executor", {}, []);
-  const snapshot = createPolicySnapshot({ sandboxMode: "strict", approvalMode: "deny", rolePolicy, adaptivePolicy: normalizeAdaptivePolicy(undefined) });
+  const snapshot = createPolicySnapshot({
+    sandboxMode: "strict",
+    approvalMode: "deny",
+    rolePolicy,
+    adaptivePolicy: normalizeAdaptivePolicy(undefined),
+  });
   const policy = { ...defaultHostActionPolicy(), maxUses: 2, maxCost: 3 };
   const lease = createActionFamilyLease({
-    jobId: "child", generation: 1, role: "executor", snapshot,
+    jobId: "child",
+    generation: 1,
+    role: "executor",
+    snapshot,
     recommendation: {
-      kind: "action-recommendation", actionClass: "local-mutation", summary: "edit", target: "src",
-      rationale: "needed", expectedEvidence: ["diff"], dataClassification: "project-internal",
+      kind: "action-recommendation",
+      actionClass: "local-mutation",
+      summary: "edit",
+      target: "src",
+      rationale: "needed",
+      expectedEvidence: ["diff"],
+      dataClassification: "project-internal",
     },
     policy,
     now: new Date("2026-07-12T00:00:00.000Z"),

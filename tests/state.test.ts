@@ -45,10 +45,16 @@ test("adaptive role and approval settings survive state normalization", async ()
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-adaptive-state-"));
   await updateState(workspace, (state) => {
     state.config.sandboxMode = "adaptive";
-    state.config.rolePolicies = { planner: { models: ["test/planner"], thinkingLevel: "xhigh", maxAttempts: 2 } };
+    state.config.rolePolicies = {
+      planner: { models: ["test/planner"], thinkingLevel: "xhigh", maxAttempts: 2 },
+    };
     state.config.adaptivePolicy = {
-      classifierModels: ["test/classifier"], classifierThinkingLevel: "medium",
-      approvalPolicy: "wait", trustedDomains: ["registry.npmjs.org"], rules: [], diagnostics: true,
+      classifierModels: ["test/classifier"],
+      classifierThinkingLevel: "medium",
+      approvalPolicy: "wait",
+      trustedDomains: ["registry.npmjs.org"],
+      rules: [],
+      diagnostics: true,
     };
     state.config.backgroundRolePolicy = { mechanicalExecutor: true };
   });
@@ -67,11 +73,9 @@ function repositoryFixture(): { repository: string; worktree: string } {
   execFileSync("git", ["-C", repository, "config", "user.email", "test@example.com"]);
   fs.writeFileSync(path.join(repository, "README.md"), "fixture\n");
   execFileSync("git", ["-C", repository, "add", "README.md"]);
-  execFileSync(
-    "git",
-    ["-c", "commit.gpgsign=false", "-C", repository, "commit", "-m", "fixture"],
-    { stdio: "ignore" },
-  );
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", repository, "commit", "-m", "fixture"], {
+    stdio: "ignore",
+  });
   execFileSync("git", ["-C", repository, "worktree", "add", "-b", "feature", worktree], {
     stdio: "ignore",
   });
@@ -93,8 +97,14 @@ async function withDataDir<T>(value: string | undefined, run: () => Promise<T>):
 test("linked worktrees resolve one shared state directory", async () => {
   const { repository, worktree } = repositoryFixture();
   await withDataDir(undefined, async () => {
-    assert.equal(await resolveStateDir(repository), path.join(repository, ".git", "swarm-pi-code-plugin"));
-    assert.equal(await resolveStateDir(worktree), path.join(repository, ".git", "swarm-pi-code-plugin"));
+    assert.equal(
+      await resolveStateDir(repository),
+      path.join(repository, ".git", "swarm-pi-code-plugin"),
+    );
+    assert.equal(
+      await resolveStateDir(worktree),
+      path.join(repository, ".git", "swarm-pi-code-plugin"),
+    );
 
     await setModelPriority(repository, ["test/primary", "test/fallback"]);
     await setSandboxMode(repository, "lenient");
@@ -284,12 +294,15 @@ test("reconciliation converts stale dead workers to orphaned", async () => {
     job.updatedAt = "2000-01-01T00:00:00.000Z";
   });
   const directory = await jobDirectory(workspace, handle.id);
-  fs.writeFileSync(path.join(directory, "heartbeat.json"), JSON.stringify({
-    jobId: handle.id,
-    workerToken: handle.workerToken,
-    pid: 999_999,
-    updatedAt: "2000-01-01T00:00:00.000Z",
-  }));
+  fs.writeFileSync(
+    path.join(directory, "heartbeat.json"),
+    JSON.stringify({
+      jobId: handle.id,
+      workerToken: handle.workerToken,
+      pid: 999_999,
+      updatedAt: "2000-01-01T00:00:00.000Z",
+    }),
+  );
 
   await reconcileJobs(workspace);
   const snapshot = await getJob(workspace, handle.id);
@@ -337,12 +350,15 @@ test("reconciliation preserves a stale heartbeat while the worker PID is alive",
     job.status = "running";
     job.updatedAt = "2000-01-01T00:00:00.000Z";
   });
-  fs.writeFileSync(path.join(await jobDirectory(workspace, handle.id), "heartbeat.json"), JSON.stringify({
-    jobId: handle.id,
-    workerToken: handle.workerToken,
-    pid: process.pid,
-    updatedAt: "2000-01-01T00:00:00.000Z",
-  }));
+  fs.writeFileSync(
+    path.join(await jobDirectory(workspace, handle.id), "heartbeat.json"),
+    JSON.stringify({
+      jobId: handle.id,
+      workerToken: handle.workerToken,
+      pid: process.pid,
+      updatedAt: "2000-01-01T00:00:00.000Z",
+    }),
+  );
 
   await reconcileJobs(workspace);
   assert.equal((await getJob(workspace, handle.id)).job.status, "running");

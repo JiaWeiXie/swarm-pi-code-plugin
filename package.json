@@ -1,6 +1,6 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "description": "Dual-host Claude Code and Codex plugin backed by the embedded Pi coding-agent SDK",
@@ -14,8 +14,12 @@
     "test:build": "tsc -p tsconfig.test.json",
     "test": "npm run test:build && SWARM_PI_CODE_PLUGIN_USER_STATE_DIR=/tmp/swarm-pi-code-plugin-test-state node --test .test-dist/tests/*.test.js",
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings src tests",
+    "lint:fix": "oxlint --fix --deny-warnings src tests",
+    "fmt": "oxfmt src tests",
+    "fmt:check": "oxfmt --check src tests",
     "check:runtime-parity": "node scripts/check-runtime-parity.mjs",
-    "check": "npm run typecheck && npm test && npm run check:runtime-parity"
+    "check": "npm run typecheck && npm run lint && npm run fmt:check && npm test && npm run check:runtime-parity"
   },
   "dependencies": {
     "@carderne/sandbox-runtime": "0.0.49",
@@ -23,6 +27,8 @@
   },
   "devDependencies": {
     "@types/node": "24.10.1",
+    "oxfmt": "0.58.0",
+    "oxlint": "1.73.0",
     "typescript": "5.9.3"
   }
 }

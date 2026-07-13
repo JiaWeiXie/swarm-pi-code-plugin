@@ -41,7 +41,11 @@ import {
   type WireProtocol,
 } from "../providers/capabilities.js";
 import { CredentialDraftVault, type CredentialDraftSummary } from "../providers/credentials.js";
-import { normalizeModelsEndpoint, normalizeProtocolRoot, stableCustomProviderId } from "../providers/endpoints.js";
+import {
+  normalizeModelsEndpoint,
+  normalizeProtocolRoot,
+  stableCustomProviderId,
+} from "../providers/endpoints.js";
 import { detectSandboxAvailability, type SandboxAvailability } from "../sandbox/availability.js";
 import { assessWorkspace } from "../git/worktree.js";
 import {
@@ -64,7 +68,6 @@ import {
   saveProjectSettings,
   saveExecutionSettings,
   setModelPriority,
-  setSandboxMode,
   type SwarmProfile,
   defaultHostActionPolicy,
 } from "../state/state.js";
@@ -82,7 +85,13 @@ export interface BrowserModel extends AvailableModel {
   contextWindow: number | null;
   maxTokens: number | null;
   metadata: {
-    contextWindow: "pi-catalog" | "endpoint" | "models-dev" | "compatibility-default" | "user" | null;
+    contextWindow:
+      | "pi-catalog"
+      | "endpoint"
+      | "models-dev"
+      | "compatibility-default"
+      | "user"
+      | null;
     maxTokens: "pi-catalog" | "endpoint" | "models-dev" | "compatibility-default" | "user" | null;
   };
 }
@@ -124,10 +133,12 @@ export interface ConfigurationSubmission {
   fallbacks: string[];
   customProviders: CustomProviderConfiguration[];
   providerProfiles?: ProviderProfile[] | undefined;
-  credentialDrafts?: Array<{
-    provider: string;
-    draftId: string;
-  }> | undefined;
+  credentialDrafts?:
+    | Array<{
+        provider: string;
+        draftId: string;
+      }>
+    | undefined;
   profile?: ProjectProfileSubmission | undefined;
   sandboxMode?: SandboxMode | undefined;
   rolePolicies?: RolePolicyOverrides | undefined;
@@ -189,7 +200,11 @@ export async function configureBuiltInProvider(
     throw new Error(`${definition.name} does not support ${request.authMethod} authentication`);
   }
   const persistentAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-  const { settings, secret } = normalizeProviderFields(definition, request.authMethod, request.fields);
+  const { settings, secret } = normalizeProviderFields(
+    definition,
+    request.authMethod,
+    request.fields,
+  );
   let credentialDraft: CredentialDraftSummary | undefined;
   if (request.authMethod === "api-key" && secret) {
     credentialDraft = credentialVault.stageApiKey(definition.id, secret);
@@ -199,7 +214,11 @@ export async function configureBuiltInProvider(
       throw new Error("Credential draft does not match the selected authentication method");
     }
   }
-  if ((request.authMethod === "api-key" || request.authMethod === "oauth") && !credentialDraft && !persistentAuth.hasAuth(definition.id)) {
+  if (
+    (request.authMethod === "api-key" || request.authMethod === "oauth") &&
+    !credentialDraft &&
+    !persistentAuth.hasAuth(definition.id)
+  ) {
     throw new Error(`${definition.name} requires a credential`);
   }
   const profile = providerProfile(definition, request.authMethod, settings, "configured");
@@ -210,13 +229,16 @@ export async function configureBuiltInProvider(
     providerProfiles: upsertProviderProfile(configuration.providerProfiles, profile),
   });
   const stagingAuth = AuthStorage.inMemory(persistentAuth.getAll());
-  if (credentialDraft) stagingAuth.set(definition.id, credentialVault.resolve(definition.id, credentialDraft.id));
+  if (credentialDraft)
+    stagingAuth.set(definition.id, credentialVault.resolve(definition.id, credentialDraft.id));
   const pi = createPiEnvironment(candidate, env, { authStorage: stagingAuth });
   const all = pi.modelRegistry.getAll();
   const providerModels = all.filter((model) => model.provider === definition.id);
   if (providerModels.length === 0) throw new Error(`Pi has no models for ${definition.name}`);
   const available = new Set(pi.modelRegistry.getAvailable().map(modelId));
-  const models = providerModels.map((model) => browserModel(model, available.has(modelId(model)), candidate));
+  const models = providerModels.map((model) =>
+    browserModel(model, available.has(modelId(model)), candidate),
+  );
   const authStatus = pi.modelRegistry.getProviderAuthStatus(definition.id);
   return {
     provider: {
@@ -226,10 +248,12 @@ export async function configureBuiltInProvider(
       modelCount: models.length,
       availableModelCount: models.filter((model) => model.available).length,
       auth: {
-        source: credentialDraft ? "runtime" : authStatus.source ?? request.authMethod,
+        source: credentialDraft ? "runtime" : (authStatus.source ?? request.authMethod),
         label: credentialDraft
-          ? request.authMethod === "oauth" ? "Subscription sign-in pending save" : "Credential pending save"
-          : authStatus.label ?? authMethodLabel(request.authMethod),
+          ? request.authMethod === "oauth"
+            ? "Subscription sign-in pending save"
+            : "Credential pending save"
+          : (authStatus.label ?? authMethodLabel(request.authMethod)),
       },
       selection: null,
       custom: false,
@@ -255,10 +279,11 @@ export async function discoverConfigurationEndpoint(
   const all = catalog.all?.() ?? catalog.available();
   const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
   const expectedProvider = stableCustomProviderId(root, request.protocol);
-  const existingProvider = configuration.customProviders.find((provider) =>
-    provider.id === request.provider &&
-    provider.wireProtocol === request.protocol &&
-    normalizeProtocolRoot(provider.baseUrl, request.protocol) === root,
+  const existingProvider = configuration.customProviders.find(
+    (provider) =>
+      provider.id === request.provider &&
+      provider.wireProtocol === request.protocol &&
+      normalizeProtocolRoot(provider.baseUrl, request.protocol) === root,
   );
   if (request.provider !== expectedProvider && !existingProvider) {
     throw new Error("Custom provider identifier does not match its endpoint policy");
@@ -269,22 +294,27 @@ export async function discoverConfigurationEndpoint(
     : AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).get(request.provider);
   const apiKey = credentialSecret(credential, request.provider, authMethod, request.headerName);
   if (authMethod !== "none" && !apiKey) throw new Error("Credential draft is missing or expired");
-  const result = await discoverEndpoint({
-    ...request,
-    ...(apiKey ? { apiKey } : {}),
-  }, all, {
-    reservedProviderIds: [
-      ...all.map((model) => model.provider),
-      ...(request.reservedProviderIds ?? []),
-    ],
-  });
+  const result = await discoverEndpoint(
+    {
+      ...request,
+      ...(apiKey ? { apiKey } : {}),
+    },
+    all,
+    {
+      reservedProviderIds: [
+        ...all.map((model) => model.provider),
+        ...(request.reservedProviderIds ?? []),
+      ],
+    },
+  );
   if (existingProvider && result.provider.id !== request.provider) {
     result.provider.id = request.provider;
     if (result.provider.auth && result.provider.auth.method !== "none") {
       result.provider.auth.secretRef = providerSecretRef(request.provider);
     }
     for (const header of result.provider.headers ?? []) {
-      if (header.secretRef) header.secretRef = providerHeaderSecretRef(request.provider, header.name);
+      if (header.secretRef)
+        header.secretRef = providerHeaderSecretRef(request.provider, header.name);
     }
   }
   const now = new Date().toISOString();
@@ -322,19 +352,26 @@ export async function stageCustomProviderCredential(
   if (request.existingProvider) {
     const state = await loadState(cwd);
     const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
-    const existing = configuration.customProviders.find((candidate) =>
-      candidate.id === request.existingProvider &&
-      candidate.wireProtocol === request.protocol &&
-      normalizeProtocolRoot(candidate.baseUrl, request.protocol) === root,
+    const existing = configuration.customProviders.find(
+      (candidate) =>
+        candidate.id === request.existingProvider &&
+        candidate.wireProtocol === request.protocol &&
+        normalizeProtocolRoot(candidate.baseUrl, request.protocol) === root,
     );
-    if (!existing) throw new Error("Existing custom provider does not match this endpoint and protocol");
+    if (!existing)
+      throw new Error("Existing custom provider does not match this endpoint and protocol");
     provider = existing.id;
   }
   if (request.authMethod === "none") return { provider };
   if (!request.secret) throw new Error("Credential is required");
-  const credentialDraft = request.authMethod === "custom-header"
-    ? credentialVault.stageCustomHeader(provider, requireSecretHeader(request.headerName), request.secret)
-    : credentialVault.stageApiKey(provider, request.secret);
+  const credentialDraft =
+    request.authMethod === "custom-header"
+      ? credentialVault.stageCustomHeader(
+          provider,
+          requireSecretHeader(request.headerName),
+          request.secret,
+        )
+      : credentialVault.stageApiKey(provider, request.secret);
   return { provider, credentialDraft };
 }
 
@@ -346,12 +383,14 @@ async function assertExistingCustomProvider(
 ): Promise<CustomProviderConfiguration> {
   const state = await loadState(cwd);
   const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
-  const existing = configuration.customProviders.find((candidate) =>
-    candidate.id === providerId &&
-    candidate.wireProtocol === protocol &&
-    normalizeProtocolRoot(candidate.baseUrl, protocol) === root,
+  const existing = configuration.customProviders.find(
+    (candidate) =>
+      candidate.id === providerId &&
+      candidate.wireProtocol === protocol &&
+      normalizeProtocolRoot(candidate.baseUrl, protocol) === root,
   );
-  if (!existing) throw new Error("Existing custom provider does not match this endpoint and protocol");
+  if (!existing)
+    throw new Error("Existing custom provider does not match this endpoint and protocol");
   return existing;
 }
 
@@ -376,7 +415,9 @@ export async function createManualCustomProvider(
     ? normalizeModelsEndpoint(request.modelsEndpoint, root)
     : undefined;
   const modelIds = [...new Set(request.modelIds.map((model) => model.trim()).filter(Boolean))];
-  if (modelIds.length === 0 || modelIds.length > 500) throw new Error("Enter between 1 and 500 model identifiers");
+  if (modelIds.length === 0 || modelIds.length > 500)
+    throw new Error("Enter between 1 and 500 model identifiers");
+  // oxlint-disable-next-line no-control-regex -- intentionally rejects ASCII control characters in model ids
   if (modelIds.some((model) => model.length > 512 || /[\u0000-\u001f\u007f]/.test(model))) {
     throw new Error("Manual model identifiers contain unsupported characters");
   }
@@ -385,18 +426,25 @@ export async function createManualCustomProvider(
     ...(request.authMethod === "none" ? {} : { secretRef: providerSecretRef(provider) }),
     ...(request.headerName ? { headerName: request.headerName } : {}),
   } as const;
-  const headers = request.authMethod === "custom-header"
-    ? [{ name: requireSecretHeader(request.headerName), secretRef: providerHeaderSecretRef(provider, requireSecretHeader(request.headerName)) }]
-    : [];
+  const headers =
+    request.authMethod === "custom-header"
+      ? [
+          {
+            name: requireSecretHeader(request.headerName),
+            secretRef: providerHeaderSecretRef(provider, requireSecretHeader(request.headerName)),
+          },
+        ]
+      : [];
   const customProvider: CustomProviderConfiguration = {
     id: provider,
     name: request.name?.trim() || new URL(root).hostname,
     baseUrl: root,
-    api: request.protocol === "openai-chat-completions"
-      ? "openai-completions"
-      : request.protocol === "openai-responses"
-        ? "openai-responses"
-        : "anthropic-messages",
+    api:
+      request.protocol === "openai-chat-completions"
+        ? "openai-completions"
+        : request.protocol === "openai-responses"
+          ? "openai-responses"
+          : "anthropic-messages",
     wireProtocol: request.protocol,
     authHeader: request.authMethod === "api-key" && request.protocol !== "anthropic-messages",
     requiresApiKey: request.authMethod !== "none",
@@ -443,7 +491,8 @@ export async function verifyProviderConnection(
   const drafts = normalizeCredentialDrafts(request.credentialDrafts, credentialVault);
   const persistentAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
   const stagingAuth = AuthStorage.inMemory(persistentAuth.getAll());
-  for (const draft of drafts) stagingAuth.set(draft.provider, credentialVault.resolve(draft.provider, draft.draftId));
+  for (const draft of drafts)
+    stagingAuth.set(draft.provider, credentialVault.resolve(draft.provider, draft.draftId));
   const pi = createPiEnvironment(candidate, env, { authStorage: stagingAuth });
   const model = pi.modelRegistry.getAll().find((entry) => modelId(entry) === request.model);
   if (!model) throw new Error(`Unknown model selection: ${request.model}`);
@@ -493,7 +542,10 @@ export async function signOutProvider(
 ): Promise<void> {
   const state = await loadState(cwd);
   const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
-  if (!getProviderDefinition(provider) && !configuration.customProviders.some((candidate) => candidate.id === provider)) {
+  if (
+    !getProviderDefinition(provider) &&
+    !configuration.customProviders.some((candidate) => candidate.id === provider)
+  ) {
     throw new Error(`Unknown provider: ${provider}`);
   }
   AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).logout(provider);
@@ -524,14 +576,17 @@ export async function loadConfigurationView(
   const available = new Set(availableModels.map(modelId));
   const selected = new Set(modelPriority(configuration));
   const custom = new Set(configuration.customProviders.map((provider) => provider.id));
-  const relevant = all.filter((model) =>
-    available.has(modelId(model)) || selected.has(modelId(model)) || custom.has(model.provider),
+  const relevant = all.filter(
+    (model) =>
+      available.has(modelId(model)) || selected.has(modelId(model)) || custom.has(model.provider),
   );
   const providerIds = [...new Set(all.map((model) => model.provider))];
   const unknownProviders = unknownProviderIds(providerIds.filter((id) => !custom.has(id)));
   const registryProblems = [
     catalog.error?.(),
-    unknownProviders.length ? `Pinned Pi exposes providers missing from ProviderCapabilityRegistry: ${unknownProviders.join(", ")}` : undefined,
+    unknownProviders.length
+      ? `Pinned Pi exposes providers missing from ProviderCapabilityRegistry: ${unknownProviders.join(", ")}`
+      : undefined,
   ].filter((entry): entry is string => Boolean(entry));
   return {
     configuration,
@@ -539,9 +594,10 @@ export async function loadConfigurationView(
     directoryOptions: await projectDirectoryOptions(cwd, state.config.profile?.dirs ?? []),
     providers: describeProviders(catalog, configuration),
     providerCatalog: listProviderDefinitions().map((definition) => {
-      const status = definition.id === "custom"
-        ? { configured: false }
-        : catalog.authStatus?.(definition.id) ?? { configured: false };
+      const status =
+        definition.id === "custom"
+          ? { configured: false }
+          : (catalog.authStatus?.(definition.id) ?? { configured: false });
       return {
         ...definition,
         auth: {
@@ -551,16 +607,23 @@ export async function loadConfigurationView(
         },
       };
     }),
-    models: relevant.map((model) => browserModel(model, available.has(modelId(model)), configuration)),
+    models: relevant.map((model) =>
+      browserModel(model, available.has(modelId(model)), configuration),
+    ),
     registryError: registryProblems.length ? registryProblems.join("\n") : null,
     sandboxMode: state.config.sandboxMode ?? "strict",
     sandboxAvailability: detectSandboxAvailability(),
     rolePolicies: structuredClone(state.config.rolePolicies ?? {}),
     adaptivePolicy: normalizeAdaptivePolicy(state.config.adaptivePolicy),
-    backgroundRolePolicy: structuredClone(state.config.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY),
+    backgroundRolePolicy: structuredClone(
+      state.config.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY,
+    ),
     roles: listDefaultRoles(),
     workspace: await assessWorkspace(cwd),
-    workspaceId: createHash("sha256").update(await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd))).digest("hex").slice(0, 24),
+    workspaceId: createHash("sha256")
+      .update(await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd)))
+      .digest("hex")
+      .slice(0, 24),
     decisionMode: state.config.decisionMode ?? "balance",
     hostAssistance: structuredClone(state.config.hostAssistance ?? defaultHostAssistancePolicy()),
     contextBudget: state.config.contextBudget ?? 4,
@@ -587,16 +650,18 @@ function browserModel(
     available,
     reasoning: model.reasoning,
     input: model.input,
-    contextWindow: isCustomModel ? configured.contextWindow ?? null : model.contextWindow ?? null,
-    maxTokens: isCustomModel ? configured.maxTokens ?? null : model.maxTokens ?? null,
+    contextWindow: isCustomModel
+      ? (configured.contextWindow ?? null)
+      : (model.contextWindow ?? null),
+    maxTokens: isCustomModel ? (configured.maxTokens ?? null) : (model.maxTokens ?? null),
     metadata: {
       contextWindow: isCustomModel
-        ? configured.metadata?.contextWindow ?? null
+        ? (configured.metadata?.contextWindow ?? null)
         : model.contextWindow
           ? "pi-catalog"
           : null,
       maxTokens: isCustomModel
-        ? configured.metadata?.maxTokens ?? null
+        ? (configured.metadata?.maxTokens ?? null)
         : model.maxTokens
           ? "pi-catalog"
           : null,
@@ -629,7 +694,10 @@ export async function saveConfigurationSubmission(
   assertProviderProfilePolicies(candidate);
 
   const persistentAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-  const credentialDrafts = normalizeCredentialDrafts(submission.credentialDrafts, options.credentialVault);
+  const credentialDrafts = normalizeCredentialDrafts(
+    submission.credentialDrafts,
+    options.credentialVault,
+  );
   const credentials = credentialDrafts.map((draft) => ({
     provider: draft.provider,
     draftId: draft.draftId,
@@ -658,10 +726,12 @@ export async function saveConfigurationSubmission(
   assertExecutionModels(execution, all, available, sandboxMode);
 
   if (env.SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST !== "1") {
-    const smokeModels = [...new Set([
-      ...(candidate.primary ? [candidate.primary] : []),
-      ...(sandboxMode === "adaptive" ? execution.adaptivePolicy.classifierModels : []),
-    ])];
+    const smokeModels = [
+      ...new Set([
+        ...(candidate.primary ? [candidate.primary] : []),
+        ...(sandboxMode === "adaptive" ? execution.adaptivePolicy.classifierModels : []),
+      ]),
+    ];
     for (const reference of smokeModels) {
       const model = all.get(reference)!;
       const { session } = await createWorkerSession({
@@ -681,7 +751,8 @@ export async function saveConfigurationSubmission(
         session,
         timeoutMs: 15_000,
       });
-      if (!smoke.success) throw new Error(`Model smoke test failed for ${reference}: ${smoke.error ?? smoke.output}`);
+      if (!smoke.success)
+        throw new Error(`Model smoke test failed for ${reference}: ${smoke.error ?? smoke.output}`);
       const provider = reference.slice(0, reference.indexOf("/"));
       const profile = candidate.providerProfiles.find((entry) => entry.provider === provider);
       if (profile) {
@@ -719,19 +790,25 @@ export async function saveConfigurationSubmission(
         if (snapshot.value) persistentAuth.set(snapshot.provider, snapshot.value);
         else persistentAuth.remove(snapshot.provider);
       } catch (rollbackError) {
-        rollbackErrors.push(`credential:${snapshot.provider}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        rollbackErrors.push(
+          `credential:${snapshot.provider}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        );
       }
     }
     for (const snapshot of fileSnapshots) {
       try {
         await restoreFile(snapshot);
       } catch (rollbackError) {
-        rollbackErrors.push(`file:${snapshot.file}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+        rollbackErrors.push(
+          `file:${snapshot.file}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        );
       }
     }
     if (rollbackErrors.length > 0) {
       await writeRecoveryJournal(cwd, rollbackErrors);
-      throw new Error("Configuration failed and could not be fully rolled back; run doctor (configuration-recovery-required)");
+      throw new Error(
+        "Configuration failed and could not be fully rolled back; run doctor (configuration-recovery-required)",
+      );
     }
     throw error;
   }
@@ -739,7 +816,10 @@ export async function saveConfigurationSubmission(
   return loadConfigurationView(cwd, env);
 }
 
-interface FileSnapshot { file: string; contents?: Buffer; }
+interface FileSnapshot {
+  file: string;
+  contents?: Buffer;
+}
 
 async function snapshotFile(file: string): Promise<FileSnapshot> {
   const contents = await fs.readFile(file).catch((error: NodeJS.ErrnoException) => {
@@ -763,11 +843,19 @@ async function restoreFile(snapshot: FileSnapshot): Promise<void> {
 async function writeRecoveryJournal(cwd: string, errors: string[]): Promise<void> {
   const directory = path.join(await resolveStateDir(cwd), "recovery");
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  await fs.writeFile(path.join(directory, "configuration.json"), `${JSON.stringify({
-    code: "configuration-recovery-required",
-    createdAt: new Date().toISOString(),
-    errors: errors.map((error) => error.replace(/(?:sk-|key=)[^\s:]+/gi, "[redacted]")),
-  }, null, 2)}\n`, { mode: 0o600 });
+  await fs.writeFile(
+    path.join(directory, "configuration.json"),
+    `${JSON.stringify(
+      {
+        code: "configuration-recovery-required",
+        createdAt: new Date().toISOString(),
+        errors: errors.map((error) => error.replace(/(?:sk-|key=)[^\s:]+/gi, "[redacted]")),
+      },
+      null,
+      2,
+    )}\n`,
+    { mode: 0o600 },
+  );
 }
 
 export async function saveProjectProfileSubmission(
@@ -795,7 +883,9 @@ export async function saveProjectProfileSubmission(
   assertSandboxModeAvailable(sandboxMode);
   const modelConfiguration = await loadModelConfiguration(cwd, current.config.modelPriority);
   const catalog = createModelCatalog(modelConfiguration);
-  const all = new Map((catalog.all?.() ?? catalog.available()).map((model) => [modelId(model), model]));
+  const all = new Map(
+    (catalog.all?.() ?? catalog.available()).map((model) => [modelId(model), model]),
+  );
   const available = new Set(catalog.available().map(modelId));
   assertExecutionModels(execution, all, available, sandboxMode);
   const state = await saveProjectSettings(cwd, profile, sandboxMode, execution);
@@ -814,7 +904,13 @@ function normalizeDecisionMode(value: unknown, fallback: DecisionMode): Decision
   throw new Error("Decision mode must be cost, balance, or power");
 }
 
-function normalizeBoundedInteger(value: unknown, fallback: number, min: number, max: number, label: string): number {
+function normalizeBoundedInteger(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+  label: string,
+): number {
   if (value === undefined) return fallback;
   if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
     throw new Error(`${label} must be an integer from ${min} to ${max}`);
@@ -822,55 +918,142 @@ function normalizeBoundedInteger(value: unknown, fallback: number, min: number, 
   return value as number;
 }
 
-function normalizeHostAssistance(value: HostAssistancePolicy | undefined, fallback: HostAssistancePolicy): HostAssistancePolicy {
+function normalizeHostAssistance(
+  value: HostAssistancePolicy | undefined,
+  fallback: HostAssistancePolicy,
+): HostAssistancePolicy {
   if (value === undefined) return structuredClone(fallback);
   const contextClasses = Array.isArray(value.contextClasses)
-    ? [...new Set(value.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item)))]
+    ? [
+        ...new Set(
+          value.contextClasses.filter((item) =>
+            ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item),
+          ),
+        ),
+      ]
     : [];
-  if (value.mode !== "on" && value.mode !== "off" && value.mode !== "inherit") throw new Error("Invalid Host Assistance mode");
-  if (value.privateConnector !== "ask" && value.privateConnector !== "deny") throw new Error("Invalid private connector policy");
+  if (value.mode !== "on" && value.mode !== "off" && value.mode !== "inherit")
+    throw new Error("Invalid Host Assistance mode");
+  if (value.privateConnector !== "ask" && value.privateConnector !== "deny")
+    throw new Error("Invalid private connector policy");
   return {
     enabled: value.mode === "off" ? false : value.enabled !== false,
     mode: value.mode,
     contextClasses,
     privateConnector: value.privateConnector,
-    maxRequests: normalizeBoundedInteger(value.maxRequests, fallback.maxRequests, 0, 32, "Host Assistance request limit"),
-    maxFanOut: normalizeBoundedInteger(value.maxFanOut, fallback.maxFanOut, 0, 8, "Host Assistance fan-out"),
+    maxRequests: normalizeBoundedInteger(
+      value.maxRequests,
+      fallback.maxRequests,
+      0,
+      32,
+      "Host Assistance request limit",
+    ),
+    maxFanOut: normalizeBoundedInteger(
+      value.maxFanOut,
+      fallback.maxFanOut,
+      0,
+      8,
+      "Host Assistance fan-out",
+    ),
   };
 }
 
-function normalizeAdvisor(value: AdvisorPolicy | undefined, fallback: AdvisorPolicy): AdvisorPolicy {
+function normalizeAdvisor(
+  value: AdvisorPolicy | undefined,
+  fallback: AdvisorPolicy,
+): AdvisorPolicy {
   if (value === undefined) return structuredClone(fallback);
   const targets = Array.isArray(value.targets)
-    ? [...new Set(value.targets.filter((item) => ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"].includes(item)))]
+    ? [
+        ...new Set(
+          value.targets.filter((item) =>
+            [
+              "ask",
+              "review",
+              "plan",
+              "implement",
+              "orchestrate",
+              "scaffold",
+              "setup",
+              "discover",
+            ].includes(item),
+          ),
+        ),
+      ]
     : [];
   return {
     enabled: value.enabled === true,
     targets,
-    maxRequests: normalizeBoundedInteger(value.maxRequests, fallback.maxRequests, 0, 8, "Advisor request limit"),
-    maxPerspectives: normalizeBoundedInteger(value.maxPerspectives, fallback.maxPerspectives, 0, 8, "Advisor perspective limit"),
+    maxRequests: normalizeBoundedInteger(
+      value.maxRequests,
+      fallback.maxRequests,
+      0,
+      8,
+      "Advisor request limit",
+    ),
+    maxPerspectives: normalizeBoundedInteger(
+      value.maxPerspectives,
+      fallback.maxPerspectives,
+      0,
+      8,
+      "Advisor perspective limit",
+    ),
   };
 }
 
-function normalizeHostActions(value: HostActionPolicy | undefined, fallback: HostActionPolicy): HostActionPolicy {
+function normalizeHostActions(
+  value: HostActionPolicy | undefined,
+  fallback: HostActionPolicy,
+): HostActionPolicy {
   if (value === undefined) return structuredClone(fallback);
   const allowedActionClasses = Array.isArray(value.allowedActionClasses)
-    ? [...new Set(value.allowedActionClasses.filter((item) => ["local-mutation", "draft", "remote-write", "message", "deploy", "transaction"].includes(item)))]
+    ? [
+        ...new Set(
+          value.allowedActionClasses.filter((item) =>
+            [
+              "local-mutation",
+              "draft",
+              "remote-write",
+              "message",
+              "deploy",
+              "transaction",
+            ].includes(item),
+          ),
+        ),
+      ]
     : [];
   return {
     enabled: value.enabled === true,
     allowedActionClasses,
     remoteActionsEnabled: value.remoteActionsEnabled === true,
-    maxUses: normalizeBoundedInteger(value.maxUses, fallback.maxUses, 1, 100, "Host Action use limit"),
-    maxCost: typeof value.maxCost === "number" && Number.isFinite(value.maxCost) && value.maxCost >= 0 ? value.maxCost : (() => { throw new Error("Host Action cost limit must be non-negative"); })(),
-    ttlMs: normalizeBoundedInteger(value.ttlMs, fallback.ttlMs, 60_000, 86_400_000, "Host Action TTL"),
+    maxUses: normalizeBoundedInteger(
+      value.maxUses,
+      fallback.maxUses,
+      1,
+      100,
+      "Host Action use limit",
+    ),
+    maxCost:
+      typeof value.maxCost === "number" && Number.isFinite(value.maxCost) && value.maxCost >= 0
+        ? value.maxCost
+        : (() => {
+            throw new Error("Host Action cost limit must be non-negative");
+          })(),
+    ttlMs: normalizeBoundedInteger(
+      value.ttlMs,
+      fallback.ttlMs,
+      60_000,
+      86_400_000,
+      "Host Action TTL",
+    ),
   };
 }
 
 function assertSandboxModeAvailable(mode: SandboxMode): void {
   if (mode === "strict") return;
   const availability = detectSandboxAvailability();
-  if (!availability.available) throw new Error(availability.reason ?? "Lenient sandboxing is unavailable");
+  if (!availability.available)
+    throw new Error(availability.reason ?? "Lenient sandboxing is unavailable");
 }
 
 function normalizeExecutionSettings(
@@ -885,7 +1068,18 @@ function normalizeExecutionSettings(
     doctrine?: DoctrineId | null | undefined;
     hostActions?: HostActionPolicy | undefined;
   },
-  fallback: Pick<ConfigurationView, "rolePolicies" | "adaptivePolicy" | "backgroundRolePolicy" | "decisionMode" | "hostAssistance" | "contextBudget" | "advisor" | "doctrine" | "hostActions">,
+  fallback: Pick<
+    ConfigurationView,
+    | "rolePolicies"
+    | "adaptivePolicy"
+    | "backgroundRolePolicy"
+    | "decisionMode"
+    | "hostAssistance"
+    | "contextBudget"
+    | "advisor"
+    | "doctrine"
+    | "hostActions"
+  >,
 ) {
   const rolePolicies: RolePolicyOverrides = {};
   const source = value.rolePolicies ?? fallback.rolePolicies ?? {};
@@ -895,7 +1089,10 @@ function normalizeExecutionSettings(
     if (policy.thinkingLevel !== undefined && !isThinkingLevel(policy.thinkingLevel)) {
       throw new Error(`Invalid thinking level for ${role}`);
     }
-    if (policy.maxAttempts !== undefined && (!Number.isInteger(policy.maxAttempts) || policy.maxAttempts < 1 || policy.maxAttempts > 2)) {
+    if (
+      policy.maxAttempts !== undefined &&
+      (!Number.isInteger(policy.maxAttempts) || policy.maxAttempts < 1 || policy.maxAttempts > 2)
+    ) {
       throw new Error(`Role ${role} max attempts must be 1 or 2`);
     }
     rolePolicies[role] = {
@@ -904,38 +1101,70 @@ function normalizeExecutionSettings(
       ...(policy.maxAttempts ? { maxAttempts: policy.maxAttempts } : {}),
     };
   }
-  const adaptivePolicy = normalizeAdaptivePolicy(value.adaptivePolicy ?? fallback.adaptivePolicy ?? DEFAULT_ADAPTIVE_POLICY);
+  const adaptivePolicy = normalizeAdaptivePolicy(
+    value.adaptivePolicy ?? fallback.adaptivePolicy ?? DEFAULT_ADAPTIVE_POLICY,
+  );
   validateAdaptivePolicy(adaptivePolicy);
   return {
     rolePolicies,
     adaptivePolicy,
     backgroundRolePolicy: {
-      mechanicalExecutor: (value.backgroundRolePolicy ?? fallback.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY).mechanicalExecutor === true,
+      mechanicalExecutor:
+        (
+          value.backgroundRolePolicy ??
+          fallback.backgroundRolePolicy ??
+          DEFAULT_BACKGROUND_ROLE_POLICY
+        ).mechanicalExecutor === true,
     },
     decisionMode: normalizeDecisionMode(value.decisionMode, fallback.decisionMode),
     hostAssistance: normalizeHostAssistance(value.hostAssistance, fallback.hostAssistance),
-    contextBudget: normalizeBoundedInteger(value.contextBudget, fallback.contextBudget, 0, 64, "Context budget"),
+    contextBudget: normalizeBoundedInteger(
+      value.contextBudget,
+      fallback.contextBudget,
+      0,
+      64,
+      "Context budget",
+    ),
     advisor: normalizeAdvisor(value.advisor, fallback.advisor),
-    doctrine: value.doctrine === undefined ? fallback.doctrine : value.doctrine === null || value.doctrine === "first-principles-qds-v1" ? value.doctrine : (() => { throw new Error("Unknown decision doctrine"); })(),
+    doctrine:
+      value.doctrine === undefined
+        ? fallback.doctrine
+        : value.doctrine === null || value.doctrine === "first-principles-qds-v1"
+          ? value.doctrine
+          : (() => {
+              throw new Error("Unknown decision doctrine");
+            })(),
     hostActions: normalizeHostActions(value.hostActions, fallback.hostActions),
   };
 }
 
 function validateAdaptivePolicy(policy: AdaptivePolicyConfig): void {
   const capabilities = new Set([
-    "filesystem.read-workspace", "filesystem.write-workspace", "filesystem.write-temp",
-    "git.read", "shell.execute", "network.connect",
+    "filesystem.read-workspace",
+    "filesystem.write-workspace",
+    "filesystem.write-temp",
+    "git.read",
+    "shell.execute",
+    "network.connect",
   ]);
   for (const domain of policy.trustedDomains) {
-    if (!/^(?:\*\.)?[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(domain) ||
-        domain === "localhost" || /^\d+(?:\.\d+){3}$/.test(domain)) {
+    if (
+      !/^(?:\*\.)?[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(domain) ||
+      domain === "localhost" ||
+      /^\d+(?:\.\d+){3}$/.test(domain)
+    ) {
       throw new Error(`Invalid trusted domain: ${domain}`);
     }
   }
   if (policy.rules.length > 128) throw new Error("Adaptive policy supports at most 128 rules");
   for (const rule of policy.rules) {
-    if (!rule || typeof rule.id !== "string" || !rule.id || !["deny", "ask", "allow"].includes(rule.effect) ||
-        !capabilities.has(rule.capability)) {
+    if (
+      !rule ||
+      typeof rule.id !== "string" ||
+      !rule.id ||
+      !["deny", "ask", "allow"].includes(rule.effect) ||
+      !capabilities.has(rule.capability)
+    ) {
       throw new Error("Adaptive policy rules require an id, valid effect, and capability");
     }
   }
@@ -952,9 +1181,13 @@ function assertExecutionModels(
     ...execution.adaptivePolicy.classifierModels,
   ];
   const unknown = selected.filter((model) => !all.has(model));
-  if (unknown.length) throw new Error(`Unknown role or classifier model: ${[...new Set(unknown)].join(", ")}`);
+  if (unknown.length)
+    throw new Error(`Unknown role or classifier model: ${[...new Set(unknown)].join(", ")}`);
   const unavailable = selected.filter((model) => !available.has(model));
-  if (unavailable.length) throw new Error(`Role or classifier models are not authenticated: ${[...new Set(unavailable)].join(", ")}`);
+  if (unavailable.length)
+    throw new Error(
+      `Role or classifier models are not authenticated: ${[...new Set(unavailable)].join(", ")}`,
+    );
   if (sandboxMode === "adaptive" && execution.adaptivePolicy.classifierModels.length === 0) {
     throw new Error("Adaptive mode requires at least one classifier model");
   }
@@ -975,23 +1208,34 @@ function normalizeProviderFields(
   const settings: Record<string, string> = {};
   let secret: string | undefined;
   for (const field of definition.fields) {
-    const visible = (!field.visibleWhen || field.visibleWhen.field !== "authMethod" || field.visibleWhen.equals === authMethod) &&
+    const visible =
+      (!field.visibleWhen ||
+        field.visibleWhen.field !== "authMethod" ||
+        field.visibleWhen.equals === authMethod) &&
       (!field.secret || authMethod === "api-key");
     const raw = value[field.id];
-    if (raw !== undefined && typeof raw !== "string") throw new Error(`${field.label} must be text`);
+    if (raw !== undefined && typeof raw !== "string")
+      throw new Error(`${field.label} must be text`);
     const normalized = raw?.trim() ?? "";
-    if (field.type === "select" && normalized && !field.options?.some((option) => option.value === normalized)) {
+    if (
+      field.type === "select" &&
+      normalized &&
+      !field.options?.some((option) => option.value === normalized)
+    ) {
       throw new Error(`${field.label} has an invalid option`);
     }
     if (!visible) {
-      if (field.type === "select" && normalized) throw new Error(`${field.label} is unavailable for ${authMethod}`);
+      if (field.type === "select" && normalized)
+        throw new Error(`${field.label} is unavailable for ${authMethod}`);
       continue;
     }
     if (normalized.length > 16_384) throw new Error(`${field.label} is too long`);
-    if (field.required && !field.secret && !normalized) throw new Error(`${field.label} is required`);
+    if (field.required && !field.secret && !normalized)
+      throw new Error(`${field.label} is required`);
     if (!normalized) continue;
     if (field.secret) secret = normalized;
-    else if (field.type === "url") settings[field.id] = normalizeProviderUrl(normalized, field.label, authMethod);
+    else if (field.type === "url")
+      settings[field.id] = normalizeProviderUrl(normalized, field.label, authMethod);
     else {
       settings[field.id] = normalized;
     }
@@ -999,22 +1243,38 @@ function normalizeProviderFields(
   if (definition.id === "azure-openai-responses" && !settings.baseUrl && !settings.resourceName) {
     throw new Error("Azure OpenAI requires an endpoint or resource name");
   }
-  if (settings.deploymentNameMap && !settings.deploymentNameMap.split(",").every((entry) => /^[^=,\s]+=[^=,\s]+$/.test(entry.trim()))) {
-    throw new Error("Azure deployment mapping must use model=deployment entries separated by commas");
+  if (
+    settings.deploymentNameMap &&
+    !settings.deploymentNameMap
+      .split(",")
+      .every((entry) => /^[^=,\s]+=[^=,\s]+$/.test(entry.trim()))
+  ) {
+    throw new Error(
+      "Azure deployment mapping must use model=deployment entries separated by commas",
+    );
   }
   return { settings, ...(secret ? { secret } : {}) };
 }
 
-function normalizeProviderUrl(value: string, label: string, authMethod: ProviderAuthMethod): string {
+function normalizeProviderUrl(
+  value: string,
+  label: string,
+  authMethod: ProviderAuthMethod,
+): string {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
     throw new Error(`${label} must be a valid URL`);
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`${label} must use HTTP or HTTPS`);
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    throw new Error(`${label} must use HTTP or HTTPS`);
   if (url.username || url.password) throw new Error(`${label} may not contain credentials`);
-  if (authMethod !== "none" && url.protocol === "http:" && !["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+  if (
+    authMethod !== "none" &&
+    url.protocol === "http:" &&
+    !["127.0.0.1", "localhost", "::1"].includes(url.hostname)
+  ) {
     throw new Error(`${label} must use HTTPS when credentials are configured`);
   }
   url.hash = "";
@@ -1027,9 +1287,10 @@ function providerProfile(
   settings: Record<string, string>,
   readiness: ProviderProfile["readiness"],
 ): ProviderProfile {
-  const runtimeApi = definition.protocolMode === "managed-per-model"
-    ? "managed-per-model"
-    : definition.runtimeApis[0];
+  const runtimeApi =
+    definition.protocolMode === "managed-per-model"
+      ? "managed-per-model"
+      : definition.runtimeApis[0];
   if (!runtimeApi) throw new Error(`Provider has no runtime API: ${definition.id}`);
   return {
     id: definition.id,
@@ -1038,7 +1299,9 @@ function providerProfile(
     connectionKind: "builtin",
     auth: {
       method: authMethod,
-      ...(authMethod === "api-key" || authMethod === "oauth" ? { secretRef: providerSecretRef(definition.id) } : {}),
+      ...(authMethod === "api-key" || authMethod === "oauth"
+        ? { secretRef: providerSecretRef(definition.id) }
+        : {}),
     },
     ...(definition.wireProtocol ? { protocol: definition.wireProtocol } : {}),
     runtimeApi,
@@ -1057,11 +1320,16 @@ function upsertProviderProfile(
 
 function authMethodLabel(method: ProviderAuthMethod): string {
   switch (method) {
-    case "api-key": return "Stored API key";
-    case "oauth": return "Subscription OAuth";
-    case "ambient": return "Ambient cloud identity";
-    case "none": return "No credential";
-    case "custom-header": return "API key plus custom secret header";
+    case "api-key":
+      return "Stored API key";
+    case "oauth":
+      return "Subscription OAuth";
+    case "ambient":
+      return "Ambient cloud identity";
+    case "none":
+      return "No credential";
+    case "custom-header":
+      return "API key plus custom secret header";
   }
 }
 
@@ -1090,9 +1358,14 @@ async function projectDirectoryOptions(cwd: string, selected: string[]): Promise
   const root = await resolveWorkspaceRoot(cwd);
   const entries = await fs.readdir(root, { withFileTypes: true });
   const discovered = entries
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules")
+    .filter(
+      (entry) =>
+        entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules",
+    )
     .map((entry) => entry.name);
-  return [...new Set([...discovered, ...selected])].sort((left, right) => left.localeCompare(right));
+  return [...new Set([...discovered, ...selected])].sort((left, right) =>
+    left.localeCompare(right),
+  );
 }
 
 async function normalizeProjectProfile(
@@ -1107,21 +1380,26 @@ async function normalizeProjectProfile(
   }
   if (submission.goal.length > 4_000) throw new Error("Project goal is too long");
   if (
-    submission.dirs !== undefined
-    && (!Array.isArray(submission.dirs) || !submission.dirs.every((entry) => typeof entry === "string"))
+    submission.dirs !== undefined &&
+    (!Array.isArray(submission.dirs) ||
+      !submission.dirs.every((entry) => typeof entry === "string"))
   ) {
     throw new Error("Project directories must be a string array");
   }
-  if (!Array.isArray(submission.tasks) || !submission.tasks.every((entry) => typeof entry === "string")) {
+  if (
+    !Array.isArray(submission.tasks) ||
+    !submission.tasks.every((entry) => typeof entry === "string")
+  ) {
     throw new Error("Delegated task types must be a string array");
   }
-  if ((submission.dirs?.length ?? 0) > 128) throw new Error("Too many project directories were selected");
+  if ((submission.dirs?.length ?? 0) > 128)
+    throw new Error("Too many project directories were selected");
   if (submission.tasks.length === 0) throw new Error("Choose at least one delegated task type");
   if (submission.tasks.length > 32) throw new Error("Too many delegated task types were selected");
 
   const root = await fs.realpath(await resolveWorkspaceRoot(cwd));
   const dirs: string[] = [];
-  for (const raw of [...new Set((submission.dirs ?? []).map((entry) => entry.trim()).filter(Boolean))]) {
+  for (const raw of new Set((submission.dirs ?? []).map((entry) => entry.trim()).filter(Boolean))) {
     if (path.isAbsolute(raw)) throw new Error(`Project directory must be relative: ${raw}`);
     const normalized = path.normalize(raw);
     if (normalized === ".." || normalized.startsWith(`..${path.sep}`)) {
@@ -1137,7 +1415,8 @@ async function normalizeProjectProfile(
     if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
       throw new Error(`Project directory is outside the workspace: ${raw}`);
     }
-    if (!(await fs.stat(absolute)).isDirectory()) throw new Error(`Project scope is not a directory: ${raw}`);
+    if (!(await fs.stat(absolute)).isDirectory())
+      throw new Error(`Project scope is not a directory: ${raw}`);
     dirs.push(relative.split(path.sep).join("/"));
   }
   const tasks = [...new Set(submission.tasks.map((entry) => entry.trim()).filter(Boolean))];
@@ -1156,10 +1435,10 @@ function assertNoBuiltInProviderOverride(
   current: ConfigurationView,
   candidate: ModelConfiguration,
 ): void {
-  const currentCustom = new Set(current.configuration.customProviders.map((provider) => provider.id));
-  const builtIn = new Set(
-    current.providerCatalog.map((provider) => provider.id),
+  const currentCustom = new Set(
+    current.configuration.customProviders.map((provider) => provider.id),
   );
+  const builtIn = new Set(current.providerCatalog.map((provider) => provider.id));
   for (const provider of candidate.customProviders) {
     if (builtIn.has(provider.id) && !currentCustom.has(provider.id)) {
       throw new Error(`Custom provider may not replace built-in provider: ${provider.id}`);
@@ -1171,17 +1450,28 @@ function assertProviderProfilePolicies(configuration: ModelConfiguration): void 
   for (const profile of configuration.providerProfiles) {
     if (profile.connectionKind === "builtin") {
       const definition = getProviderDefinition(profile.provider);
-      if (!definition || definition.id === "custom") throw new Error(`Unknown built-in provider profile: ${profile.provider}`);
-      profile.settings = normalizeProviderFields(definition, profile.auth.method, profile.settings).settings;
+      if (!definition || definition.id === "custom")
+        throw new Error(`Unknown built-in provider profile: ${profile.provider}`);
+      profile.settings = normalizeProviderFields(
+        definition,
+        profile.auth.method,
+        profile.settings,
+      ).settings;
       continue;
     }
-    const provider = configuration.customProviders.find((candidate) => candidate.id === profile.provider);
+    const provider = configuration.customProviders.find(
+      (candidate) => candidate.id === profile.provider,
+    );
     if (!provider) throw new Error(`Missing custom provider for profile: ${profile.provider}`);
     if (profile.protocol !== provider.wireProtocol || profile.runtimeApi !== provider.api) {
-      throw new Error(`Custom provider profile does not match runtime adapter: ${profile.provider}`);
+      throw new Error(
+        `Custom provider profile does not match runtime adapter: ${profile.provider}`,
+      );
     }
     if (profile.auth.method !== provider.auth?.method) {
-      throw new Error(`Custom provider profile does not match authentication policy: ${profile.provider}`);
+      throw new Error(
+        `Custom provider profile does not match authentication policy: ${profile.provider}`,
+      );
     }
   }
 }
@@ -1192,7 +1482,8 @@ function normalizeCredentialDrafts(
 ): Array<{ provider: string; draftId: string }> {
   if (value === undefined) return [];
   if (!vault) throw new Error("Credential drafts are unavailable for this configuration session");
-  if (!Array.isArray(value) || value.length > 64) throw new Error("Credential drafts must be an array");
+  if (!Array.isArray(value) || value.length > 64)
+    throw new Error("Credential drafts must be an array");
   const byProvider = new Map<string, { provider: string; draftId: string }>();
   for (const entry of value) {
     if (!entry || typeof entry.provider !== "string" || typeof entry.draftId !== "string") {

@@ -1,7 +1,4 @@
-import {
-  AuthStorage,
-  ModelRegistry,
-} from "@earendil-works/pi-coding-agent";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 import { getProviderDefinition } from "../providers/capabilities.js";
 import { wireProtocolForRuntimeApi } from "../providers/endpoints.js";
@@ -59,15 +56,13 @@ export function createPiEnvironment(
   env: NodeJS.ProcessEnv = process.env,
   options: PiEnvironmentOptions = {},
 ): PiEnvironment {
-  const persistentAuth = options.authStorage ?? AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  const persistentAuth =
+    options.authStorage ?? AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
   const authStorage = withProviderEnvironment(
     persistentAuth,
     providerEnvironmentOverlays(configuration),
   );
-  const modelRegistry = ModelRegistry.create(
-    authStorage,
-    env.SWARM_PI_CODE_PLUGIN_MODELS_FILE,
-  );
+  const modelRegistry = ModelRegistry.create(authStorage, env.SWARM_PI_CODE_PLUGIN_MODELS_FILE);
   applyProviderProfiles(modelRegistry, configuration);
   applyCustomProviders(modelRegistry, configuration);
   return { authStorage, modelRegistry };
@@ -96,9 +91,8 @@ export function applyCustomProviders(
     const input: Parameters<ModelRegistry["registerProvider"]>[1] = {
       name: provider.name,
       baseUrl: provider.baseUrl,
-      apiKey: authMethod !== "none"
-        ? `$${customProviderApiKeyVariable(provider.id)}`
-        : "local-no-auth",
+      apiKey:
+        authMethod !== "none" ? `$${customProviderApiKeyVariable(provider.id)}` : "local-no-auth",
       api: provider.api,
       authHeader: authMethod === "api-key" && provider.authHeader,
       ...(Object.keys(headers).length ? { headers } : {}),
@@ -141,10 +135,16 @@ export function providerEnvironmentOverlays(
     const overlay: Record<string, string> = {};
     for (const field of definition.fields) {
       const destination = field.destination;
-      if (!destination?.key || (destination.kind !== "profile" && destination.kind !== "credential-env")) {
+      if (
+        !destination?.key ||
+        (destination.kind !== "profile" && destination.kind !== "credential-env")
+      ) {
         continue;
       }
-      if (field.visibleWhen?.field === "authMethod" && field.visibleWhen.equals !== profile.auth.method) {
+      if (
+        field.visibleWhen?.field === "authMethod" &&
+        field.visibleWhen.equals !== profile.auth.method
+      ) {
         continue;
       }
       const value = profile.settings[field.id];
@@ -185,8 +185,10 @@ function profileHeaders(profile: ProviderProfile): Record<string, string> {
     if (value) headers[field.destination.key] = configLiteral(value);
   }
   if (profile.provider === "openai") {
-    if (profile.settings.organization) headers["OpenAI-Organization"] = configLiteral(profile.settings.organization);
-    if (profile.settings.project) headers["OpenAI-Project"] = configLiteral(profile.settings.project);
+    if (profile.settings.organization)
+      headers["OpenAI-Organization"] = configLiteral(profile.settings.organization);
+    if (profile.settings.project)
+      headers["OpenAI-Project"] = configLiteral(profile.settings.project);
   }
   return headers;
 }
@@ -202,14 +204,18 @@ function resolvedHeaders(
       continue;
     }
     if (header.secretRef && CONTROLLED_SECRET_HEADER_NAMES.includes(header.name as never)) {
-      headers[canonicalHeaderName(header.name)] = `$${customProviderHeaderVariable(provider, header.name)}`;
+      headers[canonicalHeaderName(header.name)] =
+        `$${customProviderHeaderVariable(provider, header.name)}`;
     }
   }
   return headers;
 }
 
 function canonicalHeaderName(name: string): string {
-  return name.split("-").map((part) => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part).join("-");
+  return name
+    .split("-")
+    .map((part) => (part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part))
+    .join("-");
 }
 
 function configLiteral(value: string): string {

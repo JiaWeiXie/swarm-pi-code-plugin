@@ -88,16 +88,16 @@ codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 Start a new Codex task so skills are reloaded. The available skills are:
 
 ```text
-$swarm-pi-code-plugin-configure
-$swarm-pi-code-plugin-project
-$swarm-pi-code-plugin-ask
-$swarm-pi-code-plugin-review
-$swarm-pi-code-plugin-plan
-$swarm-pi-code-plugin-implement
-$swarm-pi-code-plugin-orchestrate
-$swarm-pi-code-plugin-discover
-$swarm-pi-code-plugin-scaffold
-$swarm-pi-code-plugin-setup
+$swarm-pi-configure
+$swarm-pi-project
+$swarm-pi-ask
+$swarm-pi-review
+$swarm-pi-plan
+$swarm-pi-implement
+$swarm-pi-orchestrate
+$swarm-pi-discover
+$swarm-pi-scaffold
+$swarm-pi-setup
 ```
 
 ## Usage
@@ -106,17 +106,17 @@ $swarm-pi-code-plugin-setup
 
 | Situation | Claude Code | Codex |
 | --- | --- | --- |
-| First provider, model, and project setup | `/swarm-pi-code-plugin:init` | `$swarm-pi-code-plugin-configure` |
-| Change Provider or model priority | `/swarm-pi-code-plugin:init --reconfigure` | `$swarm-pi-code-plugin-configure` |
-| Repeatedly change project goal, folders, or task types | `/swarm-pi-code-plugin:project` | `$swarm-pi-code-plugin-project` |
-| Ask a repository question or request analysis | `/swarm-pi-code-plugin:ask` | `$swarm-pi-code-plugin-ask` |
-| Create a read-only implementation plan | `/swarm-pi-code-plugin:plan` | `$swarm-pi-code-plugin-plan` |
-| Review working-tree or branch changes | `/swarm-pi-code-plugin:review` | `$swarm-pi-code-plugin-review` |
-| Make an explicit scoped code change | `/swarm-pi-code-plugin:implement` | `$swarm-pi-code-plugin-implement` |
-| Run multiple read-only perspectives | `/swarm-pi-code-plugin:orchestrate` | `$swarm-pi-code-plugin-orchestrate` |
-| Investigate unknown requirements with gated evidence and experiments | `/swarm-pi-code-plugin:discover` | `$swarm-pi-code-plugin-discover` |
-| Design and create a new project | `/swarm-pi-code-plugin:scaffold` | `$swarm-pi-code-plugin-scaffold` |
-| Configure project-local development tools | `/swarm-pi-code-plugin:setup` | `$swarm-pi-code-plugin-setup` |
+| First provider, model, and project setup | `/swarm-pi-code-plugin:swarm-pi-configure` | `$swarm-pi-configure` |
+| Change Provider or model priority | `/swarm-pi-code-plugin:swarm-pi-configure --reconfigure` | `$swarm-pi-configure` |
+| Repeatedly change project goal, folders, or task types | `/swarm-pi-code-plugin:swarm-pi-project` | `$swarm-pi-project` |
+| Ask a repository question or request analysis | `/swarm-pi-code-plugin:swarm-pi-ask` | `$swarm-pi-ask` |
+| Create a read-only implementation plan | `/swarm-pi-code-plugin:swarm-pi-plan` | `$swarm-pi-plan` |
+| Review working-tree or branch changes | `/swarm-pi-code-plugin:swarm-pi-review` | `$swarm-pi-review` |
+| Make an explicit scoped code change | `/swarm-pi-code-plugin:swarm-pi-implement` | `$swarm-pi-implement` |
+| Run multiple read-only perspectives | `/swarm-pi-code-plugin:swarm-pi-orchestrate` | `$swarm-pi-orchestrate` |
+| Investigate unknown requirements with gated evidence and experiments | `/swarm-pi-code-plugin:swarm-pi-discover` | `$swarm-pi-discover` |
+| Design and create a new project | `/swarm-pi-code-plugin:swarm-pi-scaffold` | `$swarm-pi-scaffold` |
+| Configure project-local development tools | `/swarm-pi-code-plugin:swarm-pi-setup` | `$swarm-pi-setup` |
 
 Claude Code commands and Codex skills use the same runner protocol: they check
 readiness and pending notifications first, preserve original requests across
@@ -180,8 +180,8 @@ Provider and model settings can be reopened with `--reconfigure` or the Codex
 configure skill. Project settings have a separate repeatable flow:
 
 ```text
-/swarm-pi-code-plugin:project
-$swarm-pi-code-plugin-project
+/swarm-pi-code-plugin:swarm-pi-project
+$swarm-pi-project
 ```
 
 The project flow reads current role, safety, and profile settings, then updates
@@ -530,13 +530,16 @@ mise run install
 mise run check
 ```
 
-Development uses Node.js `24.15.0` from mise. Installed plugin packages support
+`mise run check` runs type checking, oxlint, oxfmt's formatting check, the test
+suite, and runtime-parity verification. Development uses Node.js `24.15.0` from mise. Installed plugin packages support
 Node.js `22.19.0` or newer to match the Pi SDK engine requirement.
 
 Useful individual checks are:
 
 ```bash
 mise run typecheck
+mise run lint
+mise run fmt-check
 mise run test
 mise run build
 ```

@@ -9,16 +9,18 @@ export interface SandboxAvailability {
 }
 
 export function detectSandboxAvailability(): SandboxAvailability {
-  const backend = process.platform === "darwin"
-    ? "macos-seatbelt"
-    : process.platform === "linux"
-      ? "linux-bubblewrap"
-      : "unsupported";
-  const label = backend === "macos-seatbelt"
-    ? "macOS Seatbelt"
-    : backend === "linux-bubblewrap"
-      ? "Linux Bubblewrap"
-      : `Unsupported (${process.platform})`;
+  const backend =
+    process.platform === "darwin"
+      ? "macos-seatbelt"
+      : process.platform === "linux"
+        ? "linux-bubblewrap"
+        : "unsupported";
+  const label =
+    backend === "macos-seatbelt"
+      ? "macOS Seatbelt"
+      : backend === "linux-bubblewrap"
+        ? "Linux Bubblewrap"
+        : `Unsupported (${process.platform})`;
 
   if (!SandboxManager.isSupportedPlatform()) {
     return {
@@ -35,9 +37,10 @@ export function detectSandboxAvailability(): SandboxAvailability {
     available: dependencies.errors.length === 0,
     backend,
     label,
-    reason: dependencies.errors.length > 0
-      ? `Sandbox dependencies are unavailable: ${dependencies.errors.join(", ")}`
-      : null,
+    reason:
+      dependencies.errors.length > 0
+        ? `Sandbox dependencies are unavailable: ${dependencies.errors.join(", ")}`
+        : null,
     warnings: dependencies.warnings,
   };
 }

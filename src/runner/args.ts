@@ -11,9 +11,38 @@ import type {
 } from "../core/contracts.js";
 import { isThinkingLevel, isWorkerRole } from "../orchestration/roles.js";
 
-export type RunnerCommand = "init" | "status" | "doctor" | "resume" | "models" | "providers" | "configure" | "roles" | "jobs" | "__worker" | TaskKind;
+export type RunnerCommand =
+  | "init"
+  | "status"
+  | "doctor"
+  | "resume"
+  | "models"
+  | "providers"
+  | "configure"
+  | "roles"
+  | "jobs"
+  | "__worker"
+  | TaskKind;
 export type ReviewScope = "auto" | "working-tree" | "branch";
-export type JobsAction = "list" | "status" | "wait" | "watch" | "cancel" | "acknowledge" | "approvals" | "approve" | "deny" | "host-requests" | "host-respond" | "host-decline" | "decisions" | "decide" | "action-start" | "cleanup" | "materialize" | "export";
+export type JobsAction =
+  | "list"
+  | "status"
+  | "wait"
+  | "watch"
+  | "cancel"
+  | "acknowledge"
+  | "approvals"
+  | "approve"
+  | "deny"
+  | "host-requests"
+  | "host-respond"
+  | "host-decline"
+  | "decisions"
+  | "decide"
+  | "action-start"
+  | "cleanup"
+  | "materialize"
+  | "export";
 
 export interface RunnerArguments {
   command: RunnerCommand;
@@ -104,7 +133,11 @@ export function parseArguments(argv: string[]): RunnerArguments {
     reconfigure: false,
     reset: false,
   };
-  for (let index = command === "jobs" || command === "roles" ? 2 : 1; index < argv.length; index += 1) {
+  for (
+    let index = command === "jobs" || command === "roles" ? 2 : 1;
+    index < argv.length;
+    index += 1
+  ) {
     const argument = argv[index];
     switch (argument) {
       case "--json":
@@ -272,7 +305,12 @@ export function parseArguments(argv: string[]): RunnerArguments {
     throw new Error("--section is only supported by configure");
   }
   if (
-    (command === "ask" || command === "plan" || command === "implement" || command === "orchestrate" || command === "setup" || command === "discover") &&
+    (command === "ask" ||
+      command === "plan" ||
+      command === "implement" ||
+      command === "orchestrate" ||
+      command === "setup" ||
+      command === "discover") &&
     !parsed.promptFile
   ) {
     throw new Error(`--prompt-file is required for ${command}`);
@@ -280,12 +318,28 @@ export function parseArguments(argv: string[]): RunnerArguments {
   if (command === "scaffold" && (!parsed.specFile || !parsed.target)) {
     throw new Error("scaffold requires --spec-file and --target");
   }
-  if (command === "resume" && !parsed.continuationId) throw new Error("resume requires --continuation");
-  if (parsed.audit && command !== "jobs") throw new Error("--audit is only supported by jobs export");
-  if (parsed.adoptExisting && command !== "scaffold") throw new Error("--adopt-existing is only supported by scaffold");
-  if (parsed.discoveryFrom && command !== "plan") throw new Error("--discovery-from is only supported by plan");
-  if (parsed.smokeTest && command !== "doctor") throw new Error("--smoke-test is only supported by doctor");
-  if ((parsed.executionMode || parsed.timeoutMs || parsed.role || parsed.thinkingLevel || parsed.approvalMode || parsed.specFile || parsed.decisionMode || parsed.hostAssistance || parsed.hostContextFile) && !isTaskCommand(command)) {
+  if (command === "resume" && !parsed.continuationId)
+    throw new Error("resume requires --continuation");
+  if (parsed.audit && command !== "jobs")
+    throw new Error("--audit is only supported by jobs export");
+  if (parsed.adoptExisting && command !== "scaffold")
+    throw new Error("--adopt-existing is only supported by scaffold");
+  if (parsed.discoveryFrom && command !== "plan")
+    throw new Error("--discovery-from is only supported by plan");
+  if (parsed.smokeTest && command !== "doctor")
+    throw new Error("--smoke-test is only supported by doctor");
+  if (
+    (parsed.executionMode ||
+      parsed.timeoutMs ||
+      parsed.role ||
+      parsed.thinkingLevel ||
+      parsed.approvalMode ||
+      parsed.specFile ||
+      parsed.decisionMode ||
+      parsed.hostAssistance ||
+      parsed.hostContextFile) &&
+    !isTaskCommand(command)
+  ) {
     throw new Error("Delegation options are only supported by delegated task commands");
   }
   if (command === "jobs") validateJobsArguments(parsed);
@@ -297,8 +351,16 @@ export function parseArguments(argv: string[]): RunnerArguments {
 }
 
 function isTaskCommand(command: RunnerCommand): command is TaskKind {
-  return command === "ask" || command === "review" || command === "plan" ||
-    command === "implement" || command === "orchestrate" || command === "scaffold" || command === "setup" || command === "discover";
+  return (
+    command === "ask" ||
+    command === "review" ||
+    command === "plan" ||
+    command === "implement" ||
+    command === "orchestrate" ||
+    command === "scaffold" ||
+    command === "setup" ||
+    command === "discover"
+  );
 }
 
 function parseDecisionMode(value: string): DecisionMode {
@@ -312,10 +374,26 @@ function parseHostAssistanceMode(value: string): HostAssistanceMode {
 }
 
 function parseJobsAction(value: string | undefined): JobsAction {
-  if (value === "list" || value === "status" || value === "wait" || value === "watch" ||
-      value === "cancel" || value === "acknowledge" || value === "approvals" ||
-      value === "approve" || value === "deny" || value === "host-requests" || value === "host-respond" || value === "host-decline" ||
-      value === "decisions" || value === "decide" || value === "action-start" || value === "cleanup" || value === "export") return value;
+  if (
+    value === "list" ||
+    value === "status" ||
+    value === "wait" ||
+    value === "watch" ||
+    value === "cancel" ||
+    value === "acknowledge" ||
+    value === "approvals" ||
+    value === "approve" ||
+    value === "deny" ||
+    value === "host-requests" ||
+    value === "host-respond" ||
+    value === "host-decline" ||
+    value === "decisions" ||
+    value === "decide" ||
+    value === "action-start" ||
+    value === "cleanup" ||
+    value === "export"
+  )
+    return value;
   if (value === "materialize") return value;
   throw new Error(`Unknown or missing jobs action: ${value ?? "<none>"}`);
 }
@@ -358,7 +436,13 @@ function validateJobsArguments(args: RunnerArguments): void {
   if ((args.jobsAction === "approve" || args.jobsAction === "deny") && !args.approvalId) {
     throw new Error(`jobs ${args.jobsAction} requires --approval`);
   }
-  if ((args.jobsAction === "host-respond" || args.jobsAction === "host-decline" || args.jobsAction === "decide" || args.jobsAction === "action-start") && !args.hostRequestId) {
+  if (
+    (args.jobsAction === "host-respond" ||
+      args.jobsAction === "host-decline" ||
+      args.jobsAction === "decide" ||
+      args.jobsAction === "action-start") &&
+    !args.hostRequestId
+  ) {
     throw new Error(`jobs ${args.jobsAction} requires --request`);
   }
   if ((args.jobsAction === "host-respond" || args.jobsAction === "decide") && !args.responseFile) {

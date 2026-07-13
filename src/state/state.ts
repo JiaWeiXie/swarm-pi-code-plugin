@@ -112,11 +112,17 @@ export interface SwarmState {
   version: 1;
   config: SwarmConfig;
   jobs: JobRecord[];
-  migration?: { source: ".swarm-pi-code-plugin" | ".swarm-pi-code" | ".swarm-code"; migratedAt: string };
+  migration?: {
+    source: ".swarm-pi-code-plugin" | ".swarm-pi-code" | ".swarm-code";
+    migratedAt: string;
+  };
 }
 
 export class StateMigrationConflictError extends Error {
-  constructor(readonly legacyDir: string, readonly destinationDir: string) {
+  constructor(
+    readonly legacyDir: string,
+    readonly destinationDir: string,
+  ) {
     super(`Runtime state exists in both ${legacyDir} and ${destinationDir}`);
     this.name = "StateMigrationConflictError";
   }
@@ -277,7 +283,10 @@ export async function setAvailableModels(cwd: string, models: string[]): Promise
 
 export async function saveProfile(cwd: string, profile: SwarmProfile): Promise<SwarmState> {
   return updateState(cwd, (state) => {
-    state.config.profile = { ...profile, configuredAt: profile.configuredAt ?? new Date().toISOString() };
+    state.config.profile = {
+      ...profile,
+      configuredAt: profile.configuredAt ?? new Date().toISOString(),
+    };
   });
 }
 
@@ -297,8 +306,10 @@ export async function saveProjectSettings(
       configuredAt: profile.configuredAt ?? new Date().toISOString(),
     };
     state.config.sandboxMode = sandboxMode;
-    if (execution?.rolePolicies) state.config.rolePolicies = structuredClone(execution.rolePolicies);
-    if (execution?.adaptivePolicy) state.config.adaptivePolicy = normalizeAdaptivePolicy(execution.adaptivePolicy);
+    if (execution?.rolePolicies)
+      state.config.rolePolicies = structuredClone(execution.rolePolicies);
+    if (execution?.adaptivePolicy)
+      state.config.adaptivePolicy = normalizeAdaptivePolicy(execution.adaptivePolicy);
     if (execution?.backgroundRolePolicy) {
       state.config.backgroundRolePolicy = {
         mechanicalExecutor: execution.backgroundRolePolicy.mechanicalExecutor === true,
@@ -337,8 +348,10 @@ export async function saveExecutionSettings(
 function applyWorkflowSettings(config: SwarmConfig, settings: WorkflowSettings | undefined): void {
   if (!settings) return;
   if (settings.decisionMode) config.decisionMode = settings.decisionMode;
-  if (settings.hostAssistance) config.hostAssistance = normalizeHostAssistancePolicy(settings.hostAssistance);
-  if (settings.contextBudget !== undefined) config.contextBudget = Math.min(64, Math.max(0, Math.trunc(settings.contextBudget)));
+  if (settings.hostAssistance)
+    config.hostAssistance = normalizeHostAssistancePolicy(settings.hostAssistance);
+  if (settings.contextBudget !== undefined)
+    config.contextBudget = Math.min(64, Math.max(0, Math.trunc(settings.contextBudget)));
   if (settings.advisor) config.advisor = normalizeAdvisorPolicy(settings.advisor);
   if (settings.hostActions) config.hostActions = normalizeHostActionPolicy(settings.hostActions);
   if (settings.doctrine === "first-principles-qds-v1") config.doctrine = settings.doctrine;
@@ -424,9 +437,12 @@ function normalizeState(value: Record<string, unknown>): SwarmState {
   state.config.rolePolicies = rolePolicyOverrides(config.rolePolicies);
   state.config.adaptivePolicy = normalizeAdaptivePolicy(asRecord(config.adaptivePolicy));
   const background = asRecord(config.backgroundRolePolicy);
-  state.config.backgroundRolePolicy = { mechanicalExecutor: background.mechanicalExecutor === true };
+  state.config.backgroundRolePolicy = {
+    mechanicalExecutor: background.mechanicalExecutor === true,
+  };
   const decisionMode = config.decisionMode;
-  state.config.decisionMode = decisionMode === "cost" || decisionMode === "power" ? decisionMode : "balance";
+  state.config.decisionMode =
+    decisionMode === "cost" || decisionMode === "power" ? decisionMode : "balance";
   state.config.hostAssistance = normalizeHostAssistancePolicy(config.hostAssistance);
   state.config.contextBudget = Number.isInteger(config.contextBudget)
     ? Math.min(64, Math.max(0, config.contextBudget as number))
@@ -450,7 +466,9 @@ function normalizeState(value: Record<string, unknown>): SwarmState {
     : [];
   const migration = asRecord(value.migration);
   if (
-    (migration.source === ".swarm-pi-code-plugin" || migration.source === ".swarm-pi-code" || migration.source === ".swarm-code") &&
+    (migration.source === ".swarm-pi-code-plugin" ||
+      migration.source === ".swarm-pi-code" ||
+      migration.source === ".swarm-code") &&
     typeof migration.migratedAt === "string"
   ) {
     state.migration = { source: migration.source, migratedAt: migration.migratedAt };
@@ -466,10 +484,19 @@ function normalizeHostAssistancePolicy(value: unknown): HostAssistancePolicy {
   return {
     enabled: mode === "off" ? false : candidate.enabled !== false,
     mode,
-    contextClasses: Array.isArray(candidate.contextClasses) ? candidate.contextClasses.filter((item): item is HostAssistancePolicy["contextClasses"][number] => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item as string)) : defaults.contextClasses,
+    contextClasses: Array.isArray(candidate.contextClasses)
+      ? candidate.contextClasses.filter(
+          (item): item is HostAssistancePolicy["contextClasses"][number] =>
+            ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item as string),
+        )
+      : defaults.contextClasses,
     privateConnector: candidate.privateConnector === "deny" ? "deny" : "ask",
-    maxRequests: Number.isInteger(candidate.maxRequests) ? Math.min(MAX_HOST_ASSISTANCE_REQUESTS, Math.max(0, candidate.maxRequests as number)) : defaults.maxRequests,
-    maxFanOut: Number.isInteger(candidate.maxFanOut) ? Math.min(MAX_HOST_ASSISTANCE_FAN_OUT, Math.max(0, candidate.maxFanOut as number)) : defaults.maxFanOut,
+    maxRequests: Number.isInteger(candidate.maxRequests)
+      ? Math.min(MAX_HOST_ASSISTANCE_REQUESTS, Math.max(0, candidate.maxRequests as number))
+      : defaults.maxRequests,
+    maxFanOut: Number.isInteger(candidate.maxFanOut)
+      ? Math.min(MAX_HOST_ASSISTANCE_FAN_OUT, Math.max(0, candidate.maxFanOut as number))
+      : defaults.maxFanOut,
   };
 }
 
@@ -479,9 +506,26 @@ function normalizeAdvisorPolicy(value: unknown): AdvisorPolicy {
   const candidate = value as Record<string, unknown>;
   return {
     enabled: candidate.enabled === true,
-    targets: Array.isArray(candidate.targets) ? candidate.targets.filter((item): item is TaskKind => ["ask", "review", "plan", "implement", "orchestrate", "scaffold", "setup", "discover"].includes(item as string)) : defaults.targets,
-    maxRequests: Number.isInteger(candidate.maxRequests) ? Math.min(MAX_ADVISOR_REQUESTS, Math.max(0, candidate.maxRequests as number)) : defaults.maxRequests,
-    maxPerspectives: Number.isInteger(candidate.maxPerspectives) ? Math.min(MAX_ADVISOR_PERSPECTIVES, Math.max(0, candidate.maxPerspectives as number)) : defaults.maxPerspectives,
+    targets: Array.isArray(candidate.targets)
+      ? candidate.targets.filter((item): item is TaskKind =>
+          [
+            "ask",
+            "review",
+            "plan",
+            "implement",
+            "orchestrate",
+            "scaffold",
+            "setup",
+            "discover",
+          ].includes(item as string),
+        )
+      : defaults.targets,
+    maxRequests: Number.isInteger(candidate.maxRequests)
+      ? Math.min(MAX_ADVISOR_REQUESTS, Math.max(0, candidate.maxRequests as number))
+      : defaults.maxRequests,
+    maxPerspectives: Number.isInteger(candidate.maxPerspectives)
+      ? Math.min(MAX_ADVISOR_PERSPECTIVES, Math.max(0, candidate.maxPerspectives as number))
+      : defaults.maxPerspectives,
   };
 }
 
@@ -501,23 +545,36 @@ function normalizeHostActionPolicy(value: unknown): HostActionPolicy {
   if (!value || typeof value !== "object" || Array.isArray(value)) return defaults;
   const candidate = value as Record<string, unknown>;
   const classes = Array.isArray(candidate.allowedActionClasses)
-    ? candidate.allowedActionClasses.filter((item): item is HostActionPolicy["allowedActionClasses"][number] =>
-        ["local-mutation", "draft", "remote-write", "message", "deploy", "transaction"].includes(item as string))
+    ? candidate.allowedActionClasses.filter(
+        (item): item is HostActionPolicy["allowedActionClasses"][number] =>
+          ["local-mutation", "draft", "remote-write", "message", "deploy", "transaction"].includes(
+            item as string,
+          ),
+      )
     : defaults.allowedActionClasses;
   return {
     enabled: candidate.enabled !== false,
     allowedActionClasses: classes,
     remoteActionsEnabled: candidate.remoteActionsEnabled === true,
-    maxUses: Number.isInteger(candidate.maxUses) ? Math.min(100, Math.max(1, candidate.maxUses as number)) : defaults.maxUses,
-    maxCost: typeof candidate.maxCost === "number" && Number.isFinite(candidate.maxCost) ? Math.max(0, candidate.maxCost) : defaults.maxCost,
-    ttlMs: Number.isInteger(candidate.ttlMs) ? Math.min(24 * 60 * 60_000, Math.max(60_000, candidate.ttlMs as number)) : defaults.ttlMs,
+    maxUses: Number.isInteger(candidate.maxUses)
+      ? Math.min(100, Math.max(1, candidate.maxUses as number))
+      : defaults.maxUses,
+    maxCost:
+      typeof candidate.maxCost === "number" && Number.isFinite(candidate.maxCost)
+        ? Math.max(0, candidate.maxCost)
+        : defaults.maxCost,
+    ttlMs: Number.isInteger(candidate.ttlMs)
+      ? Math.min(24 * 60 * 60_000, Math.max(60_000, candidate.ttlMs as number))
+      : defaults.ttlMs,
   };
 }
 
 async function resolveGitCommonDir(cwd: string): Promise<string | undefined> {
   try {
     const { stdout } = await execFileAsync(
-      "git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, encoding: "utf8" },
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd, encoding: "utf8" },
     );
     return await fs.realpath(stdout.trim());
   } catch {
@@ -526,10 +583,19 @@ async function resolveGitCommonDir(cwd: string): Promise<string | undefined> {
 }
 
 function userStateRoot(env: NodeJS.ProcessEnv): string {
-  if (env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR) return path.resolve(env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR);
-  if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Application Support", "swarm-pi-code-plugin");
-  if (process.platform === "win32") return path.join(env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "swarm-pi-code-plugin");
-  return path.join(env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "swarm-pi-code-plugin");
+  if (env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR)
+    return path.resolve(env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR);
+  if (process.platform === "darwin")
+    return path.join(os.homedir(), "Library", "Application Support", "swarm-pi-code-plugin");
+  if (process.platform === "win32")
+    return path.join(
+      env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"),
+      "swarm-pi-code-plugin",
+    );
+  return path.join(
+    env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"),
+    "swarm-pi-code-plugin",
+  );
 }
 
 async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
@@ -567,7 +633,9 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -586,7 +654,9 @@ function rolePolicyOverrides(value: unknown): RolePolicyOverrides {
     const candidate = asRecord(raw);
     result[key] = {
       ...(stringArray(candidate.models).length ? { models: stringArray(candidate.models) } : {}),
-      ...(typeof candidate.thinkingLevel === "string" ? { thinkingLevel: candidate.thinkingLevel as never } : {}),
+      ...(typeof candidate.thinkingLevel === "string"
+        ? { thinkingLevel: candidate.thinkingLevel as never }
+        : {}),
       ...(typeof candidate.maxAttempts === "number" ? { maxAttempts: candidate.maxAttempts } : {}),
     };
   }
