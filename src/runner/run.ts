@@ -1047,6 +1047,7 @@ async function runStartedJob(options: {
   const kind = options.args.command as TaskKind;
   const jobId = options.job.id;
   let actualRole = options.policySnapshot.rolePolicy.role;
+  let verificationCandidates = options.candidates;
   const orchestrationTrace: NonNullable<WorkerResult["orchestrationTrace"]> = [];
   await markJobRunning(options.stateCwd, jobId, options.job.workerToken, process.pid);
   const heartbeat = setInterval(() => {
@@ -1421,6 +1422,7 @@ async function runStartedJob(options: {
         }).slice(0, policy.maxAttempts);
         if (executorCandidates.length > 0) {
           actualRole = "executor";
+          verificationCandidates = executorCandidates;
           result = await runWithFallback({
             kind,
             cwd: options.cwd,
@@ -1523,14 +1525,20 @@ async function runStartedJob(options: {
             cwd: options.cwd,
             task: options.rawPrompt,
             diff,
-            candidates: options.dependencies.catalog.available(),
+            candidates: verificationCandidates,
             dependencies: options.dependencies,
             deadline,
             ...(options.signal ? { signal: options.signal } : {}),
             ...(boundProjectPolicy ? { boundProjectPolicy } : {}),
           });
-          result = { ...result, agentVerification: verification, ...(artifact ? { artifact: { ...artifact, deliverable: verification.status === "passed" } } : {}) };
-          if (artifact && verification.status === "passed") {
+          result = {
+            ...result,
+            attempts: (result.attempts ?? 0) + verification.attempts,
+            fallbackUsed: Boolean(result.fallbackUsed || verification.fallbackUsed),
+            agentVerification: verification.result,
+            ...(artifact ? { artifact: { ...artifact, deliverable: verification.result.status === "passed" } } : {}),
+          };
+          if (artifact && verification.result.status === "passed") {
             result.nextActions = [{
               action: "materialize",
               label: "Apply the verified artifact to the target workspace",
@@ -1538,14 +1546,14 @@ async function runStartedJob(options: {
               jobId,
             }];
           }
-          if (verification.status !== "passed") {
+          if (verification.result.status !== "passed") {
             result = {
               ...result,
               status: "failed",
               success: false,
-              errorCode: verification.status === "refuted" ? "verification-refuted" : "verification-inconclusive",
-              error: `Agent verification ${verification.status}`,
-              output: `${result.output}\n\nVerifier: ${verification.output}`.trim(),
+              errorCode: verification.result.status === "refuted" ? "verification-refuted" : "verification-inconclusive",
+              error: `Agent verification ${verification.result.status}`,
+              output: `${result.output}\n\nVerifier: ${verification.result.output}`.trim(),
             };
           }
         }
@@ -1577,7 +1585,11 @@ async function runAgentVerifier(options: {
   deadline: number;
   signal?: AbortSignal;
   boundProjectPolicy?: BoundProjectPolicy;
-}): Promise<NonNullable<WorkerResult["agentVerification"]>> {
+}): Promise<{
+  result: NonNullable<WorkerResult["agentVerification"]>;
+  attempts: number;
+  fallbackUsed: boolean;
+}> {
   const verifierPolicy = resolveRolePolicy("verifier", {}, options.candidates.map(modelId));
   const verifierSnapshot = createPolicySnapshot({
     sandboxMode: "strict",
@@ -1615,7 +1627,11 @@ async function runAgentVerifier(options: {
       : normalized.startsWith("REFUTED")
         ? "refuted"
         : "inconclusive";
-  return { status, output: result.output, model: result.model };
+  return {
+    result: { status, output: result.output, model: result.model },
+    attempts: result.attempts ?? 0,
+    fallbackUsed: Boolean(result.fallbackUsed),
+  };
 }
 
 async function handleReadiness(

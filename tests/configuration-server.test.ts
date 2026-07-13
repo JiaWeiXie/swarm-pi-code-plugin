@@ -10,6 +10,7 @@ import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 import { getProviderDefinition } from "../src/providers/capabilities.js";
 import { CredentialDraftVault } from "../src/providers/credentials.js";
+import { compileEffectiveProjectPolicy } from "../src/policy/project-policy.js";
 import { loadState, resolveStateFile } from "../src/state/state.js";
 import { defaultModelConfiguration, resolveModelConfigurationFile, saveModelConfiguration } from "../src/state/model-config.js";
 import {
@@ -148,6 +149,7 @@ test("project-only page starts from the guided project setup", () => {
   assert.match(html, /data-step="6"/);
   assert.match(html, /sandboxed shell and outbound network enabled/);
   assert.match(html, /\/api\/save-profile/);
+  assert.match(html, /\.\.\.\(state\.profile\.scope === "selected" \? \{dirs:\[\.\.\.state\.profile\.dirs\]\} : \{\}\)/);
 });
 
 test("project profile save validates scope and does not create model configuration", async () => {
@@ -187,6 +189,35 @@ test("project profile save validates scope and does not create model configurati
   await assert.rejects(
     () => saveProjectProfileSubmission(workspace, { goal: "Invalid", dirs: [], tasks: [" "] }),
     /at least one delegated task type/,
+  );
+});
+
+test("whole-repository project setup omits dirs while explicit empty dirs remain deny-all", async () => {
+  const { workspace } = fixture();
+  const wholeRepository = await saveProjectProfileSubmission(workspace, {
+    goal: "Analyze the whole repository",
+    tasks: ["analysis"],
+  });
+
+  assert.equal(Object.hasOwn(wholeRepository, "dirs"), false);
+  assert.equal(Object.hasOwn((await loadState(workspace)).config.profile!, "dirs"), false);
+  assert.deepEqual(
+    (await compileEffectiveProjectPolicy({ cwd: workspace, profile: wholeRepository })).roots.read,
+    ["."],
+  );
+
+  const denyAll = await saveProjectProfileSubmission(workspace, {
+    goal: "Pause repository access",
+    dirs: [],
+    tasks: ["analysis"],
+  });
+
+  assert.equal(Object.hasOwn(denyAll, "dirs"), true);
+  assert.deepEqual(denyAll.dirs, []);
+  assert.deepEqual((await loadState(workspace)).config.profile?.dirs, []);
+  assert.deepEqual(
+    (await compileEffectiveProjectPolicy({ cwd: workspace, profile: denyAll })).roots.read,
+    [],
   );
 });
 

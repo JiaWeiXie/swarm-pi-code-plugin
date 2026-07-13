@@ -91,10 +91,15 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
 async function interruptSession(session: RunnableSession): Promise<void> {
   await session.abort?.().catch(() => {});
   if (!session.waitForIdle) return;
-  await Promise.race([
-    session.waitForIdle().catch(() => {}),
-    new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
-  ]);
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      session.waitForIdle().catch(() => {}),
+      new Promise<void>((resolve) => { timeout = setTimeout(resolve, 5_000); }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function resultFromTerminalMessage(

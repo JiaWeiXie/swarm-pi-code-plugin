@@ -143,7 +143,7 @@ export interface ConfigurationSubmission {
 
 export interface ProjectProfileSubmission {
   goal: string;
-  dirs: string[];
+  dirs?: string[] | undefined;
   tasks: string[];
 }
 
@@ -1106,19 +1106,22 @@ async function normalizeProjectProfile(
     throw new Error("Project goal is required");
   }
   if (submission.goal.length > 4_000) throw new Error("Project goal is too long");
-  if (!Array.isArray(submission.dirs) || !submission.dirs.every((entry) => typeof entry === "string")) {
+  if (
+    submission.dirs !== undefined
+    && (!Array.isArray(submission.dirs) || !submission.dirs.every((entry) => typeof entry === "string"))
+  ) {
     throw new Error("Project directories must be a string array");
   }
   if (!Array.isArray(submission.tasks) || !submission.tasks.every((entry) => typeof entry === "string")) {
     throw new Error("Delegated task types must be a string array");
   }
-  if (submission.dirs.length > 128) throw new Error("Too many project directories were selected");
+  if ((submission.dirs?.length ?? 0) > 128) throw new Error("Too many project directories were selected");
   if (submission.tasks.length === 0) throw new Error("Choose at least one delegated task type");
   if (submission.tasks.length > 32) throw new Error("Too many delegated task types were selected");
 
   const root = await fs.realpath(await resolveWorkspaceRoot(cwd));
   const dirs: string[] = [];
-  for (const raw of [...new Set(submission.dirs.map((entry) => entry.trim()).filter(Boolean))]) {
+  for (const raw of [...new Set((submission.dirs ?? []).map((entry) => entry.trim()).filter(Boolean))]) {
     if (path.isAbsolute(raw)) throw new Error(`Project directory must be relative: ${raw}`);
     const normalized = path.normalize(raw);
     if (normalized === ".." || normalized.startsWith(`..${path.sep}`)) {
@@ -1143,7 +1146,7 @@ async function normalizeProjectProfile(
 
   return {
     goal: submission.goal,
-    dirs,
+    ...(submission.dirs === undefined ? {} : { dirs }),
     tasks,
     configuredAt: new Date().toISOString(),
   };

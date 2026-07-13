@@ -54,10 +54,17 @@ async function interruptSession(session) {
     await session.abort?.().catch(() => { });
     if (!session.waitForIdle)
         return;
-    await Promise.race([
-        session.waitForIdle().catch(() => { }),
-        new Promise((resolve) => setTimeout(resolve, 5_000)),
-    ]);
+    let timeout;
+    try {
+        await Promise.race([
+            session.waitForIdle().catch(() => { }),
+            new Promise((resolve) => { timeout = setTimeout(resolve, 5_000); }),
+        ]);
+    }
+    finally {
+        if (timeout)
+            clearTimeout(timeout);
+    }
 }
 function resultFromTerminalMessage(kind, model, output, message) {
     if (!message?.stopReason) {

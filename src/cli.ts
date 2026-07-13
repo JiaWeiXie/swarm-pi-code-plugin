@@ -41,9 +41,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         process.removeListener("SIGTERM", abort);
       }
     }
-    const delegated = args.command === "ask" || args.command === "review" ||
-      args.command === "plan" || args.command === "implement" || args.command === "orchestrate" ||
-      args.command === "scaffold" || args.command === "setup";
+    const delegated = isDelegatedCommand(args.command);
     if (delegated) {
       process.once("SIGINT", abort);
       process.once("SIGTERM", abort);
@@ -70,6 +68,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     return 2;
   }
+}
+
+export function isDelegatedCommand(command: ReturnType<typeof parseArguments>["command"]): boolean {
+  return command === "ask" || command === "review" || command === "plan" || command === "implement" ||
+    command === "orchestrate" || command === "discover" || command === "scaffold" || command === "setup";
 }
 
 async function streamJobWatch(

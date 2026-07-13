@@ -106,6 +106,40 @@ test("linked worktrees resolve one shared state directory", async () => {
   });
 });
 
+test("state loading skips the migration lock when no current legacy directory exists", async () => {
+  const { repository } = repositoryFixture();
+  const gitDir = path.join(repository, ".git");
+  const migrationLock = path.join(gitDir, "swarm-pi-code-plugin.migration.lock");
+  const originalMode = fs.statSync(gitDir).mode & 0o777;
+  fs.writeFileSync(migrationLock, "held by another process\n");
+  fs.chmodSync(gitDir, originalMode & ~0o222);
+
+  try {
+    await withDataDir(undefined, async () => {
+      const state = await loadState(repository);
+      assert.deepEqual(state.config.modelPriority, []);
+    });
+    assert.equal(fs.readFileSync(migrationLock, "utf8"), "held by another process\n");
+  } finally {
+    fs.chmodSync(gitDir, originalMode);
+  }
+});
+
+test("state normalization preserves omitted and explicit empty directory scopes", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-profile-scope-"));
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-profile-state-"));
+
+  await withDataDir(stateDir, async () => {
+    await saveProfile(workspace, { goal: "Whole repository", tasks: ["Analysis"] });
+    assert.equal(Object.hasOwn((await loadState(workspace)).config.profile!, "dirs"), false);
+
+    await saveProfile(workspace, { goal: "Deny repository access", dirs: [], tasks: ["Analysis"] });
+    const explicitEmpty = (await loadState(workspace)).config.profile!;
+    assert.equal(Object.hasOwn(explicitEmpty, "dirs"), true);
+    assert.deepEqual(explicitEmpty.dirs, []);
+  });
+});
+
 test("previous swarm-pi-code state migrates with configuration and Pi jobs", async () => {
   const { repository } = repositoryFixture();
   const previousDir = path.join(repository, ".swarm-pi-code");

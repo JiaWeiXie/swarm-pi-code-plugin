@@ -16,6 +16,26 @@ export async function createWorkerSession(options) {
         ...(options.policyEngine ? { engine: options.policyEngine } : {}),
         ...(options.onApproval ? { onApproval: options.onApproval } : {}),
     });
+    const customTools = [
+        ...(options.boundProjectPolicy
+            ? createScopedFilesystemTools({
+                cwd: options.cwd,
+                mode: options.mode,
+                boundProjectPolicy: options.boundProjectPolicy,
+                ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+            })
+            : options.mode === "implement" ? createScopedMutationTools(options.cwd) : []),
+        ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
+        ...(options.requestHostAssistance ? [createHostAssistanceTool(options.requestHostAssistance)] : []),
+    ];
+    // `tools` is the SDK's allow-list of tool names, not a set of built-in
+    // definitions to register (core/sdk.js: allowedToolNames = options.tools).
+    // An empty array is truthy, so passing [] means "allow nothing" and filters
+    // out our own custom tools too, leaving the worker with no tools at all.
+    // Allow the mode's base tool names plus every custom tool we register: the
+    // policy-scoped custom tools override the built-ins by name, so no unscoped
+    // built-in is ever exposed while the scoped tools stay active.
+    const allowedToolNames = workerToolAllowlist(options.mode, customTools);
     return createAgentSession({
         cwd: options.cwd,
         authStorage,
@@ -23,22 +43,15 @@ export async function createWorkerSession(options) {
         sessionManager: SessionManager.inMemory(),
         settingsManager,
         resourceLoader,
-        // When a project policy is bound, expose only the policy-aware custom
-        // filesystem tools; do not register duplicate unscoped SDK built-ins.
-        tools: options.boundProjectPolicy ? [] : toolsForMode(options.mode),
-        customTools: [
-            ...(options.boundProjectPolicy
-                ? createScopedFilesystemTools({
-                    cwd: options.cwd,
-                    mode: options.mode,
-                    boundProjectPolicy: options.boundProjectPolicy,
-                    ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
-                })
-                : options.mode === "implement" ? createScopedMutationTools(options.cwd) : []),
-            ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
-            ...(options.requestHostAssistance ? [createHostAssistanceTool(options.requestHostAssistance)] : []),
-        ],
+        tools: allowedToolNames,
+        customTools,
         ...(options.model ? { model: options.model } : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
     });
+}
+export function workerToolAllowlist(mode, customTools) {
+    const customToolNames = customTools
+        .map((tool) => tool.name)
+        .filter((name) => typeof name === "string");
+    return Array.from(new Set([...toolsForMode(mode), ...customToolNames]));
 }

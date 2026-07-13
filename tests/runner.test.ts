@@ -6,9 +6,10 @@ import path from "node:path";
 import test from "node:test";
 
 import { executeSession, type RunnableSession } from "../src/pi/execute.js";
+import { isDelegatedCommand } from "../src/cli.js";
 import { createPolicySnapshot, resolveRolePolicy } from "../src/orchestration/roles.js";
 import { compileEffectiveProjectPolicy, ProjectPolicyError } from "../src/policy/project-policy.js";
-import { describeModels, describeProviders, selectModel, type PiModel } from "../src/pi/models.js";
+import { describeModels, describeProviders, modelId, selectModel, type PiModel } from "../src/pi/models.js";
 import { parseArguments } from "../src/runner/args.js";
 import { runCommand, type RunnerDependencies } from "../src/runner/run.js";
 import { approveJob, cancelJob, finishJob, getJob, readJobRequest, requestJobApproval, startJob } from "../src/state/jobs.js";
@@ -26,6 +27,11 @@ const fallbackModel = {
   id: "fallback-model",
   name: "Fallback Model",
 } as PiModel;
+
+test("CLI forwards termination signals to discover delegations", () => {
+  assert.equal(isDelegatedCommand("discover"), true);
+  assert.equal(isDelegatedCommand("status"), false);
+});
 
 test("argument parsing requires host and prompt file for ask", () => {
   assert.equal(parseArguments(["roles", "list", "--json"]).rolesAction, "list");
@@ -458,6 +464,71 @@ test("implement requires a clean worktree and captures Pi changes", async () => 
   assert.equal("agentVerification" in result && result.agentVerification?.status, "passed");
 });
 
+test("independent verification reuses the ordered Job candidates and contributes fallback attempts", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-verifier-candidates-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
+  execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
+  fs.writeFileSync(path.join(workspace, "file.txt"), "before\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "fixture"], { stdio: "ignore" });
+  await updateState(workspace, (state) => {
+    state.config.rolePolicies = {
+      ...state.config.rolePolicies,
+      executor: {
+        models: ["test-provider/fallback-model", "test-provider/test-model"],
+        maxAttempts: 2,
+      },
+    };
+  });
+  const sessions: Array<{ mode: "readonly" | "implement"; model: string }> = [];
+  const dependencies: RunnerDependencies = {
+    // Catalog order deliberately disagrees with the configured Job order.
+    catalog: { available: () => [fakeModel, fallbackModel] },
+    readFile: async () => "Change file.txt",
+    createSession: async ({ mode, model }) => {
+      sessions.push({ mode, model: modelId(model) });
+      return {
+        subscribe(listener) {
+          if (mode === "readonly" && model.id === fallbackModel.id) {
+            listener({
+              type: "message_end",
+              message: { role: "assistant", stopReason: "error", errorMessage: "verifier candidate unavailable" },
+            });
+          } else {
+            if (mode === "readonly") {
+              listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED: ordered fallback passed" } });
+            }
+            listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+          }
+          return () => {};
+        },
+        async prompt() {
+          if (mode === "implement") fs.writeFileSync(path.join(workspace, "file.txt"), "after\n");
+        },
+        dispose() {},
+      };
+    },
+  };
+
+  const result = await runCommand({
+    command: "implement", host: "codex", promptFile: "prompt.md",
+    reconfigure: false, reset: false, json: true,
+  }, workspace, dependencies);
+
+  assert.deepEqual(sessions, [
+    { mode: "implement", model: "test-provider/fallback-model" },
+    { mode: "readonly", model: "test-provider/fallback-model" },
+    { mode: "readonly", model: "test-provider/test-model" },
+  ]);
+  assert.equal("agentVerification" in result && result.agentVerification?.model, "test-provider/test-model");
+  assert.equal("attempts" in result && result.attempts, 3);
+  assert.equal("fallbackUsed" in result && result.fallbackUsed, true);
+  const persisted = await getJob(workspace, "jobId" in result ? result.jobId! : "");
+  assert.equal(persisted.result?.attempts, 3);
+  assert.equal(persisted.result?.fallbackUsed, true);
+});
+
 test("implement returns actionable isolation strategies for a dirty worktree", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-dirty-"));
   execFileSync("git", ["init", workspace], { stdio: "ignore" });
@@ -605,26 +676,30 @@ test("mechanical executor escalates only after a side-effect-free failure", asyn
       executor: { models: ["test-provider/fallback-model"], thinkingLevel: "high", maxAttempts: 1 },
     };
   });
+  const sessions: Array<{ mode: "readonly" | "implement"; model: string }> = [];
   const dependencies: RunnerDependencies = {
     catalog: { available: () => [fakeModel, fallbackModel] },
     readFile: async () => "Change file.txt",
-    createSession: async ({ model, mode }) => ({
-      subscribe(listener) {
-        if (mode === "readonly") {
-          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED" } });
-          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
-        } else if (model.id === fakeModel.id) {
-          listener({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "mechanical failed" } });
-        } else {
-          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
-        }
-        return () => {};
-      },
-      async prompt() {
-        if (mode === "implement" && model.id === fallbackModel.id) fs.writeFileSync(path.join(workspace, "file.txt"), "after\n");
-      },
-      dispose() {},
-    }),
+    createSession: async ({ model, mode }) => {
+      sessions.push({ mode, model: modelId(model) });
+      return {
+        subscribe(listener) {
+          if (mode === "readonly") {
+            listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "VERIFIED" } });
+            listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+          } else if (model.id === fakeModel.id) {
+            listener({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "mechanical failed" } });
+          } else {
+            listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+          }
+          return () => {};
+        },
+        async prompt() {
+          if (mode === "implement" && model.id === fallbackModel.id) fs.writeFileSync(path.join(workspace, "file.txt"), "after\n");
+        },
+        dispose() {},
+      };
+    },
   };
   const result = await runCommand({
     command: "implement", host: "codex", role: "mechanical-executor", promptFile: "prompt.md",
@@ -633,6 +708,11 @@ test("mechanical executor escalates only after a side-effect-free failure", asyn
   assert.equal("status" in result && result.status, "succeeded");
   assert.equal("role" in result && result.role, "executor");
   assert.deepEqual("orchestrationTrace" in result && result.orchestrationTrace?.map((item) => item.role), ["mechanical-executor", "executor"]);
+  assert.deepEqual(sessions, [
+    { mode: "implement", model: "test-provider/test-model" },
+    { mode: "implement", model: "test-provider/fallback-model" },
+    { mode: "readonly", model: "test-provider/fallback-model" },
+  ]);
 });
 
 test("init replaces validated model priority and preserves it in status", async () => {

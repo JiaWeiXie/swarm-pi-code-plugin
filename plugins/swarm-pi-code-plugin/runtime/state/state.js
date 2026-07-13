@@ -93,13 +93,16 @@ export async function migrateCurrentStateDirectory(cwd) {
     const destinationDir = await resolveStateDir(cwd);
     if (path.resolve(legacyDir) === path.resolve(destinationDir))
         return false;
+    const legacy = await fs.stat(legacyDir).catch(() => undefined);
+    if (!legacy?.isDirectory())
+        return false;
     const parent = path.dirname(destinationDir);
     await fs.mkdir(parent, { recursive: true, mode: 0o700 });
     const lock = path.join(parent, `${path.basename(destinationDir)}.migration.lock`);
     const handle = await acquireFileLock(lock);
     try {
-        const legacy = await fs.stat(legacyDir).catch(() => undefined);
-        if (!legacy?.isDirectory())
+        const lockedLegacy = await fs.stat(legacyDir).catch(() => undefined);
+        if (!lockedLegacy?.isDirectory())
             return false;
         const destination = await fs.stat(destinationDir).catch(() => undefined);
         if (destination)
@@ -264,7 +267,7 @@ async function readLegacyState(cwd) {
         if (Object.keys(legacyProfile).length > 0) {
             state.config.profile = {
                 goal: stringValue(legacyProfile.goal),
-                dirs: stringArray(legacyProfile.dirs),
+                ...(Object.hasOwn(legacyProfile, "dirs") ? { dirs: stringArray(legacyProfile.dirs) } : {}),
                 tasks: stringArray(legacyProfile.tasks),
                 configuredAt: stringValue(legacyProfile.configuredAt) ?? new Date().toISOString(),
             };
@@ -309,7 +312,7 @@ function normalizeState(value) {
     if (Object.keys(profile).length > 0) {
         state.config.profile = {
             goal: stringValue(profile.goal),
-            dirs: stringArray(profile.dirs),
+            ...(Object.hasOwn(profile, "dirs") ? { dirs: stringArray(profile.dirs) } : {}),
             tasks: stringArray(profile.tasks),
             configuredAt: stringValue(profile.configuredAt),
         };

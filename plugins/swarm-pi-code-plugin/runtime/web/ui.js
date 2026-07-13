@@ -618,7 +618,7 @@ const clientScript = String.raw `
     hostActions: structuredClone(boot.hostActions || {enabled:true,allowedActionClasses:["local-mutation","draft"],remoteActionsEnabled:false,maxUses:1,maxCost:1,ttlMs:1800000}),
     profile: {
       goal: savedProfile?.goal || "",
-      scope: savedProfile?.dirs?.length ? "selected" : "all",
+      scope: savedProfile?.dirs === undefined ? "all" : "selected",
       dirs: [...(savedProfile?.dirs || [])],
       tasks: savedProfile ? [...new Set(savedKnownTasks.filter(task => knownTasks.has(task)))] : taskTypes.map(item => item.value),
       customTasks: savedTasks.filter(task => !canonicalTask(task)),
@@ -1020,7 +1020,7 @@ const clientScript = String.raw `
   function projectProfile() {
     return {
       goal: state.profile.goal,
-      dirs: state.profile.scope === "selected" ? [...state.profile.dirs] : [],
+      ...(state.profile.scope === "selected" ? {dirs:[...state.profile.dirs]} : {}),
       tasks: [...new Set([...state.profile.tasks, ...state.profile.customTasks])],
     };
   }
@@ -1047,8 +1047,8 @@ const clientScript = String.raw `
     document.querySelectorAll(".full-only").forEach(element => element.hidden = setupMode === "project");
     const profile = projectProfile(); $("review-goal").textContent = profile.goal;
     const directories = $("review-directories"); directories.replaceChildren();
-    if (profile.dirs.length === 0) directories.textContent = "Whole project";
-    profile.dirs.forEach(value => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = value; directories.append(row); });
+    if (profile.dirs === undefined) directories.textContent = "Whole project";
+    (profile.dirs || []).forEach(value => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = value; directories.append(row); });
     const tasks = $("review-tasks"); tasks.replaceChildren();
     profile.tasks.forEach(value => { const known = taskTypes.find(item => item.value === value), row = document.createElement("div"); row.className = "review-item"; row.textContent = known?.label || value; tasks.append(row); });
     $("review-sandbox").textContent = state.sandboxMode === "lenient"
