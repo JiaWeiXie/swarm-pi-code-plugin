@@ -23,7 +23,7 @@ export function defaultState() {
             modelPriority: [],
             availableModels: [],
             availableModelsCheckedAt: null,
-            sandboxMode: "strict",
+            sandboxMode: "adaptive",
             rolePolicies: {},
             adaptivePolicy: structuredClone(DEFAULT_ADAPTIVE_POLICY),
             backgroundRolePolicy: structuredClone(DEFAULT_BACKGROUND_ROLE_POLICY),
@@ -228,7 +228,7 @@ export async function clearConfiguration(cwd) {
             modelPriority: [],
             availableModels: [],
             availableModelsCheckedAt: null,
-            sandboxMode: "strict",
+            sandboxMode: "adaptive",
             rolePolicies: {},
             adaptivePolicy: structuredClone(DEFAULT_ADAPTIVE_POLICY),
             backgroundRolePolicy: structuredClone(DEFAULT_BACKGROUND_ROLE_POLICY),
@@ -337,8 +337,14 @@ function normalizeState(value) {
 }
 function normalizeHostAssistancePolicy(value) {
     const defaults = defaultHostAssistancePolicy();
-    if (!value || typeof value !== "object" || Array.isArray(value))
-        return defaults;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return {
+            ...defaults,
+            reviewMode: "user-only",
+            autoApprovalScope: "context-only",
+            autoApproveDiscoveryGates: false,
+        };
+    }
     const candidate = value;
     const mode = candidate.mode === "off" || candidate.mode === "inherit" ? candidate.mode : "on";
     return {
@@ -354,6 +360,11 @@ function normalizeHostAssistancePolicy(value) {
         maxFanOut: Number.isInteger(candidate.maxFanOut)
             ? Math.min(MAX_HOST_ASSISTANCE_FAN_OUT, Math.max(0, candidate.maxFanOut))
             : defaults.maxFanOut,
+        reviewMode: candidate.reviewMode === "host-first" ? "host-first" : "user-only",
+        autoApprovalScope: candidate.autoApprovalScope === "read-only" || candidate.autoApprovalScope === "reversible"
+            ? candidate.autoApprovalScope
+            : "context-only",
+        autoApproveDiscoveryGates: candidate.autoApproveDiscoveryGates === true,
     };
 }
 function normalizeAdvisorPolicy(value) {

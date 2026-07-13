@@ -217,6 +217,7 @@ export function createPolicySnapshot(input: {
   adaptivePolicy?: Partial<AdaptivePolicyConfig>;
   effectiveProjectPolicy: EffectiveProjectPolicy;
   decisionMode: DecisionMode;
+  parentPolicyHash?: string;
   hostAssistance?: HostAssistancePolicy;
   advisor?: AdvisorPolicy;
   doctrine?: "first-principles-qds-v1";
@@ -230,6 +231,7 @@ export function createPolicySnapshot(input: {
   adaptivePolicy?: Partial<AdaptivePolicyConfig>;
   effectiveProjectPolicy?: EffectiveProjectPolicy;
   decisionMode?: DecisionMode;
+  parentPolicyHash?: string;
   hostAssistance?: HostAssistancePolicy;
   advisor?: AdvisorPolicy;
   doctrine?: "first-principles-qds-v1";
@@ -248,6 +250,7 @@ export function createPolicySnapshot(input: {
         adaptivePolicy,
         effectiveProjectPolicy: input.effectiveProjectPolicy,
         scopeHash: input.effectiveProjectPolicy.scopeHash,
+        ...(input.parentPolicyHash ? { parentPolicyHash: input.parentPolicyHash } : {}),
         decisionMode: input.decisionMode,
         hostAssistance: input.hostAssistance ?? defaultHostAssistancePolicy(),
         advisor: input.advisor ?? defaultAdvisorPolicy(),
@@ -309,6 +312,9 @@ export function policySnapshotHash(
       ? { effectiveProjectPolicy: snapshot.effectiveProjectPolicy }
       : {}),
     ...("scopeHash" in snapshot ? { scopeHash: snapshot.scopeHash } : {}),
+    ...("parentPolicyHash" in snapshot && snapshot.parentPolicyHash
+      ? { parentPolicyHash: snapshot.parentPolicyHash }
+      : {}),
     ...("decisionMode" in snapshot ? { decisionMode: snapshot.decisionMode } : {}),
     ...("hostAssistance" in snapshot ? { hostAssistance: snapshot.hostAssistance } : {}),
     ...("advisor" in snapshot ? { advisor: snapshot.advisor } : {}),
@@ -347,6 +353,8 @@ export function assertPolicySnapshotValid(
     (!isDecisionMode(candidate.decisionMode) ||
       !isHostAssistancePolicy(candidate.hostAssistance) ||
       !isAdvisorPolicy(candidate.advisor) ||
+      (candidate.parentPolicyHash !== undefined &&
+        !/^[a-f0-9]{64}$/.test(candidate.parentPolicyHash)) ||
       !Number.isInteger(candidate.contextBudget) ||
       candidate.contextBudget < 0 ||
       candidate.contextBudget > 64 ||
@@ -364,6 +372,9 @@ export function defaultHostAssistancePolicy(): HostAssistancePolicy {
     privateConnector: "ask",
     maxRequests: 4,
     maxFanOut: 2,
+    reviewMode: "host-first",
+    autoApprovalScope: "reversible",
+    autoApproveDiscoveryGates: true,
   };
 }
 
@@ -396,7 +407,16 @@ function isHostAssistancePolicy(value: unknown): value is HostAssistancePolicy {
     (value.maxRequests as number) <= MAX_HOST_ASSISTANCE_REQUESTS &&
     Number.isInteger(value.maxFanOut) &&
     (value.maxFanOut as number) >= 0 &&
-    (value.maxFanOut as number) <= MAX_HOST_ASSISTANCE_FAN_OUT
+    (value.maxFanOut as number) <= MAX_HOST_ASSISTANCE_FAN_OUT &&
+    (value.reviewMode === undefined ||
+      value.reviewMode === "user-only" ||
+      value.reviewMode === "host-first") &&
+    (value.autoApprovalScope === undefined ||
+      value.autoApprovalScope === "context-only" ||
+      value.autoApprovalScope === "read-only" ||
+      value.autoApprovalScope === "reversible") &&
+    (value.autoApproveDiscoveryGates === undefined ||
+      typeof value.autoApproveDiscoveryGates === "boolean")
   );
 }
 

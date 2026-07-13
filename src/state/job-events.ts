@@ -46,6 +46,9 @@ export interface JobApprovalResolvedEvent extends JobEventBase<"approval-resolve
   notificationId: string;
   status: "approved" | "denied" | "expired" | "consumed";
   resolvedAt: string;
+  principal?: "host-model" | "user";
+  autoResolved?: boolean;
+  assessedRisk?: import("../core/contracts.js").RiskLevel;
 }
 
 export interface JobProgressEvent extends JobEventBase<"job-progress"> {
@@ -100,6 +103,9 @@ export interface JobHostAssistanceResolvedEvent extends JobEventBase<
   generation: number;
   status: Exclude<HostAssistanceRequestStatus, "pending">;
   resolvedAt: string;
+  principal?: "host-model" | "user";
+  autoResolved?: boolean;
+  assessedRisk?: import("../core/contracts.js").RiskLevel;
 }
 
 /** Public, allowlisted events emitted by `jobs watch --emit ndjson`. */
@@ -275,6 +281,13 @@ export function projectJobEvents(
           generation: request.generation,
           status: request.status,
           resolvedAt: request.resolvedAt,
+          ...(request.adjudication
+            ? {
+                principal: request.adjudication.principal,
+                autoResolved: request.adjudication.autoResolved,
+                assessedRisk: request.adjudication.assessedRisk,
+              }
+            : {}),
         },
         resolvedAt,
       );
@@ -432,6 +445,13 @@ function approvalResolvedEvent(
     notificationId,
     status: resolvedStatus(approval),
     resolvedAt,
+    ...(approval.adjudication
+      ? {
+          principal: approval.adjudication.principal,
+          autoResolved: approval.adjudication.autoResolved,
+          assessedRisk: approval.adjudication.assessedRisk,
+        }
+      : {}),
   };
 }
 

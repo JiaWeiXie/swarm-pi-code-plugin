@@ -61,6 +61,9 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
     settingsManager,
     ...(options.policyEngine ? { engine: options.policyEngine } : {}),
     ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+    ...(options.requestHostAssistance
+      ? { bypassToolNames: new Set(["request_host_assistance"]) }
+      : {}),
   });
 
   const customTools = [

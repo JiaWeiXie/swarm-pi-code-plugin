@@ -5,9 +5,19 @@ import path from "node:path";
 import test from "node:test";
 
 import { exportJobAudit } from "../src/audit/export.js";
+import type { HostAssistancePolicy, WorkerAssessment } from "../src/core/contracts.js";
 import { createPolicySnapshot, resolveRolePolicy } from "../src/orchestration/roles.js";
+import { compileEffectiveProjectPolicy } from "../src/policy/project-policy.js";
 import { parseArguments } from "../src/runner/args.js";
-import { finishJob, jobDirectory, startJob } from "../src/state/jobs.js";
+import {
+  approveJob,
+  finishJob,
+  jobDirectory,
+  requestJobApproval,
+  requestJobHostAssistance,
+  resolveJobHostRequest,
+  startJob,
+} from "../src/state/jobs.js";
 import { defaultModelConfiguration } from "../src/state/model-config.js";
 
 async function terminalFixture() {
@@ -94,6 +104,148 @@ test("audit export returns a safe single-job evidence package", async () => {
   assert.doesNotMatch(serialized, /BEGIN PRIVATE KEY/);
   assert.doesNotMatch(serialized, /Do not export this prompt/);
   assert.equal(serialized.includes(cwd), false);
+});
+
+test("audit export includes redacted WorkerAssessment, Host receipts, and lease principal", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-audit-host-first-"));
+  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({
+    cwd,
+    profile: { dirs: ["."], tasks: ["analysis"] },
+  });
+  const hostAssistance: HostAssistancePolicy = {
+    enabled: true,
+    mode: "on",
+    contextClasses: ["workspace", "web", "docs", "paper", "connector", "skill"],
+    privateConnector: "ask",
+    maxRequests: 4,
+    maxFanOut: 2,
+    reviewMode: "host-first",
+    autoApprovalScope: "read-only",
+    autoApproveDiscoveryGates: true,
+  };
+  const policySnapshot = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("scout"),
+    effectiveProjectPolicy,
+    decisionMode: "balance",
+    hostAssistance,
+  });
+  const modelConfiguration = defaultModelConfiguration(["test-provider/test-model"]);
+  const job = await startJob(cwd, {
+    host: "codex",
+    kind: "ask",
+    prompt: "Read one local file and obtain public documentation.",
+    cwd,
+    executionMode: "supervised",
+    sandboxMode: "adaptive",
+    timeoutMs: 60_000,
+    role: "scout",
+    approvalMode: "wait",
+    policySnapshot,
+    modelConfiguration,
+  });
+  const assessment: WorkerAssessment = {
+    purpose: "Read bounded evidence for the current analysis.",
+    blockedBy: "Independent Host review is required.",
+    minimumAccess: ["filesystem.read-workspace"],
+    targets: ["README.md"],
+    sideEffects: ["No mutation."],
+    dataExposure: ["Public documentation only."],
+    failureModes: ["Evidence is stale."],
+    mitigations: ["Require a dated citation."],
+    reversibility: "read-only",
+    rollback: "No state changes are made.",
+    verification: ["Verify the citation and exact target."],
+    proposedRisk: "low",
+    fallback: "Continue without the missing evidence.",
+  };
+  const approvalFingerprint = "d".repeat(64);
+  const approval = await requestJobApproval(cwd, job.id, job.workerToken, {
+    actionFingerprint: approvalFingerprint,
+    toolName: "read",
+    actionSummary: "read README.md",
+    decision: {
+      decision: "require-approval",
+      risk: "high",
+      capabilities: ["filesystem.read-workspace"],
+      reason: "fixture",
+      constraints: ["README.md only"],
+      policyHash: policySnapshot.hash,
+    },
+    workerAssessment: assessment,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+  const receiptBase = {
+    principal: "host-model" as const,
+    host: "codex" as const,
+    model: "host/test-model",
+    decision: "allow" as const,
+    assessedRisk: "low" as const,
+    rationale: "The request is bounded, read-only, and matches the original task.",
+    constraints: ["Read-only"],
+    intentMatch: true,
+    policyHash: policySnapshot.hash,
+    autoResolved: true,
+    decidedAt: new Date().toISOString(),
+  };
+  await approveJob(cwd, job.id, approval.id, "once", {
+    ...receiptBase,
+    actionFingerprint: approvalFingerprint,
+  });
+  const hostRequest = await requestJobHostAssistance(cwd, job.id, job.workerToken, {
+    correlation: { jobId: job.id, generation: 1, sessionId: "audit", attempt: 1 },
+    request: {
+      kind: "context",
+      contextClass: "docs",
+      question: "Find the public documentation.",
+      unknowns: ["current behavior"],
+      acceptanceCriteria: ["dated public citation"],
+      dataClassification: "public",
+      egressAllowed: true,
+      budget: 1,
+      workerAssessment: assessment,
+    },
+    policy: hostAssistance,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+  await resolveJobHostRequest(
+    cwd,
+    job.id,
+    hostRequest.id,
+    {
+      requestId: hostRequest.id,
+      answer: "Public answer.",
+      claims: [],
+      citations: [],
+      provenance: ["public fixture"],
+    },
+    { ...receiptBase, actionFingerprint: hostRequest.actionFingerprint },
+  );
+  await finishJob(cwd, job.id, {
+    kind: "ask",
+    status: "succeeded",
+    success: true,
+    output: "done",
+    model: "test-provider/test-model",
+    changedFiles: [],
+    diffStat: "",
+    verification: { status: "passed", commands: [] },
+  });
+  const audit = await exportJobAudit(cwd, job.id);
+  assert.equal(audit.approvals[0]?.workerAssessment?.reversibility, "read-only");
+  assert.equal(audit.approvals[0]?.adjudication?.principal, "host-model");
+  assert.equal(audit.leases[0]?.principal, "host-model");
+  assert.equal(
+    audit.hostAssistance[0]?.request.workerAssessment?.verification[0],
+    "Verify the citation and exact target.",
+  );
+  assert.equal(audit.hostAssistance[0]?.adjudication?.actionFingerprint.length, 64);
+  assert.equal(audit.result.hostAdjudications?.length, 2);
+  assert.deepEqual(audit.result.hostAdjudications?.map((item) => item.source).sort(), [
+    "approval",
+    "host-assistance",
+  ]);
 });
 
 test("audit export rejects non-terminal jobs, malformed events, and traversal ids", async () => {

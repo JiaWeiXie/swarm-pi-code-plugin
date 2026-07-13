@@ -1,6 +1,6 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "description": "Dual-host Claude Code and Codex plugin backed by the embedded Pi coding-agent SDK",

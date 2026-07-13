@@ -20,6 +20,9 @@ export async function createTrustedResourceLoader(options) {
                         let consecutiveBlocks = 0;
                         let totalBlocks = 0;
                         pi.on("tool_call", async (event, ctx) => {
+                            if (shouldBypassGenericPolicy(event.toolName, options.bypassToolNames)) {
+                                return undefined;
+                            }
                             const action = toolAction(event, options.cwd);
                             let decision = await options.engine.authorize(action, ctx.signal);
                             if (decision.decision === "require-approval" && options.onApproval) {
@@ -44,6 +47,9 @@ export async function createTrustedResourceLoader(options) {
     });
     await loader.reload();
     return loader;
+}
+export function shouldBypassGenericPolicy(toolName, bypassToolNames) {
+    return bypassToolNames?.has(toolName) === true;
 }
 function toolAction(event, cwd) {
     const input = event.input;

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import type { HostAdjudicationReceipt, WorkerAssessment } from "../src/core/contracts.js";
 import { createPolicySnapshot, resolveRolePolicy } from "../src/orchestration/roles.js";
 import { compileEffectiveProjectPolicy } from "../src/policy/project-policy.js";
 import { defaultModelConfiguration } from "../src/state/model-config.js";
@@ -14,6 +15,7 @@ import {
   getJob,
   listJobs,
   readJobRequest,
+  recordJobApprovalAdjudication,
   requestJobApproval,
   startJob,
   waitForJob,
@@ -295,4 +297,265 @@ test("a capability lease is bound to the exact policy snapshot, so a scope chang
   assert.notEqual(snapshotB.scopeHash, snapshotA.scopeHash);
   assert.notEqual(snapshotB.hash, snapshotA.hash);
   assert.equal(await leases.find("write-src", snapshotB), null);
+});
+
+test("Host-first can issue one exact reversible lease but cannot expand Strict mode", async () => {
+  const assessment: WorkerAssessment = {
+    purpose: "Apply the requested bounded source edit.",
+    blockedBy: "The adaptive policy requires independent approval for this write.",
+    minimumAccess: ["filesystem.write-workspace"],
+    targets: ["src/new.ts"],
+    sideEffects: ["Create one source file."],
+    dataExposure: ["No data leaves the workspace."],
+    failureModes: ["The new source file fails typecheck."],
+    mitigations: ["Limit the write to one file and run typecheck."],
+    reversibility: "reversible",
+    rollback: "Delete the newly created job-owned file before delivery.",
+    verification: ["Run the targeted typecheck."],
+    proposedRisk: "medium",
+    fallback: "Leave the request pending for the user.",
+  };
+  async function createHostFirstJob(sandboxMode: "adaptive" | "strict") {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), `swarm-host-lease-${sandboxMode}-`));
+    const effectiveProjectPolicy = await compileEffectiveProjectPolicy({
+      cwd,
+      profile: { dirs: ["src"], tasks: ["implementation"] },
+    });
+    const snapshot = createPolicySnapshot({
+      sandboxMode,
+      approvalMode: "wait",
+      rolePolicy: resolveRolePolicy("executor"),
+      effectiveProjectPolicy,
+      decisionMode: "balance",
+      hostAssistance: {
+        enabled: true,
+        mode: "on",
+        contextClasses: ["workspace", "web", "docs", "paper", "connector", "skill"],
+        privateConnector: "ask",
+        maxRequests: 4,
+        maxFanOut: 2,
+        reviewMode: "host-first",
+        autoApprovalScope: "reversible",
+        autoApproveDiscoveryGates: true,
+      },
+    });
+    const job = await startJob(cwd, {
+      host: "codex",
+      kind: "implement",
+      prompt: "create src/new.ts",
+      cwd,
+      executionMode: "supervised",
+      sandboxMode,
+      timeoutMs: 60_000,
+      role: "executor",
+      approvalMode: "wait",
+      policySnapshot: snapshot,
+      modelConfiguration: defaultModelConfiguration(["test-provider/test-model"]),
+    });
+    const fingerprint = "a".repeat(64);
+    const approval = await requestJobApproval(cwd, job.id, job.workerToken, {
+      actionFingerprint: fingerprint,
+      toolName: "write",
+      actionSummary: "write src/new.ts",
+      decision: {
+        decision: "require-approval",
+        risk: "high",
+        capabilities: ["filesystem.write-workspace"],
+        reason: "independent review required",
+        constraints: ["src/new.ts only"],
+        policyHash: snapshot.hash,
+      },
+      workerAssessment: assessment,
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+    });
+    const receipt: HostAdjudicationReceipt = {
+      principal: "host-model",
+      host: "codex",
+      model: "host/test-model",
+      decision: "allow",
+      assessedRisk: "medium",
+      rationale: "The write is bounded, reversible, and already authorized by the task.",
+      constraints: ["One exact action", "Run typecheck"],
+      intentMatch: true,
+      actionFingerprint: fingerprint,
+      policyHash: snapshot.hash,
+      autoResolved: true,
+      decidedAt: new Date().toISOString(),
+    };
+    return { cwd, job, approval, receipt, snapshot };
+  }
+
+  const adaptive = await createHostFirstJob("adaptive");
+  const badReceipt = { ...adaptive.receipt, policyHash: "b".repeat(64) };
+  await assert.rejects(
+    approveJob(adaptive.cwd, adaptive.job.id, adaptive.approval.id, "once", badReceipt),
+    /policy hash/,
+  );
+  const approved = await approveJob(
+    adaptive.cwd,
+    adaptive.job.id,
+    adaptive.approval.id,
+    "once",
+    adaptive.receipt,
+  );
+  assert.equal(approved.lease.principal, "host-model");
+  assert.equal(approved.lease.scope, "once");
+  assert.equal(approved.lease.adjudication?.actionFingerprint, adaptive.receipt.actionFingerprint);
+  assert.ok(
+    await createJobLeaseProvider(adaptive.cwd, adaptive.job.id).find(
+      adaptive.receipt.actionFingerprint,
+      adaptive.snapshot,
+    ),
+  );
+
+  const strict = await createHostFirstJob("strict");
+  await assert.rejects(
+    approveJob(strict.cwd, strict.job.id, strict.approval.id, "once", strict.receipt),
+    /Strict mode/,
+  );
+  assert.equal((await getJob(strict.cwd, strict.job.id)).job.pendingApprovalId, strict.approval.id);
+  const askUserReceipt: HostAdjudicationReceipt = {
+    ...strict.receipt,
+    decision: "ask-user",
+    assessedRisk: "high",
+    intentMatch: false,
+    autoResolved: false,
+    rationale: "Strict mode and the remaining uncertainty require the user's decision.",
+  };
+  const fallback = await recordJobApprovalAdjudication(
+    strict.cwd,
+    strict.job.id,
+    strict.approval.id,
+    askUserReceipt,
+  );
+  assert.equal(fallback.outcome, "ask-user");
+  assert.equal(fallback.approval.status, "pending");
+  assert.equal(fallback.job.leases?.length ?? 0, 0);
+  const denied = await recordJobApprovalAdjudication(
+    strict.cwd,
+    strict.job.id,
+    strict.approval.id,
+    {
+      ...askUserReceipt,
+      decision: "hard-deny",
+      autoResolved: true,
+      rationale: "The requested capability must not expand Strict mode.",
+    },
+  );
+  assert.equal(denied.outcome, "hard-deny");
+  assert.equal(denied.approval.status, "denied");
+  assert.equal(denied.job.leases?.length ?? 0, 0);
+});
+
+test("Host-first can independently allow a trusted read-only shell inspection", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-host-readonly-shell-"));
+  const effectiveProjectPolicy = await compileEffectiveProjectPolicy({
+    cwd,
+    profile: { tasks: ["discovery"] },
+  });
+  const snapshot = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("analyst"),
+    effectiveProjectPolicy,
+    decisionMode: "cost",
+    hostAssistance: {
+      enabled: true,
+      mode: "on",
+      contextClasses: ["workspace", "web", "docs", "paper", "connector", "skill"],
+      privateConnector: "ask",
+      maxRequests: 4,
+      maxFanOut: 2,
+      reviewMode: "host-first",
+      autoApprovalScope: "reversible",
+      autoApproveDiscoveryGates: true,
+    },
+  });
+  const job = await startJob(cwd, {
+    host: "codex",
+    kind: "discover",
+    prompt: "inspect repository state",
+    cwd,
+    executionMode: "supervised",
+    sandboxMode: "adaptive",
+    timeoutMs: 60_000,
+    role: "analyst",
+    approvalMode: "wait",
+    policySnapshot: snapshot,
+    modelConfiguration: defaultModelConfiguration(["test-provider/test-model"]),
+  });
+  const assessment: WorkerAssessment = {
+    purpose: "Inspect tracked repository state without mutation.",
+    blockedBy: "The classifier broadened a read-only shell capability.",
+    minimumAccess: ["shell.execute"],
+    targets: ["git status --short --branch && git ls-files"],
+    sideEffects: ["No mutation capability is requested."],
+    dataExposure: ["No data leaves the workspace."],
+    failureModes: ["The inspection command may fail without changing state."],
+    mitigations: ["Bind the lease to the exact command fingerprint."],
+    reversibility: "read-only",
+    rollback: "No rollback is required.",
+    verification: ["Confirm the original worktree remains unchanged."],
+    proposedRisk: "low",
+    fallback: "Leave the request pending for the user.",
+  };
+  const fingerprint = "c".repeat(64);
+  const approval = await requestJobApproval(cwd, job.id, job.workerToken, {
+    actionFingerprint: fingerprint,
+    toolName: "bash",
+    actionSummary: "bash git status --short --branch && git ls-files",
+    trustedReadOnly: true,
+    decision: {
+      decision: "require-approval",
+      risk: "high",
+      capabilities: ["shell.execute"],
+      reason: "Classifier failed: classifier broadened capabilities",
+      constraints: [],
+      policyHash: snapshot.hash,
+    },
+    workerAssessment: assessment,
+    expiresAt: new Date(Date.now() + 30_000).toISOString(),
+  });
+  const receipt: HostAdjudicationReceipt = {
+    principal: "host-model",
+    host: "codex",
+    model: "host/test-model",
+    decision: "allow",
+    assessedRisk: "low",
+    rationale: "The exact command is a local read-only inspection within the original intent.",
+    constraints: ["One exact command", "No network", "No workspace mutation"],
+    intentMatch: true,
+    actionFingerprint: fingerprint,
+    policyHash: snapshot.hash,
+    autoResolved: true,
+    decidedAt: new Date().toISOString(),
+  };
+  const approved = await approveJob(cwd, job.id, approval.id, "once", receipt);
+  assert.equal(approved.approval.trustedReadOnly, true);
+  assert.equal(approved.lease.principal, "host-model");
+
+  const untrustedFingerprint = "d".repeat(64);
+  const untrusted = await requestJobApproval(cwd, job.id, job.workerToken, {
+    actionFingerprint: untrustedFingerprint,
+    toolName: "bash",
+    actionSummary: "bash unknown-command",
+    decision: {
+      decision: "require-approval",
+      risk: "high",
+      capabilities: ["shell.execute"],
+      reason: "Unknown shell effect",
+      constraints: [],
+      policyHash: snapshot.hash,
+    },
+    workerAssessment: { ...assessment, targets: ["unknown-command"] },
+    expiresAt: new Date(Date.now() + 30_000).toISOString(),
+  });
+  await assert.rejects(
+    approveJob(cwd, job.id, untrusted.id, "once", {
+      ...receipt,
+      actionFingerprint: untrustedFingerprint,
+      decidedAt: new Date().toISOString(),
+    }),
+    /no mutation intent/,
+  );
 });

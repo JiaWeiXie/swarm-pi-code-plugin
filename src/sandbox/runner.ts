@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -33,6 +34,7 @@ export async function createSandboxRunner(options: {
   trustedDomains?: string[];
   boundProjectPolicy?: BoundProjectPolicy;
   authorizeNetwork?: (host: string, port?: number) => Promise<boolean>;
+  allowGitMetadataRead?: boolean;
   env?: NodeJS.ProcessEnv;
 }): Promise<SandboxRunner> {
   const availability = detectSandboxAvailability();
@@ -54,6 +56,7 @@ export async function createSandboxRunner(options: {
       options.sandboxMode ?? "lenient",
       options.trustedDomains ?? [],
       options.boundProjectPolicy,
+      options.allowGitMetadataRead ?? false,
     );
   } catch (error) {
     await fs.rm(tempRoot, { recursive: true, force: true });
@@ -108,6 +111,7 @@ export async function sandboxConfiguration(
   sandboxMode: Extract<SandboxMode, "adaptive" | "lenient"> = "lenient",
   trustedDomains: string[] = [],
   boundProjectPolicy?: BoundProjectPolicy,
+  allowGitMetadataRead = false,
 ): Promise<SandboxRuntimeConfig> {
   cwd = await fs.realpath(cwd);
   if (boundProjectPolicy && boundProjectPolicy.executionRoot !== cwd) {
@@ -118,7 +122,7 @@ export async function sandboxConfiguration(
   const denyRead = [
     ...(await hostReadDenyPaths(cwd)),
     stateDir,
-    ...gitPaths,
+    ...(allowGitMetadataRead ? [] : gitPaths),
     ...credentialPaths(env),
   ];
   const denyWrite = [
@@ -155,7 +159,11 @@ export async function sandboxConfiguration(
       denyRead: uniquePaths(denyRead),
       // Bash is a distinct capability: it may read only its shell roots, not
       // roots granted solely to the scoped read/search tools.
-      allowRead: uniquePaths([...executableReadPaths(cwd), ...policyShellRoots]),
+      allowRead: uniquePaths([
+        ...executableReadPaths(cwd),
+        ...policyShellRoots,
+        ...(allowGitMetadataRead ? gitPaths : []),
+      ]),
       allowWrite: uniquePaths(
         mode === "implement"
           ? boundProjectPolicy
@@ -327,13 +335,18 @@ function credentialPaths(env: NodeJS.ProcessEnv): string[] {
 }
 
 function executableReadPaths(cwd: string): string[] {
-  return uniquePaths([path.dirname(process.execPath), path.join(cwd, "node_modules", ".bin")]);
+  return uniquePaths([
+    path.dirname(process.execPath),
+    path.join(cwd, "node_modules", ".bin"),
+    ...directDeveloperToolPaths(),
+  ]);
 }
 
 function sandboxPath(cwd: string): string {
   return uniquePaths([
     path.join(cwd, "node_modules", ".bin"),
     path.dirname(process.execPath),
+    ...directDeveloperToolPaths(),
     "/opt/homebrew/bin",
     "/usr/local/bin",
     "/usr/bin",
@@ -341,6 +354,11 @@ function sandboxPath(cwd: string): string {
     "/usr/sbin",
     "/sbin",
   ]).join(path.delimiter);
+}
+
+function directDeveloperToolPaths(): string[] {
+  const commandLineTools = "/Library/Developer/CommandLineTools/usr/bin";
+  return process.platform === "darwin" && existsSync(commandLineTools) ? [commandLineTools] : [];
 }
 
 function uniquePaths(values: string[]): string[] {

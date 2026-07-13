@@ -138,7 +138,7 @@ function renderContext(events, cwd) {
   const context = [
     "[Swarm Pi Code Plugin] Job notification recovery:",
     ...lines.map((line) => `- ${line}`),
-    "No approval or acknowledgement was performed by this hook. Present approval-required events to the user before deciding.",
+    "No approval, denial, response, receipt, lease, or acknowledgement was performed by this hook. The active Host must inspect the full durable request before Host-first review or user fallback.",
   ].join("\n");
   const redacted = redactText(context, cwd).slice(0, MAX_CONTEXT_LENGTH);
   const serialized = JSON.stringify(redacted);
@@ -156,33 +156,39 @@ function renderEvent(event, cwd) {
       const capabilities = safeList(event.capabilities, cwd);
       const reason = safeText(event.reason, cwd);
       const expiresAt = safeText(event.expiresAt, cwd);
-      return `approval-required job=${jobId} approval=${approvalId} tool=${tool} action=${action} risk=${risk} capabilities=${capabilities} reason=${reason} expiresAt=${expiresAt}; use jobs approve/deny after user decision`;
+      return `approval-required job=${jobId} approval=${approvalId} tool=${tool} action=${action} risk=${risk} capabilities=${capabilities} reason=${reason} expiresAt=${expiresAt}; inspect jobs approvals in the active Host`;
     }
     case "approval-resolved": {
       const approvalId = safeIdentifier(event.approvalId);
       const status = safeText(event.status, cwd);
       const resolvedAt = safeText(event.resolvedAt, cwd);
-      return `approval-resolved job=${jobId} approval=${approvalId} status=${status} resolvedAt=${resolvedAt}; notification still requires host acknowledgement if pending`;
+      const principal = safeText(event.principal, cwd);
+      const autoResolved = safeText(event.autoResolved, cwd);
+      const assessedRisk = safeText(event.assessedRisk, cwd);
+      return `approval-resolved job=${jobId} approval=${approvalId} status=${status} principal=${principal} autoResolved=${autoResolved} assessedRisk=${assessedRisk} resolvedAt=${resolvedAt}; notification still requires host acknowledgement if pending`;
     }
     case "host-assistance-required": {
       const requestId = safeIdentifier(event.requestId);
       const contextClass = safeText(event.contextClass, cwd);
       const summary = safeText(event.safeSummary, cwd);
       const expiresAt = safeText(event.expiresAt, cwd);
-      return `host-assistance-required job=${jobId} request=${requestId} class=${contextClass} summary=${summary} expiresAt=${expiresAt}; inspect with jobs host-requests and respond or decline`;
+      return `host-assistance-required job=${jobId} request=${requestId} class=${contextClass} summary=${summary} expiresAt=${expiresAt}; inspect jobs host-requests in the active Host`;
     }
     case "human-decision-required": {
       const requestId = safeIdentifier(event.requestId);
       const summary = safeText(event.safeSummary, cwd);
       const expiresAt = safeText(event.expiresAt, cwd);
-      return `human-decision-required job=${jobId} request=${requestId} summary=${summary} expiresAt=${expiresAt}; inspect with jobs decisions and decide explicitly`;
+      return `human-decision-required job=${jobId} request=${requestId} summary=${summary} expiresAt=${expiresAt}; inspect jobs decisions in the active Host`;
     }
     case "host-assistance-resolved":
     case "human-decision-resolved": {
       const requestId = safeIdentifier(event.requestId);
       const status = safeText(event.status, cwd);
       const resolvedAt = safeText(event.resolvedAt, cwd);
-      return `${event.event} job=${jobId} request=${requestId} status=${status} resolvedAt=${resolvedAt}`;
+      const principal = safeText(event.principal, cwd);
+      const autoResolved = safeText(event.autoResolved, cwd);
+      const assessedRisk = safeText(event.assessedRisk, cwd);
+      return `${event.event} job=${jobId} request=${requestId} status=${status} principal=${principal} autoResolved=${autoResolved} assessedRisk=${assessedRisk} resolvedAt=${resolvedAt}`;
     }
     case "job-progress": {
       const status = safeText(event.status, cwd);

@@ -30,6 +30,7 @@ import type {
   HostAssistanceRequest,
   HostAssistanceResult,
   HostAssistanceRecord,
+  WorkerAssessment,
 } from "../core/contracts.js";
 import {
   assertHostActionAllowed,
@@ -82,6 +83,7 @@ import {
   type PolicyAction,
   type PolicyClassifier,
 } from "../policy/engine.js";
+import { isReadOnlyShellCommand } from "../policy/read-only-shell.js";
 import {
   assertTaskAdmitted,
   assertPathAllowed,
@@ -117,6 +119,7 @@ import {
   approveJob,
   denyJobApproval,
   listJobApprovals,
+  recordJobApprovalAdjudication,
   isTerminalJobStatus,
   type JobHandle,
   type JobRequest,
@@ -171,6 +174,7 @@ import {
 export interface RunnerDependencies {
   catalog: ModelCatalog;
   readFile(path: string): Promise<string>;
+  createSandboxRunner?: typeof createSandboxRunner;
   createSession(options: {
     cwd: string;
     mode: "readonly" | "implement";
@@ -225,8 +229,8 @@ export type RunnerOutput =
       request: import("../core/contracts.js").HostAssistanceRequestSummary;
     }
   | { event: "setup-required"; continuationId: string; readiness: ReadinessReport }
-  | { requests: HostAssistanceRecord[] }
-  | { decisions: HostAssistanceRecord[] }
+  | { requests: HostAssistanceRecord[]; adjudicationContext: JobAdjudicationContext }
+  | { decisions: HostAssistanceRecord[]; adjudicationContext: JobAdjudicationContext }
   | { request: HostAssistanceRecord }
   | {
       event: "workspace-action-required";
@@ -245,7 +249,10 @@ export type RunnerOutput =
       approval: import("../core/contracts.js").ApprovalRequest;
       lease?: import("../core/contracts.js").CapabilityLease;
     }
-  | { approvals: import("../core/contracts.js").ApprovalRequest[] }
+  | {
+      approvals: import("../core/contracts.js").ApprovalRequest[];
+      adjudicationContext: JobAdjudicationContext;
+    }
   | { cleaned: true; jobId: string }
   | {
       materialized: true;
@@ -289,9 +296,21 @@ export interface RunCommandOptions {
   requestOverride?: WorkerRequest;
   continuationId?: string;
   relayWaitTimeoutMs?: number;
+  requireDiscoveryGates?: boolean;
 }
 
 type PublicJobRecord = Omit<JobRecord, "workerToken">;
+interface JobAdjudicationContext {
+  host: Host;
+  kind: TaskKind;
+  originalIntent: string;
+  projectGoal?: string;
+  role?: import("../core/contracts.js").WorkerRoleId;
+  workspaceStrategy?: import("../core/contracts.js").WorkspaceStrategy;
+  target?: string;
+  sandboxMode: SandboxMode;
+  policySnapshot: PolicySnapshot | null;
+}
 const approvalQueues = new Map<string, Promise<void>>();
 
 export function defaultDependencies(modelConfiguration: ModelConfiguration): RunnerDependencies {
@@ -302,6 +321,7 @@ export function defaultDependencies(modelConfiguration: ModelConfiguration): Run
       const { session } = await createWorkerSession({ ...options, modelConfiguration });
       return session;
     },
+    createSandboxRunner,
     createClassifier: (options) =>
       new PiPolicyClassifier({
         ...options,
@@ -321,7 +341,13 @@ export async function runCommand(
   }
   if (args.command === "jobs") return handleJobs(args, cwd, dependencies, options.signal);
   if (args.command === "__worker") {
-    return runBackgroundJob(args, cwd, dependencies, options.signal);
+    return runBackgroundJob(
+      args,
+      cwd,
+      dependencies,
+      options.signal,
+      options.requireDiscoveryGates ?? dependencies === undefined,
+    );
   }
   if (args.command === "status" || args.command === "doctor") {
     return handleReadiness(args, cwd, dependencies);
@@ -789,7 +815,7 @@ export async function runCommand(
     ...(projectGoal !== undefined ? { projectGoal } : {}),
     candidates,
     dependencies: activeDependencies,
-    requireDiscoveryGates: dependencies === undefined,
+    requireDiscoveryGates: options.requireDiscoveryGates ?? dependencies === undefined,
     job,
     timeoutMs,
     sandboxMode,
@@ -866,9 +892,29 @@ async function handleJobs(
     case "acknowledge":
       return { job: publicJob(await acknowledgeJob(cwd, args.jobId!, args.notificationId)) };
     case "approvals":
-      return { approvals: await listJobApprovals(cwd, args.jobId!) };
+      return {
+        approvals: await listJobApprovals(cwd, args.jobId!),
+        adjudicationContext: await jobAdjudicationContext(cwd, args.jobId!),
+      };
     case "approve": {
-      const approved = await approveJob(cwd, args.jobId!, args.approvalId!, args.approvalScope);
+      const adjudication = args.adjudicationFile
+        ? (JSON.parse(await fs.readFile(args.adjudicationFile, "utf8")) as unknown)
+        : undefined;
+      if (
+        adjudication &&
+        typeof adjudication === "object" &&
+        !Array.isArray(adjudication) &&
+        (adjudication as Record<string, unknown>).decision !== "allow"
+      ) {
+        return recordJobApprovalAdjudication(cwd, args.jobId!, args.approvalId!, adjudication);
+      }
+      const approved = await approveJob(
+        cwd,
+        args.jobId!,
+        args.approvalId!,
+        args.approvalScope,
+        adjudication,
+      );
       return { job: publicJob(approved.job), approval: approved.approval, lease: approved.lease };
     }
     case "deny": {
@@ -876,14 +922,29 @@ async function handleJobs(
       return { job: publicJob(denied.job), approval: denied.approval };
     }
     case "host-requests":
-      return { requests: await listJobHostRequests(cwd, args.jobId!) };
+      return {
+        requests: await listJobHostRequests(cwd, args.jobId!),
+        adjudicationContext: await jobAdjudicationContext(cwd, args.jobId!),
+      };
     case "decisions":
-      return { decisions: await listJobHostRequests(cwd, args.jobId!, "decision") };
+      return {
+        decisions: await listJobHostRequests(cwd, args.jobId!, "decision"),
+        adjudicationContext: await jobAdjudicationContext(cwd, args.jobId!),
+      };
     case "host-respond":
     case "decide": {
       const response = JSON.parse(await fs.readFile(args.responseFile!, "utf8")) as unknown;
+      const adjudication = args.adjudicationFile
+        ? (JSON.parse(await fs.readFile(args.adjudicationFile, "utf8")) as unknown)
+        : undefined;
       return {
-        request: await resolveJobHostRequest(cwd, args.jobId!, args.hostRequestId!, response),
+        request: await resolveJobHostRequest(
+          cwd,
+          args.jobId!,
+          args.hostRequestId!,
+          response,
+          adjudication,
+        ),
       };
     }
     case "host-decline":
@@ -1010,6 +1071,22 @@ async function handleJobs(
   }
 }
 
+async function jobAdjudicationContext(cwd: string, jobId: string) {
+  const request = await readJobRequest(cwd, jobId);
+  const prompt = await readJobPrompt(cwd, jobId);
+  return {
+    host: request.host,
+    kind: request.kind,
+    originalIntent: request.delegationSpec?.request ?? prompt,
+    ...(request.projectGoal !== undefined ? { projectGoal: request.projectGoal } : {}),
+    ...(request.role ? { role: request.role } : {}),
+    ...(request.workspaceStrategy ? { workspaceStrategy: request.workspaceStrategy } : {}),
+    ...(request.target ? { target: request.target } : {}),
+    sandboxMode: request.sandboxMode ?? "strict",
+    policySnapshot: request.policySnapshot ?? null,
+  };
+}
+
 function publicJob(job: JobRecord): PublicJobRecord {
   const { workerToken: _workerToken, ...publicRecord } = job;
   return publicRecord;
@@ -1020,6 +1097,7 @@ async function runBackgroundJob(
   cwd: string,
   dependencies?: RunnerDependencies,
   outerSignal?: AbortSignal,
+  requireDiscoveryGates = dependencies === undefined,
 ): Promise<WorkerResult> {
   const request = await readJobRequest(cwd, args.jobId!);
   if (request.workerToken !== args.workerToken)
@@ -1097,7 +1175,7 @@ async function runBackgroundJob(
           : {}),
       candidates,
       dependencies: activeDependencies,
-      requireDiscoveryGates: dependencies === undefined,
+      requireDiscoveryGates,
       job: { id: request.id, workerToken: request.workerToken },
       timeoutMs: request.timeoutMs,
       sandboxMode: request.sandboxMode ?? "strict",
@@ -1169,9 +1247,12 @@ async function buildDiscoveryHandoffPrompt(
   if (
     !convergence ||
     convergence.status !== "passed" ||
-    !convergence.verification.includes("user-gate:approved")
+    !convergence.verification.some(
+      (verification) =>
+        verification === "review-gate:approved" || verification === "user-gate:approved",
+    )
   ) {
-    throw new Error(`Discovery handoff source lacks final user approval: ${discoveryJobId}`);
+    throw new Error(`Discovery handoff source lacks final review approval: ${discoveryJobId}`);
   }
   const provenance = {
     discoveryJobId,
@@ -1497,8 +1578,12 @@ async function runStartedJob(options: {
         return hostAssistanceUnavailable(reason, message);
       }
     };
-    if (options.sandboxMode === "lenient" || options.sandboxMode === "adaptive") {
-      sandboxRunner = await createSandboxRunner({
+    if (
+      (options.sandboxMode === "lenient" || options.sandboxMode === "adaptive") &&
+      kind !== "discover" &&
+      options.dependencies.createSandboxRunner
+    ) {
+      sandboxRunner = await options.dependencies.createSandboxRunner({
         cwd: options.cwd,
         mode: workerMode,
         sandboxMode: options.sandboxMode,
@@ -2506,7 +2591,6 @@ async function runDiscoveryWorkflow(options: {
   sandboxMode: SandboxMode;
   boundProjectPolicy?: BoundProjectPolicy;
   onPolicyViolation?: (error: ProjectPolicyError) => void | Promise<void>;
-  sandboxRunner?: SandboxRunner;
   policyEngine?: PolicyEngine;
   onApproval?: RunnerDependencies["createSession"] extends (options: infer T) => unknown
     ? T extends { onApproval?: infer A }
@@ -2603,30 +2687,55 @@ async function runDiscoveryWorkflow(options: {
             ...(options.signal ? { signal: options.signal } : {}),
           })
         : undefined;
-    const result =
-      child?.result ??
-      (await runWithFallback({
-        kind: "discover",
-        cwd: options.cwd,
-        prompt: stagePrompt,
-        mode: "readonly",
-        candidates: options.candidates,
-        dependencies: options.dependencies,
-        ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
-        ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
-        ...(options.sandboxRunner ? { sandboxRunner: options.sandboxRunner } : {}),
-        ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
-        ...(options.onApproval ? { onApproval: options.onApproval } : {}),
-        ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-        ...(options.requestHostAssistance
-          ? {
-              requestHostAssistance: options.requestHostAssistance,
-              perspective: `discovery:${stage}`,
-            }
-          : {}),
-        deadline: options.deadline,
-        ...(options.signal ? { signal: options.signal } : {}),
-      }));
+    let stageSandbox: SandboxRunner | undefined;
+    let result: WorkerResult;
+    try {
+      if (!child && options.sandboxMode !== "strict" && options.dependencies.createSandboxRunner) {
+        stageSandbox = await options.dependencies.createSandboxRunner({
+          cwd: options.cwd,
+          mode: "readonly",
+          sandboxMode: options.sandboxMode,
+          trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
+          ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+          ...(options.sandboxMode === "adaptive"
+            ? {
+                authorizeNetwork: discoveryNetworkAuthorizer({
+                  cwd: options.cwd,
+                  ...(options.policyEngine ? { engine: options.policyEngine } : {}),
+                  ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+                  ...(options.signal ? { signal: options.signal } : {}),
+                }),
+              }
+            : {}),
+        });
+      }
+      result =
+        child?.result ??
+        (await runWithFallback({
+          kind: "discover",
+          cwd: options.cwd,
+          prompt: stagePrompt,
+          mode: "readonly",
+          candidates: options.candidates,
+          dependencies: options.dependencies,
+          ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+          ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+          ...(stageSandbox ? { sandboxRunner: stageSandbox } : {}),
+          ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
+          ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+          ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+          ...(options.requestHostAssistance
+            ? {
+                requestHostAssistance: options.requestHostAssistance,
+                perspective: `discovery:${stage}`,
+              }
+            : {}),
+          deadline: options.deadline,
+          ...(options.signal ? { signal: options.signal } : {}),
+        }));
+    } finally {
+      await stageSandbox?.dispose().catch(() => {});
+    }
     let status: DiscoveryStageReport["status"] = result.success
       ? "passed"
       : result.status === "timed-out" || result.status === "cancelled"
@@ -2681,7 +2790,7 @@ async function runDiscoveryWorkflow(options: {
         ),
         ...(options.signal ? { signal: options.signal } : {}),
       });
-      reports.at(-1)?.verification.push(`user-gate:${gate.approved ? "approved" : gate.reason}`);
+      reports.at(-1)?.verification.push(`review-gate:${gate.approved ? "approved" : gate.reason}`);
       if (!gate.approved) {
         if (reports.at(-1)) reports.at(-1)!.status = "inconclusive";
         overallStatus = "failed";
@@ -2703,40 +2812,67 @@ async function runDiscoveryWorkflow(options: {
       .map((report) => `### ${report.stage}\n${report.output.slice(0, 8_000)}`)
       .join("\n\n");
     for (let index = 0; index < advisorCount; index += 1) {
-      const advisorResult = await runWithFallback({
-        kind: "discover",
-        cwd: options.cwd,
-        mode: "readonly",
-        prompt: buildWorkerPrompt({
-          host: options.host,
+      let advisorSandbox: SandboxRunner | undefined;
+      let advisorResult: WorkerResult;
+      try {
+        if (options.sandboxMode !== "strict" && options.dependencies.createSandboxRunner) {
+          advisorSandbox = await options.dependencies.createSandboxRunner({
+            cwd: options.cwd,
+            mode: "readonly",
+            sandboxMode: options.sandboxMode,
+            trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
+            ...(options.boundProjectPolicy
+              ? { boundProjectPolicy: options.boundProjectPolicy }
+              : {}),
+            ...(options.sandboxMode === "adaptive"
+              ? {
+                  authorizeNetwork: discoveryNetworkAuthorizer({
+                    cwd: options.cwd,
+                    ...(options.policyEngine ? { engine: options.policyEngine } : {}),
+                    ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+                    ...(options.signal ? { signal: options.signal } : {}),
+                  }),
+                }
+              : {}),
+          });
+        }
+        advisorResult = await runWithFallback({
           kind: "discover",
-          prompt: [
-            `Advisor consultation ${index + 1} of ${advisorCount}: review the bounded discovery reports below for unsupported claims, unresolved conflicts, and missing evidence.`,
-            "Do not execute actions, mutate files, or recurse into another advisor.",
-            evidenceContext,
-          ].join("\n\n"),
-          projectGoal: options.projectGoal,
-          renderedProjectPolicy: options.renderedProjectPolicy,
-          ...(options.decisionMode ? { decisionMode: options.decisionMode } : {}),
-          advisorEnabled: true,
-        }),
-        candidates: options.candidates,
-        dependencies: options.dependencies,
-        ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
-        ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
-        ...(options.sandboxRunner ? { sandboxRunner: options.sandboxRunner } : {}),
-        ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
-        ...(options.onApproval ? { onApproval: options.onApproval } : {}),
-        ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-        ...(options.requestHostAssistance
-          ? {
-              requestHostAssistance: options.requestHostAssistance,
-              perspective: `discovery:advisor:${index + 1}`,
-            }
-          : {}),
-        deadline: options.deadline,
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
+          cwd: options.cwd,
+          mode: "readonly",
+          prompt: buildWorkerPrompt({
+            host: options.host,
+            kind: "discover",
+            prompt: [
+              `Advisor consultation ${index + 1} of ${advisorCount}: review the bounded discovery reports below for unsupported claims, unresolved conflicts, and missing evidence.`,
+              "Do not execute actions, mutate files, or recurse into another advisor.",
+              evidenceContext,
+            ].join("\n\n"),
+            projectGoal: options.projectGoal,
+            renderedProjectPolicy: options.renderedProjectPolicy,
+            ...(options.decisionMode ? { decisionMode: options.decisionMode } : {}),
+            advisorEnabled: true,
+          }),
+          candidates: options.candidates,
+          dependencies: options.dependencies,
+          ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+          ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+          ...(advisorSandbox ? { sandboxRunner: advisorSandbox } : {}),
+          ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
+          ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+          ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+          ...(options.requestHostAssistance
+            ? {
+                requestHostAssistance: options.requestHostAssistance,
+                perspective: `discovery:advisor:${index + 1}`,
+              }
+            : {}),
+          deadline: options.deadline,
+          ...(options.signal ? { signal: options.signal } : {}),
+        });
+      } finally {
+        await advisorSandbox?.dispose().catch(() => {});
+      }
       const convergence = reports.find((report) => report.stage === "convergence");
       if (convergence) {
         convergence.output += `\n\n## Advisor consultation ${index + 1}\n\n${advisorResult.output}`;
@@ -2773,7 +2909,7 @@ async function runDiscoveryWorkflow(options: {
       ),
       ...(options.signal ? { signal: options.signal } : {}),
     });
-    convergence.verification.push(`user-gate:${gate.approved ? "approved" : gate.reason}`);
+    convergence.verification.push(`review-gate:${gate.approved ? "approved" : gate.reason}`);
     if (!gate.approved) {
       convergence.status = "inconclusive";
       overallStatus = "failed";
@@ -2810,6 +2946,41 @@ async function runDiscoveryWorkflow(options: {
   };
 }
 
+function discoveryNetworkAuthorizer(options: {
+  cwd: string;
+  engine?: PolicyEngine;
+  onApproval?: RunnerDependencies["createSession"] extends (options: infer T) => unknown
+    ? T extends { onApproval?: infer A }
+      ? A
+      : never
+    : never;
+  signal?: AbortSignal;
+}): (host: string, port?: number) => Promise<boolean> {
+  return async (host, port) => {
+    if (!(await publicNetworkTarget(host)) || !options.engine) return false;
+    const action: PolicyAction = {
+      toolName: "network",
+      input: { host, port },
+      cwd: options.cwd,
+      domain: host,
+      ...(port ? { port } : {}),
+    };
+    let decision = await options.engine.authorize(action, options.signal);
+    if (decision.decision === "require-approval" && options.onApproval) {
+      const resolution = await options.onApproval(
+        action,
+        decision,
+        actionFingerprint(action),
+        options.signal,
+      );
+      if (resolution === "approved") {
+        decision = await options.engine.authorize(action, options.signal);
+      }
+    }
+    return decision.decision === "allow";
+  };
+}
+
 async function requestDiscoveryGate(options: {
   requestHostAssistance:
     | ((
@@ -2831,6 +3002,30 @@ async function requestDiscoveryGate(options: {
       options: ["approve", "stop"],
       context: options.context.slice(0, 12_000),
       dataClassification: "project-internal",
+      workerAssessment: {
+        purpose: `Review the bounded Discovery ${options.stage} gate before advancing.`,
+        blockedBy: "The fixed Discovery workflow requires a correlated gate decision.",
+        minimumAccess: ["Resolve this exact Discovery gate only"],
+        targets: [`discovery:${options.stage}-gate`],
+        sideEffects: [
+          options.stage === "research"
+            ? "Approval permits the isolated experiment stage to start under the same policy snapshot."
+            : "Approval marks the converged DiscoveryResult as final decision input.",
+        ],
+        dataExposure: ["Project-internal stage evidence remains inside the active Host session."],
+        failureModes: ["An unsupported gate approval could advance incomplete evidence."],
+        mitigations: [
+          "Require schema-valid stage evidence and bind the decision to this request fingerprint.",
+          "Fallback to the user when uncertainty is high or scope changed.",
+        ],
+        reversibility: "read-only",
+        rollback: "Stop the workflow before the next stage; no delivery or materialization occurs.",
+        verification: [
+          "Confirm the stage artifact is schema-valid and within the original intent.",
+        ],
+        proposedRisk: "medium",
+        fallback: "Ask the user to approve or stop the Discovery workflow.",
+      },
     },
     {
       sessionId: `discovery-gate:${randomUUID()}`,
@@ -2888,6 +3083,7 @@ async function runIsolatedExperimentChild(options: {
           rolePolicy,
           adaptivePolicy: structuredClone(parent.adaptivePolicy),
           effectiveProjectPolicy: structuredClone(parent.effectiveProjectPolicy),
+          parentPolicyHash: parent.hash,
           decisionMode: parent.decisionMode,
           hostAssistance: structuredClone(parent.hostAssistance),
           advisor: { ...structuredClone(parent.advisor), enabled: false },
@@ -2932,6 +3128,7 @@ async function runIsolatedExperimentChild(options: {
     }
   });
   let executionCwd = options.sourceCwd;
+  let childSandbox: SandboxRunner | undefined;
   let workspace:
     | (Awaited<ReturnType<typeof prepareJobWorktree>> & { scratch?: boolean })
     | undefined;
@@ -3080,15 +3277,26 @@ async function runIsolatedExperimentChild(options: {
             );
           }
         : undefined;
-    const childSandbox =
-      options.sandboxMode === "strict"
+    childSandbox =
+      options.sandboxMode === "strict" || !options.dependencies.createSandboxRunner
         ? undefined
-        : await createSandboxRunner({
+        : await options.dependencies.createSandboxRunner({
             cwd: executionCwd,
             mode: "implement",
             sandboxMode: options.sandboxMode,
             trustedDomains: childSnapshot.adaptivePolicy.trustedDomains,
+            allowGitMetadataRead: true,
             ...(boundPolicy ? { boundProjectPolicy: boundPolicy } : {}),
+            ...(options.sandboxMode === "adaptive"
+              ? {
+                  authorizeNetwork: discoveryNetworkAuthorizer({
+                    cwd: executionCwd,
+                    engine,
+                    onApproval,
+                    ...(options.signal ? { signal: options.signal } : {}),
+                  }),
+                }
+              : {}),
           });
     let result = await runWithFallback({
       kind: "discover",
@@ -3171,6 +3379,8 @@ async function runIsolatedExperimentChild(options: {
     };
     await finishJob(options.stateCwd, child.id, result);
     return { jobId: child.id, result };
+  } finally {
+    await childSandbox?.dispose().catch(() => {});
   }
 }
 
@@ -3292,7 +3502,9 @@ async function handlePolicyApproval(options: {
       actionFingerprint: options.fingerprint,
       toolName: options.action.toolName,
       actionSummary: summarizePolicyAction(options.action),
+      ...(isReadOnlyPolicyAction(options.action) ? { trustedReadOnly: true } : {}),
       decision: options.decision,
+      workerAssessment: policyWorkerAssessment(options.action, options.decision),
       expiresAt: new Date(options.deadline).toISOString(),
     });
     return waitForApprovalResolution(
@@ -3368,6 +3580,60 @@ function summarizePolicyAction(action: PolicyAction): string {
   const command =
     typeof action.input.command === "string" ? action.input.command : JSON.stringify(action.input);
   return `${action.toolName} ${command.slice(0, 1_500)}`;
+}
+
+function policyWorkerAssessment(action: PolicyAction, decision: PolicyDecision): WorkerAssessment {
+  const summary = summarizePolicyAction(action);
+  const trustedReadOnly = isReadOnlyPolicyAction(action);
+  const mutation = decision.capabilities.some(
+    (capability) =>
+      capability === "filesystem.write-workspace" ||
+      (capability === "shell.execute" && !trustedReadOnly) ||
+      capability === "network.connect",
+  );
+  const reversibleFileMutation = action.toolName === "write" || action.toolName === "edit";
+  const targets = [
+    ...(action.path ? [path.resolve(action.cwd, action.path)] : []),
+    ...(action.domain ? [`${action.domain}:${action.port ?? "default"}`] : []),
+    ...(typeof action.input.command === "string" ? [action.input.command.slice(0, 2_000)] : []),
+  ];
+  return {
+    purpose: summary,
+    blockedBy: decision.reason,
+    minimumAccess: [...decision.capabilities],
+    targets: targets.length > 0 ? targets : [action.cwd],
+    sideEffects: mutation
+      ? [`May exercise ${decision.capabilities.join(", ") || "a gated capability"}.`]
+      : ["No mutation capability was requested."],
+    dataExposure: action.domain
+      ? [`Network destination ${action.domain}:${action.port ?? "default"}.`]
+      : ["No network destination was declared."],
+    failureModes: ["The action may fail after a partial operation or produce an unexpected diff."],
+    mitigations: [
+      ...decision.constraints,
+      "Bind any approval to this exact action fingerprint and policy snapshot.",
+    ],
+    reversibility: mutation
+      ? reversibleFileMutation
+        ? "reversible"
+        : "partially-reversible"
+      : "read-only",
+    rollback: reversibleFileMutation
+      ? "Restore the affected path from the job worktree baseline before delivery."
+      : mutation
+        ? "Stop and return to the Host; do not retry an uncertain external outcome."
+        : "No rollback is required for a read-only action.",
+    verification: [
+      "Re-check the exact target and inspect post-action state before reporting success.",
+    ],
+    proposedRisk: decision.risk,
+    fallback: "Ask the user when the active Host cannot validate the bounded request.",
+  };
+}
+
+function isReadOnlyPolicyAction(action: PolicyAction): boolean {
+  if (action.toolName !== "bash" || typeof action.input.command !== "string") return false;
+  return isReadOnlyShellCommand(action.input.command);
 }
 
 function hostAssistanceUnavailable(

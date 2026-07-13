@@ -151,6 +151,35 @@ test("plugin package contains both host adapters and a self-contained runner", (
     protocol,
     /adds no capability approval, resource lease, runtime classifier, or hard execution gate/i,
   );
+  assert.match(protocol, /Only the model handling the active Codex or Claude Code turn/i);
+  assert.match(protocol, /HostAdjudicationReceipt/);
+  assert.match(protocol, /--adjudication-file/);
+  assert.match(protocol, /timeout, hook, watcher, background process, or replay may only notify/i);
+  assert.match(protocol, /Strict mode cannot gain a capability/i);
+
+  for (const skill of ["implement", "setup", "scaffold"]) {
+    const source = fs.readFileSync(
+      path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
+      "utf8",
+    );
+    assert.match(source, /WorkerAssessment/);
+    assert.match(source, /reversible/i);
+  }
+  for (const skill of ["ask", "review", "plan", "orchestrate"]) {
+    const source = fs.readFileSync(
+      path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
+      "utf8",
+    );
+    assert.match(source, /adjudication context/i);
+    assert.match(source, /active Host/i);
+  }
+  const discover = fs.readFileSync(
+    path.join(pluginRoot, "skills/swarm-pi-discover/SKILL.md"),
+    "utf8",
+  );
+  assert.match(discover, /immutable Job policy/i);
+  assert.match(discover, /shared Adaptive network authorizer/i);
+  assert.match(discover, /stage Sandboxes/i);
 
   const workerAgent = fs.readFileSync(path.join(pluginRoot, "agents/pi-worker.md"), "utf8");
   assert.match(workerAgent, /swarm-pi-orchestrate/);

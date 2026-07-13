@@ -115,6 +115,13 @@ export function projectJobEvents(state, options = {}) {
                 generation: request.generation,
                 status: request.status,
                 resolvedAt: request.resolvedAt,
+                ...(request.adjudication
+                    ? {
+                        principal: request.adjudication.principal,
+                        autoResolved: request.adjudication.autoResolved,
+                        assessedRisk: request.adjudication.assessedRisk,
+                    }
+                    : {}),
             }, resolvedAt);
         }
         if (includeProgress && !isTerminalStatus(job.status)) {
@@ -236,6 +243,13 @@ function approvalResolvedEvent(job, approval, notificationId, emittedAt) {
         notificationId,
         status: resolvedStatus(approval),
         resolvedAt,
+        ...(approval.adjudication
+            ? {
+                principal: approval.adjudication.principal,
+                autoResolved: approval.adjudication.autoResolved,
+                assessedRisk: approval.adjudication.assessedRisk,
+            }
+            : {}),
     };
 }
 function resolvedStatus(approval) {

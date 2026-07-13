@@ -78,6 +78,7 @@ export interface RunnerArguments {
   approvalScope?: "once" | "job";
   hostRequestId?: string;
   responseFile?: string;
+  adjudicationFile?: string;
   declineReason?: string;
   notificationId?: string;
   discard?: boolean;
@@ -241,6 +242,9 @@ export function parseArguments(argv: string[]): RunnerArguments {
         break;
       case "--response-file":
         parsed.responseFile = readValue(argv, ++index, argument);
+        break;
+      case "--adjudication-file":
+        parsed.adjudicationFile = readValue(argv, ++index, argument);
         break;
       case "--reason":
         parsed.declineReason = readValue(argv, ++index, argument);
@@ -450,6 +454,16 @@ function validateJobsArguments(args: RunnerArguments): void {
   }
   if (args.responseFile && args.jobsAction !== "host-respond" && args.jobsAction !== "decide") {
     throw new Error("--response-file is only supported by jobs host-respond or jobs decide");
+  }
+  if (
+    args.adjudicationFile &&
+    args.jobsAction !== "approve" &&
+    args.jobsAction !== "host-respond" &&
+    args.jobsAction !== "decide"
+  ) {
+    throw new Error(
+      "--adjudication-file is only supported by jobs approve, host-respond, or decide",
+    );
   }
   if (args.declineReason && args.jobsAction !== "host-decline") {
     throw new Error("--reason is only supported by jobs host-decline");

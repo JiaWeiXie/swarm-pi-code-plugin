@@ -12,11 +12,19 @@ import {
   resolveRolePolicy,
 } from "../src/orchestration/roles.js";
 import { ClassifierDecisionCache, PolicyEngine, actionFingerprint } from "../src/policy/engine.js";
+import { shouldBypassGenericPolicy } from "../src/policy/extension.js";
 import {
   ProjectPolicyError,
   compileEffectiveProjectPolicy,
   loadRepositoryDenyRules,
 } from "../src/policy/project-policy.js";
+
+test("Host Assistance bypasses only the named generic tool classifier", () => {
+  const bypass = new Set(["request_host_assistance"]);
+  assert.equal(shouldBypassGenericPolicy("request_host_assistance", bypass), true);
+  assert.equal(shouldBypassGenericPolicy("bash", bypass), false);
+  assert.equal(shouldBypassGenericPolicy("request_host_assistance"), false);
+});
 
 test("role registry keeps task compatibility and requested thinking defaults", () => {
   assert.equal(defaultRoleForTask("plan"), "planner");
@@ -235,6 +243,24 @@ test("v3 policy snapshot carries bounded decision, host, and advisor controls", 
   });
   assert.equal(snapshot.version, 3);
   assert.doesNotThrow(() => assertPolicySnapshotValid(snapshot));
+  const childSnapshot = createPolicySnapshot({
+    sandboxMode: snapshot.sandboxMode,
+    approvalMode: snapshot.approvalMode,
+    rolePolicy: resolveRolePolicy("experimenter"),
+    effectiveProjectPolicy,
+    parentPolicyHash: snapshot.hash,
+    decisionMode: snapshot.decisionMode,
+    hostAssistance: snapshot.hostAssistance,
+    advisor: { ...snapshot.advisor, enabled: false },
+    contextBudget: snapshot.contextBudget,
+  });
+  assert.equal(childSnapshot.parentPolicyHash, snapshot.hash);
+  assert.notEqual(childSnapshot.hash, snapshot.hash);
+  assert.doesNotThrow(() => assertPolicySnapshotValid(childSnapshot));
+  const invalidParentHash = structuredClone(childSnapshot);
+  invalidParentHash.parentPolicyHash = "not-a-policy-hash";
+  invalidParentHash.hash = policySnapshotHash(invalidParentHash);
+  assert.throws(() => assertPolicySnapshotValid(invalidParentHash), /v3 controls|invalid/i);
   const invalid = structuredClone(snapshot);
   invalid.hostAssistance.maxRequests = -1;
   invalid.hash = policySnapshotHash(invalid);

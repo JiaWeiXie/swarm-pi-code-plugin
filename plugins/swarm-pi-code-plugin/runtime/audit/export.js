@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { policySnapshotHash } from "../orchestration/roles.js";
-import { getJob, jobDirectory, modelConfigurationSnapshotHash, readJobRequest, } from "../state/jobs.js";
+import { getJob, jobDirectory, listJobHostRequests, modelConfigurationSnapshotHash, readJobRequest, } from "../state/jobs.js";
 import { resolveStateDir } from "../state/state.js";
 const MAX_AUDIT_SOURCE_BYTES = 32 * 1024 * 1024;
 const SAFE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -33,6 +33,7 @@ export async function exportJobAudit(cwd, jobId) {
     const providerVerified = verifyProviderSnapshot(request);
     const policyVerified = verifyPolicySnapshot(request.policySnapshot);
     const events = parsePolicyEvents(sources.policyEvents, roots, counter);
+    const hostAssistance = await listJobHostRequests(cwd, jobId);
     if (policyVerified &&
         events.some((event) => event.policyHash && event.policyHash !== policyVerified.hash)) {
         throw new Error("Audit export failed policy event integrity validation.");
@@ -51,6 +52,7 @@ export async function exportJobAudit(cwd, jobId) {
         },
         approvals: (snapshot.job.approvals ?? []).map((approval) => summarizeApproval(approval, roots, counter)),
         leases: (snapshot.job.leases ?? []).map((lease) => redactValue(lease, roots, counter)),
+        hostAssistance: hostAssistance.map((record) => redactValue(record, roots, counter)),
         result: summarizeResult(snapshot.result, roots, counter),
         changes: {
             patch: sources.patch === null ? null : redactString(sources.patch, roots, counter),
@@ -188,12 +190,15 @@ function summarizeApproval(approval, roots, counter) {
         ...(approval.scopeHash ? { scopeHash: approval.scopeHash } : {}),
         toolName: approval.toolName,
         actionSummary: approval.actionSummary,
+        ...(approval.trustedReadOnly ? { trustedReadOnly: true } : {}),
         decision: approval.decision,
         status: approval.status,
         requestedAt: approval.requestedAt,
         expiresAt: approval.expiresAt,
         ...(approval.resolvedAt ? { resolvedAt: approval.resolvedAt } : {}),
         ...(approval.scope ? { scope: approval.scope } : {}),
+        ...(approval.workerAssessment ? { workerAssessment: approval.workerAssessment } : {}),
+        ...(approval.adjudication ? { adjudication: approval.adjudication } : {}),
     };
     return redactValue(value, roots, counter);
 }
@@ -232,6 +237,7 @@ function summarizeResult(result, roots, counter) {
             }
             : {}),
         ...(result.artifact ? { artifact: result.artifact } : {}),
+        ...(result.hostAdjudications ? { hostAdjudications: result.hostAdjudications } : {}),
     };
     return redactValue(value, roots, counter);
 }

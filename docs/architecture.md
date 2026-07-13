@@ -27,7 +27,9 @@ flowchart TB
     I --> W[Assigned Git worktree]
     DS --> EX[Isolated experiment child]
     R --> HA[Durable Host Assistance]
-    HA --> H
+    HA --> HM[Active Host model adjudication]
+    HM --> H
+    HM --> RC[Receipt and exact capability lease]
     R --> AC[Isolated host-broker action child]
     R --> B{Sandbox mode}
     B --> T[Strict scoped tools]
@@ -57,7 +59,8 @@ Codex exposes the equivalent skills under the `swarm-pi-code-plugin-` prefix.
 Every Codex skill has `agents/openai.yaml` UI metadata. Both hosts share the
 same task-specific workflow content and cross-host protocol: readiness and
 pending notifications first, supervised execution by default, durable
-continuations, explicit approval, and host-owned verification/delivery.
+continuations, active Host-first adjudication within the immutable policy,
+user fallback outside that ceiling, and host-owned verification/delivery.
 
 Host adapters write user-controlled prompts to temporary files outside the
 repository. They validate the runner result, inspect implementation diffs, and
@@ -84,6 +87,12 @@ mise exec -- node scripts/pi-runner.mjs scaffold|setup --host <claude|codex> [op
 mise exec -- node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|approvals|approve|deny|host-requests|host-respond|host-decline|decisions|decide|action-start|cleanup|materialize|export> [options] --json
 ```
 
+`jobs approve`, `jobs host-respond`, and `jobs decide` accept an optional
+`--adjudication-file`. Without it they preserve user-principal/manual behavior.
+With it the runner validates an active Host-model receipt against the full
+pending record, original intent, policy hash, action fingerprint, Sandbox mode,
+and snapshotted automatic ceiling.
+
 Every worker result includes the task kind, status, success flag, selected
 model, output, changed files, diff summary, verification status, and any
 explicit next action. Discovery results add stage reports and an experiment
@@ -96,18 +105,27 @@ delegation-spec arguments. Background readonly work returns an accepted job ID
 after durable artifacts and a detached worker exist. Opt-in mechanical
 implementation first creates an isolated job worktree.
 
-The live `request_host_assistance` tool persists safe required/resolved events,
-correlates Job/generation/session/attempt/perspective, enforces request and
-fan-out budgets, and consumes the structured response once in the same live
-session. The Host adapter chooses the actual Web, documentation, paper,
-connector, skill, or workspace mechanism. Discovery creates an isolated
+The live `request_host_assistance` tool uses dedicated admission instead of the
+generic tool classifier. It persists the full request and WorkerAssessment,
+projects safe required/resolved events, correlates
+Job/generation/session/attempt/perspective, enforces request and fan-out
+budgets, and consumes the structured response once in the same live session.
+The Host adapter chooses the actual Web, documentation, paper, connector,
+skill, or workspace mechanism. `jobs host-requests`, `jobs decisions`, and
+`jobs approvals` add an adjudication context containing the original intent and
+immutable policy snapshot; this context is never emitted by the watcher.
+Discovery creates an isolated
 experiment child; Host Actions create a separate host-broker child only after
 an explicitly recorded recommendation and explicit confirmation.
 
 The runner creates one in-memory Pi session per delegated model attempt.
-Strict jobs use scoped repository tools only. Adaptive and Lenient jobs share
-one job-level sandbox manager and add Bash; orchestration perspectives share that manager so
-parallel sessions cannot reset each other's process boundary. Pi provider failures are read
+Strict jobs use scoped repository tools only. Adaptive and Lenient jobs add
+OS-sandboxed Bash. Ordinary orchestration perspectives in a stage share one
+manager so parallel sessions cannot reset each other's process boundary.
+Discover is stage-scoped: Research disposes before gate waiting, Experiment
+owns a separate manager in the isolated child worktree, and Convergence or
+Advisor tool use creates fresh read-only managers. At most one process-global
+manager is live. Pi provider failures are read
 from the terminal assistant message rather than inferred from whether
 `prompt()` rejected; only a terminal `stop` is successful.
 
@@ -181,7 +199,7 @@ Static Host context is copied into the durable prompt. Live Host context is
 stored as typed assistance records with hashes and consumed once. Discovery
 persists schema-validated stage artifacts and supports the narrow
 `plan --discovery-from` handoff. There is no general cross-Job evidence memory
-or cross-Job model-session reuse in 0.5.0.
+or cross-Job model-session reuse.
 
 `model.json` is the canonical provider and model file. Provider profiles hold
 only non-secret adapter, endpoint, readiness, and controlled-header metadata.

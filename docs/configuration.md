@@ -26,18 +26,22 @@ The six full-setup steps are:
 Project-only setup retains Roles, Execution & Safety, Workspace, and Review. It
 does not rewrite provider credentials or model configuration.
 
-Workspace defaults use Balance Decision Mode, Host Assistance on, Advisor off,
-and doctrine off. Cost, Balance, and Power currently select one, two, or three
+New workspace defaults use Adaptive Sandbox mode, Balance Decision Mode,
+Host Assistance on with Host-first review, a Reversible automatic ceiling,
+Discovery gate auto-review, Advisor off, and doctrine off. Cost, Balance, and
+Power currently select one, two, or three
 base `orchestrate` perspectives and bound some decision attempts. Context
 budget, Host Assistance request/fan-out limits, and Advisor quotas remain
 separate explicit settings; changing Decision Mode does not rewrite them.
 None of these controls can lower project scope, private-data approval,
 experiment schema gates, or delivery policy.
 
-The same screen configures Host context classes, private-connector policy,
-Advisor targets/limits, doctrine metadata, and Host Action classes plus
-cost/use/expiry bounds. Remote Host Actions are off by default. The doctrine
-toggle is persisted in PolicySnapshot v3, but version 0.5.0 does not yet run an
+The same screen configures Host context classes, User-only versus Host-first
+review, Context-only/Read-only/Reversible automatic scope, Discovery gate
+review, private-connector policy, Advisor targets/limits, doctrine metadata,
+and Host Action classes plus cost/use/expiry bounds. Remote Host Actions are
+off by default. The doctrine
+toggle is persisted in PolicySnapshot v3, but the runtime does not yet run an
 automatic Question/Delete/Simplify convergence pass. It must not be treated as
 an active review or safety control.
 
@@ -54,10 +58,14 @@ provider or credential tutorial.
 ![Execution and safety settings](assets/setup/05-execution-safety.png)
 ![Configuration review](assets/setup/06-review.png)
 
-| Setting | Default | Runtime effect in 0.5.0 |
+| Setting | New-project default | Runtime effect |
 | --- | --- | --- |
+| Sandbox | `adaptive` | OS Sandbox plus policy-classified shell/network; Strict remains selectable |
 | Decision Mode | `balance` | 1/2/3 base orchestration perspectives for Cost/Balance/Power; bounded decision attempts |
 | Host Assistance | on | Enables correlated context, decision, and recommendation requests |
+| Host review | `host-first` | Active Host model independently reviews complete requests; hooks/watchers only notify |
+| Automatic scope | `reversible` | Allows public/read-only context and exact reversible actions already within original intent |
+| Discovery gate review | on | Allows complete, in-scope gates to be auto-reviewed with an exact receipt |
 | Context budget | 4 | Maximum numeric budget accepted from one Host context request |
 | Advisor | off | Adds bounded read-only consultations for selected tasks when enabled |
 | Doctrine | off | Snapshotted metadata only; no automatic convergence pass yet |
@@ -232,6 +240,10 @@ the user can enter model IDs manually; this remains `configured`, not
 minimal request. Final save always verifies the primary model and every
 required Adaptive classifier. Fallbacks may remain discovered, and Review shows
 their actual readiness.
+When a new Adaptive configuration has a primary model but no explicit
+classifier selection, the primary becomes its initial classifier. Provider and
+project drafts may still be saved before a primary exists, but Job readiness
+remains fail-closed until the required model is authenticated and available.
 
 Endpoint requests use bounded timeouts and response sizes, reject redirects,
 URL credentials, cloud metadata addresses, and cross-origin model endpoints.
@@ -261,6 +273,13 @@ configuration when a recommendation is explicitly started; the child keeps
 the parent's snapshotted effective project policy and receives a new bounded
 action-family lease.
 
+Existing configuration is not rewritten on load. An explicitly stored Sandbox
+mode remains unchanged; legacy state with no mode normalizes to Strict. A
+legacy Host Assistance object missing `reviewMode`, `autoApprovalScope`, or
+`autoApproveDiscoveryGates` normalizes to User-only, Context-only, and gate
+auto-review off until the user saves the updated form. Active Jobs always keep
+their submitted snapshot.
+
 ## Server Lifecycle
 
 The setup server binds to `127.0.0.1` on an ephemeral port, requires a random
@@ -276,6 +295,10 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 - Missing `providerProfiles` load as an empty list.
 - Legacy custom providers infer auth and wire protocol from existing fields.
 - Existing custom IDs are not rewritten.
+- Existing explicit Sandbox modes are preserved; missing legacy modes remain
+  Strict.
+- Missing Host-first policy fields remain User-only until a user saves the
+  updated configuration.
 - Legacy jobs with request versions 1–4 retain their original semantics and
   are not retroactively given v5 controls. Version 3 jobs continue to use
   their submitted provider snapshot; version 4 jobs additionally use their

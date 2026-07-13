@@ -39,6 +39,20 @@ Adaptive authorizes bounded shell and network actions through policy and
 durable approval, and Lenient retains broad outbound access inside the OS
 sandbox. Git delivery remains host-owned.
 
+Adaptive recognizes a deliberately narrow shell inspection grammar. Bounded
+`sha256sum`/`shasum` commands, `rustc`/`cargo` version probes, and two-file
+`cmp`/`diff` comparisons are treated as read-only so reproducibility checks can
+receive an exact Host-first lease; traversal, out-of-workspace absolute paths,
+redirection, expansion, command substitution, compilation, and test execution
+still fail closed.
+
+An isolated Experiment may read only the linked worktree's Git administrative
+paths so it can establish and verify a clean baseline. Those paths remain
+deny-write, cannot be leased for mutation, and do not make commit or delivery a
+Worker capability. On macOS, the Sandbox invokes the Command Line Tools Git
+binary directly when available so the `xcrun` shim does not need to write its
+host cache.
+
 Runtime configuration and jobs stay outside the checked-out worktree. Git
 repositories use `.git/swarm-pi-code-plugin/` through the common Git directory;
 non-Git folders use an OS user-state namespace. Credentials stay in Pi's user
@@ -49,7 +63,7 @@ See the [architecture reference](docs/architecture.md) and
 [configuration reference](docs/configuration.md) for implementation details.
 See [Host Assistance and Discovery](docs/host-assistance-discovery.md) for the
 live worker-to-host context loop, schema-gated experiment micro-SDLC, Advisor
-boundaries, discover-to-plan handoff, and isolated Host Actions 0.5.
+boundaries, discover-to-plan handoff, and isolated Host Actions.
 
 ## Install
 
@@ -120,8 +134,11 @@ $swarm-pi-setup
 
 Claude Code commands and Codex skills use the same runner protocol: they check
 readiness and pending notifications first, preserve original requests across
-configuration, default to supervised execution, and require explicit user
-decisions for approvals, adoption, artifact materialization, and delivery.
+configuration, and default to supervised execution. Only the model handling an
+active Host turn may adjudicate an eligible Host-first request from the full
+durable context; hooks, watchers, timeouts, and replay only notify. Adoption,
+artifact materialization, delivery, and requests outside the automatic ceiling
+still require an explicit user decision.
 
 ### First setup
 
@@ -190,11 +207,22 @@ rewrite model configuration, credentials, or job history.
 
 ### Execution safety and roles
 
-Projects default to **Strict**, which keeps scoped Pi tools and exposes no
-Bash. **Adaptive** adds policy-classified Bash and network access with bounded
-capability leases and optional supervisor approval. **Lenient** adds broad
+New projects default to **Adaptive**, which adds policy-classified Bash and
+network access with bounded capability leases while keeping writes inside the
+configured roots. **Strict** remains the opt-in mode that keeps scoped Pi tools
+and exposes no Bash. **Lenient** adds broad
 outbound access through macOS Seatbelt or Linux Bubblewrap. All shell modes use
 an isolated environment without model tokens, SSH sockets, or host secrets.
+Existing projects keep their explicitly saved mode; a legacy configuration
+with no mode remains Strict. Jobs keep the mode and policy snapshot captured at
+start, so a later settings change affects only new Jobs.
+
+Discovery Experiment children derive their stage-specific `experimenter`
+capability view from that frozen parent snapshot. Because different policy
+content must never reuse the same hash, the child has its own stage hash and
+includes the parent's hash as `parentPolicyHash` in its canonical snapshot.
+Receipts bind to the child stage hash while audits can verify the immutable
+parent lineage.
 
 Adaptive classifier prompts expose only the proposed action and limited policy
 context to the configured provider. Lenient source visible to the worker can be
@@ -205,14 +233,27 @@ Decision Mode controls bounded orchestration depth: Cost runs one base
 perspective, Balance two, and Power three. Host Assistance context budget and
 Advisor quotas are configured separately. Advisor is off by default and adds
 read-only, non-recursive consultations when enabled. The
-`first-principles-qds-v1` toggle is currently persisted metadata; 0.5.0 does
+`first-principles-qds-v1` toggle is currently persisted metadata; the runtime does
 not yet execute an automatic Question/Delete/Simplify convergence pass.
 
-Host Assistance is on by default. It lets a live Pi session ask the Host for a
-bounded workspace, Web, official documentation, paper, connector, installed
-skill, or human-decision result. The Host chooses the actual capability and
-returns one typed, cited, correlated `[UNTRUSTED_HOST_CONTEXT]` bundle. Secret
-egress is denied; connectors and non-public egress can require approval.
+Host Assistance is on by default. A new project uses Host-first review with a
+Reversible automatic ceiling and Discovery gate review. The Worker supplies a
+detailed purpose, minimum access, exact targets, failure modes, reversibility,
+rollback, verification, risk, and fallback. The active Codex or Claude model
+independently compares that assessment with the original intent and immutable
+policy. It may auto-resolve bounded public/read-only context or one exact
+in-scope reversible action by writing an auditable receipt; insufficient or
+high-risk evidence falls back to the user. Legacy policies missing these fields
+remain User-only until resaved. Strict never gains a capability through a Host
+receipt, and secrets, private connectors, Git metadata, deletion, delivery,
+deployment, messaging, and transactions are never auto-approved.
+
+For Bash approvals, `shell.execute` alone is never considered read-only. The
+runner derives a `trustedReadOnly` marker from the complete command using a
+small fail-closed inspection grammar that rejects expansion, redirection,
+backgrounding, alternate branches, path escape, and write/exec flags. The Host
+still reviews the exact command and fingerprint independently; unknown shell
+syntax falls back to the user instead of broadening the lease.
 
 Role routing keeps each responsibility's primary model, Thinking level, retry
 limit, and supported execution modes visible. Adaptive mode separately selects
@@ -376,27 +417,41 @@ acknowledged the terminal result.
 Host can recover after a restart. Events are allowlisted and exclude worker
 tokens, provider credentials, raw prompts, complete agent output, and logs.
 The stream includes approval, Host Assistance, Human Decision, progress, and
-terminal required/resolved events.
+terminal required/resolved events. Resolved events may include a safe Host/user
+principal, assessed risk, and auto-resolution flag.
 `--once` is used by the optional SessionStart recovery hook; it does not make
-approval decisions or acknowledge notifications. Hosts must deduplicate replayed
-events by `eventId` and must never auto-approve because a timeout, hook, or
-replay occurred.
+approval decisions, write receipts, issue leases, respond, or acknowledge
+notifications. Hosts must deduplicate replayed events by `eventId`; only the
+model handling an active Host turn may perform Host-first adjudication.
 
 ### Assistance, Discovery, and Host Actions
 
 A live worker can request bounded Host context without knowing which Host tool
-will satisfy it. The Host inspects `jobs host-requests`, chooses the narrowest
-allowed workspace/Web/docs/paper/connector/skill mechanism, and returns a typed
-bundle. Human choices use `jobs decisions` and `jobs decide`; they do not create
-leases. Responses must match the request's Job, generation, session, attempt,
-perspective, and request ID. A saved response survives a crash, but the old
+will satisfy it. The Host inspects the full `jobs host-requests` record and its
+adjudication context, chooses the narrowest allowed
+workspace/Web/docs/paper/connector/skill mechanism, and returns a typed bundle.
+`jobs approvals`, `jobs host-requests`, and `jobs decisions` include the
+original intent and immutable policy snapshot for active Host review. Host
+receipts are passed with `--adjudication-file`; without that option the existing
+manual user-principal behavior is unchanged. Responses and leases match the
+Job, generation, session, attempt, perspective, request ID, exact action
+fingerprint, and policy hash. A saved response survives a crash, but the old
 model call stack does not.
 
-`discover` is a fixed research → isolated experiment → convergence workflow.
+`discover` is a fixed research → isolated experiment → convergence workflow
+that inherits one immutable Job policy. Research disposes its read-only
+Sandbox before gate waiting; Experiment creates its own Sandbox in the isolated
+child worktree and shares the Adaptive network authorizer; Convergence and
+Advisor tool use create fresh read-only stage Sandboxes. No two runtime
+managers overlap. Successful Host-first and fallback user gates are recorded as
+`review-gate:approved`; legacy `user-gate:approved` handoffs remain accepted.
+The Experiment Sandbox grants read-only access to the linked
+worktree's Git administrative linkage for baseline and clean-replay checks,
+while retaining deny-write protection for all Git metadata.
 The experiment report must include reproducibility, test, evidence, metric,
 tolerance, and reported clean-replay fields and concludes only `supported`,
-`refuted`, or `inconclusive`. Its artifact is permanently non-deliverable. In
-0.5.0 the control plane schema-validates the replay report but does not
+`refuted`, or `inconclusive`. Its artifact is permanently non-deliverable. The
+control plane schema-validates the replay report but does not
 independently execute every recorded experiment command.
 
 An `ActionRecommendation` is inert. Only a successful `implement` or `setup`
@@ -563,6 +618,11 @@ mise run build
 
 ### Plugin versions
 
+Version 0.7.0 introduces stage-scoped Discover Sandboxes and Host-first
+adjudication as a backward-compatible minor release. Existing projects missing
+the new Host Assistance fields retain `user-only` behavior until explicitly
+resaved, so the upgrade does not silently expand authority.
+
 The root `package.json` is the canonical plugin version. Check that the runtime
 package, lockfiles, Claude manifests and marketplace, and the Codex manifest all
 agree with it:
@@ -609,7 +669,14 @@ claude plugin update swarm-pi-code-plugin@swarm-pi-code-plugin
 When the SemVer must remain unchanged and only the Codex skill cache needs a
 refresh, use the plugin-creator `update_plugin_cachebuster.py` workflow instead
 of `version:bump`, reinstall the local Codex plugin, run
-`mise run version-check-installed`, then start a new Codex task.
+`mise run version-check-installed`, then start a new Codex task. The UTC suffix
+is a development cache identity only; it does not change the base SemVer.
+
+Claude Code compares the marketplace SemVer during `plugin update`. For
+same-version local development, validate the source first with `--plugin-dir`.
+When the installed cache must also be verified, uninstall with `--keep-data`
+and immediately reinstall from the configured local directory marketplace;
+this preserves plugin data while forcing a fresh package copy.
 
 Follow the [documentation update SOP](docs/documentation-sop.md) when changing
 user-facing guides, technical references, or committed screenshots. It defines

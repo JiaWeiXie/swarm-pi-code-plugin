@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import type { HostAdjudicationReceipt } from "../src/core/contracts.js";
 import { executeSession, type RunnableSession } from "../src/pi/execute.js";
 import { isDelegatedCommand } from "../src/cli.js";
 import { createPolicySnapshot, resolveRolePolicy } from "../src/orchestration/roles.js";
@@ -22,13 +23,15 @@ import {
   cancelJob,
   finishJob,
   getJob,
+  listJobHostRequests,
   readJobRequest,
   requestJobApproval,
+  resolveJobHostRequest,
   startJob,
 } from "../src/state/jobs.js";
 import { defaultModelConfiguration } from "../src/state/model-config.js";
 import { detectSandboxAvailability } from "../src/sandbox/availability.js";
-import { resolveStateDir, setSandboxMode, updateState } from "../src/state/state.js";
+import { loadState, resolveStateDir, setSandboxMode, updateState } from "../src/state/state.js";
 
 const fakeModel = {
   provider: "test-provider",
@@ -1265,10 +1268,31 @@ test("orchestrate runs Balance-mode readonly perspectives and records artifacts"
 test("discover runs fixed stages, propagates prior evidence, and parses experiment conclusion", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-discover-"));
   let sessions = 0;
+  let activeSandboxes = 0;
   const prompts: string[] = [];
+  const sandboxEvents: string[] = [];
   const dependencies: RunnerDependencies = {
     catalog: { available: () => [fakeModel] },
     readFile: async () => "Investigate the unknown",
+    createSandboxRunner: async (options) => {
+      assert.equal(activeSandboxes, 0, "Discover stages must not overlap sandbox ownership");
+      activeSandboxes += 1;
+      const location = path.resolve(options.cwd) === path.resolve(workspace) ? "parent" : "child";
+      sandboxEvents.push(`create:${options.mode}:${location}:${options.sandboxMode}`);
+      assert.equal(typeof options.authorizeNetwork, "function");
+      let disposed = false;
+      return {
+        cwd: options.cwd,
+        mode: options.mode,
+        createBashTool: () => ({ name: "bash" }) as never,
+        async dispose() {
+          assert.equal(disposed, false);
+          disposed = true;
+          activeSandboxes -= 1;
+          sandboxEvents.push(`dispose:${options.mode}:${location}`);
+        },
+      };
+    },
     createSession: async () => {
       const stage = sessions;
       sessions += 1;
@@ -1355,7 +1379,7 @@ test("discover runs fixed stages, propagates prior evidence, and parses experime
       };
     },
   };
-  const result = await runCommand(
+  const resultPromise = runCommand(
     {
       command: "discover",
       host: "codex",
@@ -1366,7 +1390,21 @@ test("discover runs fixed stages, propagates prior evidence, and parses experime
     },
     workspace,
     dependencies,
+    { requireDiscoveryGates: true },
   );
+
+  const researchGate = await waitForPendingDiscoveryGate(workspace, "discovery:research-gate");
+  assert.equal(activeSandboxes, 0, "Research must release its Sandbox before gate review");
+  assert.deepEqual(sandboxEvents, ["create:readonly:parent:adaptive", "dispose:readonly:parent"]);
+  await autoApproveDiscoveryGate(workspace, researchGate.job.id, researchGate.summary.id);
+
+  const convergenceGate = await waitForPendingDiscoveryGate(
+    workspace,
+    "discovery:convergence-gate",
+  );
+  assert.equal(activeSandboxes, 0, "Convergence must release its Sandbox before gate review");
+  await autoApproveDiscoveryGate(workspace, convergenceGate.job.id, convergenceGate.summary.id);
+  const result = await resultPromise;
 
   assert.equal(sessions, 3);
   assert.equal("success" in result && result.success, true);
@@ -1375,6 +1413,16 @@ test("discover runs fixed stages, propagates prior evidence, and parses experime
     ["research", "experiment", "convergence"],
   );
   assert.equal("discovery" in result && result.discovery?.experimentConclusion, "supported");
+  assert.equal(
+    "discovery" in result &&
+      result.discovery?.stages[0]?.verification.includes("review-gate:approved"),
+    true,
+  );
+  assert.equal(
+    "discovery" in result &&
+      result.discovery?.stages[2]?.verification.includes("review-gate:approved"),
+    true,
+  );
   assert.match(prompts[1] ?? "", /repository evidence exists/);
   assert.match(prompts[2] ?? "", /supported/);
   assert.equal(
@@ -1389,8 +1437,121 @@ test("discover runs fixed stages, propagates prior evidence, and parses experime
   assert.equal(child.job.parentJobId, "jobId" in result ? result.jobId : undefined);
   assert.equal(child.job.internalStage, "experiment");
   assert.equal(child.job.role, "experimenter");
+  const parentRequest = await readJobRequest(workspace, "jobId" in result ? result.jobId : "");
+  const childRequest = await readJobRequest(workspace, childJobId);
+  assert.equal(parentRequest.policySnapshot?.version, 3);
+  assert.equal(childRequest.policySnapshot?.version, 3);
+  if (parentRequest.policySnapshot?.version === 3 && childRequest.policySnapshot?.version === 3) {
+    assert.equal(childRequest.policySnapshot.parentPolicyHash, parentRequest.policySnapshot.hash);
+    assert.equal(child.job.parentPolicyHash, parentRequest.policySnapshot.hash);
+    assert.notEqual(childRequest.policySnapshot.hash, parentRequest.policySnapshot.hash);
+  }
   assert.equal(child.result?.artifact?.kind, "experiment");
   assert.equal(child.result?.artifact?.deliverable, false);
+  assert.equal(activeSandboxes, 0);
+  assert.deepEqual(sandboxEvents, [
+    "create:readonly:parent:adaptive",
+    "dispose:readonly:parent",
+    "create:implement:child:adaptive",
+    "dispose:implement:child",
+    "create:readonly:parent:adaptive",
+    "dispose:readonly:parent",
+  ]);
+});
+
+async function waitForPendingDiscoveryGate(workspace: string, perspective: string) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const state = await loadState(workspace);
+    const job = state.jobs.find(
+      (candidate) => candidate.kind === "discover" && !candidate.parentJobId,
+    );
+    const summary = job?.hostAssistanceRequests?.find(
+      (candidate) => candidate.status === "pending" && candidate.perspective === perspective,
+    );
+    if (job && summary) return { job, summary };
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for controlled Discovery gate: ${perspective}`);
+}
+
+async function autoApproveDiscoveryGate(
+  workspace: string,
+  jobId: string,
+  requestId: string,
+): Promise<void> {
+  const job = (await loadState(workspace)).jobs.find((candidate) => candidate.id === jobId);
+  const record = (await listJobHostRequests(workspace, jobId)).find(
+    (candidate) => candidate.id === requestId,
+  );
+  assert.ok(job?.policyHash);
+  assert.ok(record?.actionFingerprint);
+  assert.equal(record.request.kind, "decision");
+  assert.ok(record.request.workerAssessment);
+  const receipt: HostAdjudicationReceipt = {
+    principal: "host-model",
+    host: "codex",
+    model: "codex/controlled-fixture",
+    decision: "allow",
+    assessedRisk: "medium",
+    rationale: "The schema-valid bounded gate matches the original Discovery intent.",
+    constraints: ["Advance only this exact gate", "No delivery or materialization"],
+    intentMatch: true,
+    actionFingerprint: record.actionFingerprint,
+    policyHash: job.policyHash,
+    autoResolved: true,
+    decidedAt: new Date().toISOString(),
+  };
+  await resolveJobHostRequest(
+    workspace,
+    jobId,
+    requestId,
+    { requestId, decision: "approve", rationale: receipt.rationale },
+    receipt,
+  );
+}
+
+test("discover disposes its adaptive stage sandbox when a stage fails", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-discover-cleanup-"));
+  let activeSandboxes = 0;
+  let disposals = 0;
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Investigate a failing stage",
+    createSandboxRunner: async (options) => {
+      assert.equal(activeSandboxes, 0);
+      activeSandboxes += 1;
+      return {
+        cwd: options.cwd,
+        mode: options.mode,
+        createBashTool: () => ({ name: "bash" }) as never,
+        async dispose() {
+          activeSandboxes -= 1;
+          disposals += 1;
+        },
+      };
+    },
+    createSession: async () => {
+      throw new Error("synthetic research failure");
+    },
+  };
+
+  const result = await runCommand(
+    {
+      command: "discover",
+      host: "codex",
+      promptFile: "prompt.md",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal("success" in result && result.success, false);
+  assert.equal(activeSandboxes, 0);
+  assert.equal(disposals, 1);
 });
 
 test("plan accepts only a verified and final-gated DiscoveryResult handoff", async () => {
@@ -1612,6 +1773,12 @@ test(
     const dependencies: RunnerDependencies = {
       catalog: { available: () => [fakeModel] },
       readFile: async () => "Inspect with shell access",
+      createSandboxRunner: async (options) => ({
+        cwd: options.cwd,
+        mode: options.mode,
+        createBashTool: () => ({ name: "bash" }) as never,
+        async dispose() {},
+      }),
       createSession: async (options) => {
         receivedSandbox = options.sandboxRunner !== undefined;
         return {

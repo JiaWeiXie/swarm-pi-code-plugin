@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -21,7 +22,7 @@ export async function createSandboxRunner(options) {
     const env = options.env ?? process.env;
     let config;
     try {
-        config = await sandboxConfiguration(cwd, tempRoot, options.mode, env, options.sandboxMode ?? "lenient", options.trustedDomains ?? [], options.boundProjectPolicy);
+        config = await sandboxConfiguration(cwd, tempRoot, options.mode, env, options.sandboxMode ?? "lenient", options.trustedDomains ?? [], options.boundProjectPolicy, options.allowGitMetadataRead ?? false);
     }
     catch (error) {
         await fs.rm(tempRoot, { recursive: true, force: true });
@@ -67,7 +68,7 @@ export async function createSandboxRunner(options) {
         },
     };
 }
-export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.env, sandboxMode = "lenient", trustedDomains = [], boundProjectPolicy) {
+export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.env, sandboxMode = "lenient", trustedDomains = [], boundProjectPolicy, allowGitMetadataRead = false) {
     cwd = await fs.realpath(cwd);
     if (boundProjectPolicy && boundProjectPolicy.executionRoot !== cwd) {
         throw new Error("Bound project policy execution root does not match sandbox workspace");
@@ -77,7 +78,7 @@ export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.en
     const denyRead = [
         ...(await hostReadDenyPaths(cwd)),
         stateDir,
-        ...gitPaths,
+        ...(allowGitMetadataRead ? [] : gitPaths),
         ...credentialPaths(env),
     ];
     const denyWrite = [
@@ -113,7 +114,11 @@ export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.en
             denyRead: uniquePaths(denyRead),
             // Bash is a distinct capability: it may read only its shell roots, not
             // roots granted solely to the scoped read/search tools.
-            allowRead: uniquePaths([...executableReadPaths(cwd), ...policyShellRoots]),
+            allowRead: uniquePaths([
+                ...executableReadPaths(cwd),
+                ...policyShellRoots,
+                ...(allowGitMetadataRead ? gitPaths : []),
+            ]),
             allowWrite: uniquePaths(mode === "implement"
                 ? boundProjectPolicy
                     ? [...boundProjectPolicy.roots.shell, tempRoot]
@@ -275,12 +280,17 @@ function credentialPaths(env) {
         .map((value) => path.resolve(value));
 }
 function executableReadPaths(cwd) {
-    return uniquePaths([path.dirname(process.execPath), path.join(cwd, "node_modules", ".bin")]);
+    return uniquePaths([
+        path.dirname(process.execPath),
+        path.join(cwd, "node_modules", ".bin"),
+        ...directDeveloperToolPaths(),
+    ]);
 }
 function sandboxPath(cwd) {
     return uniquePaths([
         path.join(cwd, "node_modules", ".bin"),
         path.dirname(process.execPath),
+        ...directDeveloperToolPaths(),
         "/opt/homebrew/bin",
         "/usr/local/bin",
         "/usr/bin",
@@ -288,6 +298,10 @@ function sandboxPath(cwd) {
         "/usr/sbin",
         "/sbin",
     ]).join(path.delimiter);
+}
+function directDeveloperToolPaths() {
+    const commandLineTools = "/Library/Developer/CommandLineTools/usr/bin";
+    return process.platform === "darwin" && existsSync(commandLineTools) ? [commandLineTools] : [];
 }
 function uniquePaths(values) {
     return [...new Set(values.map((value) => path.resolve(value)))];

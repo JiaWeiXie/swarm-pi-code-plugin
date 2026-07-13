@@ -97,7 +97,10 @@ test("SessionStart hook renders allowlisted Job events as host context without d
   assert.match(context, /approval-required job=job-123 approval=approval-456/);
   assert.match(context, /job-terminal job=job-123 status=failed/);
   assert.match(context, /host-assistance-required job=job-123 request=request-789/);
-  assert.match(context, /No approval or acknowledgement was performed/);
+  assert.match(
+    context,
+    /No approval, denial, response, receipt, lease, or acknowledgement was performed/,
+  );
   assert.doesNotMatch(context, /sk-super-secret-value/);
   assert.doesNotMatch(context, /\/Users\/alice\/project/);
   assert.doesNotMatch(context, /\/opt\/private\/build/);

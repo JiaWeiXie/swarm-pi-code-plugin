@@ -159,7 +159,7 @@ export function renderConfigurationPage(
           <div class="form-control">
             <label for="decision-mode">Review and decision depth</label>
             <select id="decision-mode"><option value="cost">Cost</option><option value="balance">Balance</option><option value="power">Power</option></select>
-            <label class="inline-check"><input id="decision-doctrine" type="checkbox"> Record a Question → Delete → Simplify preference (not executed automatically in 0.5.0)</label>
+            <label class="inline-check"><input id="decision-doctrine" type="checkbox"> Record a Question → Delete → Simplify preference (not executed automatically)</label>
           </div>
         </div>
         <div class="form-band">
@@ -167,6 +167,10 @@ export function renderConfigurationPage(
           <div class="form-control">
             <label for="host-assistance-mode">Default</label>
             <select id="host-assistance-mode"><option value="on">On</option><option value="inherit">Inherit</option><option value="off">Off</option></select>
+            <label for="host-review-mode">Review path</label><select id="host-review-mode"><option value="host-first">Host model first</option><option value="user-only">Always ask the user</option></select>
+            <label for="host-auto-scope">Host auto-approval ceiling</label><select id="host-auto-scope"><option value="context-only">Context only</option><option value="read-only">Read-only capabilities</option><option value="reversible">Bounded reversible changes</option></select>
+            <label class="inline-check"><input id="host-auto-discovery-gates" type="checkbox"> Allow the active Host model to approve bounded Discovery gates</label>
+            <span class="field-hint">Recovery hooks and replay never approve. Private connectors, delivery, deployment, messages, and irreversible actions still require the user.</span>
             <label>Allowed context classes</label><div id="host-context-classes" class="check-list"></div>
             <label for="context-budget">Context budget</label><input id="context-budget" type="number" min="0" max="64">
             <label for="host-max-requests">Requests per Job</label><input id="host-max-requests" type="number" min="0" max="6">
@@ -175,7 +179,7 @@ export function renderConfigurationPage(
           </div>
         </div>
         <div class="form-band">
-          <div class="form-copy"><h2>Advisor</h2><p>Optional bounded read-only consultations on selected tasks; no dynamic coordinator runs in 0.5.0.</p></div>
+          <div class="form-copy"><h2>Advisor</h2><p>Optional bounded read-only consultations on selected tasks; no dynamic coordinator runs.</p></div>
           <div class="form-control">
             <label class="inline-check"><input id="advisor-enabled" type="checkbox"> Enable Advisor</label>
             <label>Advisor targets</label><div id="advisor-targets" class="check-list"></div>
@@ -620,7 +624,7 @@ const clientScript = String.raw`
     adaptivePolicy: structuredClone(boot.adaptivePolicy || {classifierModels:[],classifierThinkingLevel:"medium",approvalPolicy:"deny",trustedDomains:[],rules:[],diagnostics:false}),
     backgroundRolePolicy: structuredClone(boot.backgroundRolePolicy || {mechanicalExecutor:false}),
     decisionMode: ["cost","balance","power"].includes(boot.decisionMode) ? boot.decisionMode : "balance",
-    hostAssistance: structuredClone(boot.hostAssistance || {enabled:true,mode:"on",contextClasses:["workspace","web","docs","paper","skill"],privateConnector:"ask",maxRequests:4,maxFanOut:2}),
+    hostAssistance: structuredClone(boot.hostAssistance || {enabled:true,mode:"on",contextClasses:["workspace","web","docs","paper","connector","skill"],privateConnector:"ask",maxRequests:4,maxFanOut:2,reviewMode:"host-first",autoApprovalScope:"reversible",autoApproveDiscoveryGates:true}),
     contextBudget: Number.isInteger(boot.contextBudget) ? boot.contextBudget : 4,
     advisor: structuredClone(boot.advisor || {enabled:false,targets:["review","plan","orchestrate","discover"],maxRequests:2,maxPerspectives:2}),
     doctrine: boot.doctrine || null,
@@ -999,6 +1003,9 @@ const clientScript = String.raw`
     $("decision-mode").value = state.decisionMode;
     $("decision-doctrine").checked = state.doctrine === "first-principles-qds-v1";
     $("host-assistance-mode").value = state.hostAssistance.mode;
+    $("host-review-mode").value = state.hostAssistance.reviewMode || "user-only";
+    $("host-auto-scope").value = state.hostAssistance.autoApprovalScope || "context-only";
+    $("host-auto-discovery-gates").checked = state.hostAssistance.autoApproveDiscoveryGates === true;
     const hostClasses = $("host-context-classes"); hostClasses.replaceChildren();
     [["workspace","Workspace files"],["web","Public Web"],["docs","SDK/API docs"],["paper","Papers"],["connector","Private connector"],["skill","Installed skill"]].forEach(([value,label]) => hostClasses.append(checkRow({
       value,label,checked:state.hostAssistance.contextClasses.includes(value),
@@ -1092,7 +1099,7 @@ const clientScript = String.raw`
     const workflow = $("review-workflow"); workflow.replaceChildren();
     [
       "Decision mode: " + state.decisionMode,
-      "Host Assistance: " + state.hostAssistance.mode + " · budget " + state.contextBudget + " · requests " + state.hostAssistance.maxRequests + " · fan-out " + state.hostAssistance.maxFanOut,
+      "Host Assistance: " + state.hostAssistance.mode + " · " + (state.hostAssistance.reviewMode || "user-only") + " · ceiling " + (state.hostAssistance.autoApprovalScope || "context-only") + " · Discovery gates " + (state.hostAssistance.autoApproveDiscoveryGates ? "Host-review" : "user") + " · budget " + state.contextBudget + " · requests " + state.hostAssistance.maxRequests + " · fan-out " + state.hostAssistance.maxFanOut,
       "Advisor: " + (state.advisor.enabled ? "on for " + state.advisor.targets.join(", ") : "off"),
       "Doctrine: " + (state.doctrine || "off"),
       "Host Actions: " + (state.hostActions.enabled ? "isolated · " + state.hostActions.allowedActionClasses.join(", ") + (state.hostActions.remoteActionsEnabled ? " · remote enabled" : " · remote disabled") : "off"),
@@ -1410,6 +1417,9 @@ const clientScript = String.raw`
   $("decision-mode").addEventListener("change", () => { state.decisionMode = $("decision-mode").value; });
   $("decision-doctrine").addEventListener("change", () => { state.doctrine = $("decision-doctrine").checked ? "first-principles-qds-v1" : null; });
   $("host-assistance-mode").addEventListener("change", () => { state.hostAssistance.mode = $("host-assistance-mode").value; state.hostAssistance.enabled = state.hostAssistance.mode !== "off"; });
+  $("host-review-mode").addEventListener("change", () => { state.hostAssistance.reviewMode = $("host-review-mode").value; });
+  $("host-auto-scope").addEventListener("change", () => { state.hostAssistance.autoApprovalScope = $("host-auto-scope").value; });
+  $("host-auto-discovery-gates").addEventListener("change", () => { state.hostAssistance.autoApproveDiscoveryGates = $("host-auto-discovery-gates").checked; });
   $("context-budget").addEventListener("input", () => { state.contextBudget = Math.max(0, Math.min(64, Number($("context-budget").value) || 0)); });
   $("host-max-requests").addEventListener("input", () => { state.hostAssistance.maxRequests = Math.max(0, Math.min(6, Number($("host-max-requests").value) || 0)); });
   $("host-max-fanout").addEventListener("input", () => { state.hostAssistance.maxFanOut = Math.max(0, Math.min(3, Number($("host-max-fanout").value) || 0)); });

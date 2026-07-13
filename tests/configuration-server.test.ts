@@ -268,6 +268,9 @@ test("project profile save validates scope and does not create model configurati
       privateConnector: "deny",
       maxRequests: 6,
       maxFanOut: 3,
+      reviewMode: "host-first",
+      autoApprovalScope: "read-only",
+      autoApproveDiscoveryGates: true,
     },
     contextBudget: 6,
     advisor: { enabled: true, targets: ["discover", "plan"], maxRequests: 3, maxPerspectives: 3 },
@@ -289,6 +292,9 @@ test("project profile save validates scope and does not create model configurati
   assert.equal(saved.config.sandboxMode, "strict");
   assert.equal(saved.config.decisionMode, "power");
   assert.equal(saved.config.hostAssistance?.maxFanOut, 3);
+  assert.equal(saved.config.hostAssistance?.reviewMode, "host-first");
+  assert.equal(saved.config.hostAssistance?.autoApprovalScope, "read-only");
+  assert.equal(saved.config.hostAssistance?.autoApproveDiscoveryGates, true);
   assert.equal(saved.config.contextBudget, 6);
   assert.equal(saved.config.advisor?.enabled, true);
   assert.equal(saved.config.doctrine, "first-principles-qds-v1");

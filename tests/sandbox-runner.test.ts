@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -60,6 +61,47 @@ test("sandbox environment omits host credentials and isolates user directories",
   assert.equal(env.SSH_AUTH_SOCK, undefined);
   assert.equal(env.AWS_SECRET_ACCESS_KEY, undefined);
   assert.equal(env.LANG, "en_US.UTF-8");
+  if (process.platform === "darwin") {
+    const entries = (env.PATH ?? "").split(path.delimiter);
+    const commandLineTools = "/Library/Developer/CommandLineTools/usr/bin";
+    if (fs.existsSync(commandLineTools)) {
+      assert.ok(entries.indexOf(commandLineTools) < entries.indexOf("/usr/bin"));
+    }
+  }
+});
+
+test("isolated worktree sandbox grants read-only Git administrative linkage", async () => {
+  const { worktree } = createLinkedWorktree();
+  const tempRoot = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-git-home-")),
+  );
+  const configuration = await sandboxConfiguration(
+    worktree,
+    tempRoot,
+    "implement",
+    process.env,
+    "adaptive",
+    [],
+    undefined,
+    true,
+  );
+  const gitDir = path.resolve(
+    execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-dir"], {
+      cwd: worktree,
+      encoding: "utf8",
+    }).trim(),
+  );
+  const commonDir = path.resolve(
+    execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      cwd: worktree,
+      encoding: "utf8",
+    }).trim(),
+  );
+  for (const metadataPath of [path.join(worktree, ".git"), gitDir, commonDir]) {
+    assert.equal(configuration.filesystem.allowRead?.includes(metadataPath), true);
+    assert.equal(configuration.filesystem.denyRead.includes(metadataPath), false);
+    assert.equal(configuration.filesystem.denyWrite.includes(metadataPath), true);
+  }
 });
 
 test(
@@ -137,6 +179,68 @@ test(
     }
   },
 );
+
+test(
+  "isolated worktree sandbox can inspect Git without metadata writes",
+  {
+    skip: !detectSandboxAvailability().available,
+  },
+  async () => {
+    const { worktree } = createLinkedWorktree();
+    const runner = await createSandboxRunner({
+      cwd: worktree,
+      mode: "implement",
+      sandboxMode: "adaptive",
+      allowGitMetadataRead: true,
+    });
+    try {
+      const tool = runner.createBashTool();
+      await tool.execute(
+        "status",
+        { command: "git status --porcelain=v1 --untracked-files=all" },
+        undefined,
+        undefined,
+        {} as never,
+      );
+      assert.equal(
+        execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+          cwd: worktree,
+          encoding: "utf8",
+        }),
+        "",
+      );
+    } finally {
+      await runner.dispose();
+    }
+  },
+);
+
+function createLinkedWorktree(): { source: string; worktree: string } {
+  const source = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-git-source-")),
+  );
+  execFileSync("git", ["init", "--quiet"], { cwd: source });
+  fs.writeFileSync(path.join(source, "README.md"), "sandbox fixture\n");
+  execFileSync("git", ["add", "README.md"], { cwd: source });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Sandbox Test",
+      "-c",
+      "user.email=sandbox@example.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "fixture",
+    ],
+    { cwd: source },
+  );
+  const worktreeParent = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-git-worktree-"));
+  const worktree = path.join(worktreeParent, "child");
+  execFileSync("git", ["worktree", "add", "--detach", "--quiet", worktree], { cwd: source });
+  return { source, worktree: fs.realpathSync(worktree) };
+}
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;

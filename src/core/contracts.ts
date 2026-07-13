@@ -42,6 +42,9 @@ export type HostAssistanceMode = "inherit" | "on" | "off";
 export type DoctrineId = "first-principles-qds-v1";
 export type HostContextClass = "workspace" | "web" | "docs" | "paper" | "connector" | "skill";
 export type DataClassification = "public" | "project-internal" | "private" | "secret";
+export type HostAssistanceReviewMode = "user-only" | "host-first";
+export type HostAutoApprovalScope = "context-only" | "read-only" | "reversible";
+export type Reversibility = "read-only" | "reversible" | "partially-reversible" | "irreversible";
 
 export interface HostAssistancePolicy {
   enabled: boolean;
@@ -50,6 +53,31 @@ export interface HostAssistancePolicy {
   privateConnector: "ask" | "deny";
   maxRequests: number;
   maxFanOut: number;
+  /** Missing on legacy snapshots; legacy normalization keeps user-only review. */
+  reviewMode?: HostAssistanceReviewMode;
+  autoApprovalScope?: HostAutoApprovalScope;
+  autoApproveDiscoveryGates?: boolean;
+}
+
+export interface WorkerAssessment {
+  purpose: string;
+  blockedBy: string;
+  minimumAccess: string[];
+  targets: string[];
+  sideEffects: string[];
+  dataExposure: string[];
+  failureModes: string[];
+  mitigations: string[];
+  reversibility: Reversibility;
+  rollback: string;
+  verification: string[];
+  proposedRisk: RiskLevel;
+  fallback: string;
+}
+
+export interface HostAssistanceRequestBase {
+  /** Optional only for persisted legacy requests; new tool calls require it. */
+  workerAssessment?: WorkerAssessment;
 }
 
 export interface HostAssistanceCorrelation {
@@ -60,7 +88,7 @@ export interface HostAssistanceCorrelation {
   perspective?: string;
 }
 
-export interface HostContextRequest {
+export interface HostContextRequest extends HostAssistanceRequestBase {
   kind: "context";
   contextClass: HostContextClass;
   question: string;
@@ -73,7 +101,7 @@ export interface HostContextRequest {
   budget: number;
 }
 
-export interface HumanDecisionRequest {
+export interface HumanDecisionRequest extends HostAssistanceRequestBase {
   kind: "decision";
   question: string;
   options: string[];
@@ -81,7 +109,7 @@ export interface HumanDecisionRequest {
   dataClassification: DataClassification;
 }
 
-export interface ActionRecommendation {
+export interface ActionRecommendation extends HostAssistanceRequestBase {
   kind: "action-recommendation";
   actionClass: "local-mutation" | "draft" | "remote-write" | "message" | "deploy" | "transaction";
   summary: string;
@@ -180,6 +208,8 @@ export interface HostAssistanceRequestSummary {
   consumedAt?: string;
   notificationId: string;
   responseHash?: string;
+  actionFingerprint?: string;
+  adjudication?: HostAdjudicationReceipt;
 }
 
 export interface HostAssistanceRecord extends HostAssistanceRequestSummary {
@@ -468,6 +498,7 @@ export interface PolicySnapshotV2 {
 
 export interface PolicySnapshotV3 extends Omit<PolicySnapshotV2, "version"> {
   version: 3;
+  parentPolicyHash?: string;
   decisionMode: DecisionMode;
   hostAssistance: HostAssistancePolicy;
   advisor: AdvisorPolicy;
@@ -531,6 +562,7 @@ export interface ApprovalRequest {
   scopeHash?: string;
   toolName: string;
   actionSummary: string;
+  trustedReadOnly?: boolean;
   decision: PolicyDecision;
   status: "pending" | "approved" | "denied" | "expired" | "consumed";
   requestedAt: string;
@@ -539,6 +571,23 @@ export interface ApprovalRequest {
   scope?: "once" | "job";
   notificationId: string;
   notification?: NotificationStatus;
+  workerAssessment?: WorkerAssessment;
+  adjudication?: HostAdjudicationReceipt;
+}
+
+export interface HostAdjudicationReceipt {
+  principal: "host-model" | "user";
+  host: Host;
+  model?: string;
+  decision: "allow" | "ask-user" | "hard-deny";
+  assessedRisk: RiskLevel;
+  rationale: string;
+  constraints: string[];
+  intentMatch: boolean;
+  actionFingerprint: string;
+  policyHash: string;
+  autoResolved: boolean;
+  decidedAt: string;
 }
 
 export interface CapabilityLease {
@@ -554,7 +603,8 @@ export interface CapabilityLease {
   createdAt: string;
   expiresAt: string;
   consumedAt?: string;
-  principal?: "worker" | "host-broker";
+  principal?: "worker" | "host-broker" | "host-model" | "user";
+  adjudication?: HostAdjudicationReceipt;
   actionFamily?: {
     actionClass: ActionRecommendation["actionClass"];
     target?: string;
@@ -673,6 +723,24 @@ export interface WorkerResult {
     experimentConclusion?: ExperimentConclusion;
   };
   hostAction?: HostActionReceipt;
+  hostAdjudications?: HostAdjudicationSummary[];
+}
+
+export interface HostAdjudicationSummary {
+  source: "approval" | "host-assistance";
+  requestId: string;
+  principal: HostAdjudicationReceipt["principal"];
+  host: Host;
+  model?: string;
+  decision: HostAdjudicationReceipt["decision"];
+  assessedRisk: RiskLevel;
+  rationale: string;
+  constraints: string[];
+  actionFingerprint: string;
+  policyHash: string;
+  autoResolved: boolean;
+  outcome: string;
+  decidedAt: string;
 }
 
 export interface AuditJobSummary {
@@ -734,12 +802,15 @@ export interface AuditApproval {
   scopeHash?: string;
   toolName: string;
   actionSummary: string;
+  trustedReadOnly?: boolean;
   decision: PolicyDecision;
   status: ApprovalRequest["status"];
   requestedAt: string;
   expiresAt: string;
   resolvedAt?: string;
   scope?: "once" | "job";
+  workerAssessment?: WorkerAssessment;
+  adjudication?: HostAdjudicationReceipt;
 }
 
 export interface AuditLease {
@@ -755,6 +826,8 @@ export interface AuditLease {
   createdAt: string;
   expiresAt: string;
   consumedAt?: string;
+  principal?: CapabilityLease["principal"];
+  adjudication?: HostAdjudicationReceipt;
 }
 
 export interface AuditResultSummary {
@@ -783,6 +856,7 @@ export interface AuditResultSummary {
     model: string | null;
   };
   artifact?: WorkerResult["artifact"];
+  hostAdjudications?: HostAdjudicationSummary[];
 }
 
 export interface JobAuditExportV1 {
@@ -797,6 +871,7 @@ export interface JobAuditExportV1 {
   };
   approvals: AuditApproval[];
   leases: AuditLease[];
+  hostAssistance: HostAssistanceRecord[];
   result: AuditResultSummary;
   changes: { patch: string | null; sourceSha256: string | null };
   integrity: {

@@ -20,6 +20,7 @@ export interface TrustedPolicyLoaderOptions {
     fingerprint: string,
     signal?: AbortSignal,
   ) => Promise<"approved" | "denied" | "expired">;
+  bypassToolNames?: ReadonlySet<string>;
 }
 
 export async function createTrustedResourceLoader(
@@ -42,6 +43,9 @@ export async function createTrustedResourceLoader(
               let consecutiveBlocks = 0;
               let totalBlocks = 0;
               pi.on("tool_call", async (event, ctx) => {
+                if (shouldBypassGenericPolicy(event.toolName, options.bypassToolNames)) {
+                  return undefined;
+                }
                 const action = toolAction(event, options.cwd);
                 let decision = await options.engine!.authorize(action, ctx.signal);
                 if (decision.decision === "require-approval" && options.onApproval) {
@@ -70,6 +74,13 @@ export async function createTrustedResourceLoader(
   });
   await loader.reload();
   return loader;
+}
+
+export function shouldBypassGenericPolicy(
+  toolName: string,
+  bypassToolNames?: ReadonlySet<string>,
+): boolean {
+  return bypassToolNames?.has(toolName) === true;
 }
 
 function toolAction(event: ToolCallEvent, cwd: string): PolicyAction {

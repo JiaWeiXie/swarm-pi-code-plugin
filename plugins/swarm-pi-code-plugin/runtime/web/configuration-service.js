@@ -463,7 +463,8 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
     if (unavailable.length > 0) {
         throw new Error(`Selected models are not authenticated: ${unavailable.join(", ")}`);
     }
-    assertExecutionModels(execution, all, available, sandboxMode);
+    applyAdaptiveClassifierDefault(execution, sandboxMode, candidate.primary);
+    assertExecutionModels(execution, all, available, sandboxMode, Boolean(candidate.primary));
     if (env.SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST !== "1") {
         const smokeModels = [
             ...new Set([
@@ -603,7 +604,8 @@ export async function saveProjectProfileSubmission(cwd, submission) {
     const catalog = createModelCatalog(modelConfiguration);
     const all = new Map((catalog.all?.() ?? catalog.available()).map((model) => [modelId(model), model]));
     const available = new Set(catalog.available().map(modelId));
-    assertExecutionModels(execution, all, available, sandboxMode);
+    applyAdaptiveClassifierDefault(execution, sandboxMode, modelConfiguration.primary);
+    assertExecutionModels(execution, all, available, sandboxMode, Boolean(modelConfiguration.primary));
     const state = await saveProjectSettings(cwd, profile, sandboxMode, execution);
     return state.config.profile;
 }
@@ -632,6 +634,9 @@ function normalizeBoundedInteger(value, fallback, min, max, label) {
 function normalizeHostAssistance(value, fallback) {
     if (value === undefined)
         return structuredClone(fallback);
+    const reviewMode = value.reviewMode ?? fallback.reviewMode ?? "user-only";
+    const autoApprovalScope = value.autoApprovalScope ?? fallback.autoApprovalScope ?? "context-only";
+    const autoApproveDiscoveryGates = value.autoApproveDiscoveryGates ?? fallback.autoApproveDiscoveryGates ?? false;
     const contextClasses = Array.isArray(value.contextClasses)
         ? [
             ...new Set(value.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item))),
@@ -641,6 +646,12 @@ function normalizeHostAssistance(value, fallback) {
         throw new Error("Invalid Host Assistance mode");
     if (value.privateConnector !== "ask" && value.privateConnector !== "deny")
         throw new Error("Invalid private connector policy");
+    if (reviewMode !== "user-only" && reviewMode !== "host-first")
+        throw new Error("Invalid Host Assistance review mode");
+    if (autoApprovalScope !== "context-only" &&
+        autoApprovalScope !== "read-only" &&
+        autoApprovalScope !== "reversible")
+        throw new Error("Invalid Host Assistance auto-approval scope");
     return {
         enabled: value.mode === "off" ? false : value.enabled !== false,
         mode: value.mode,
@@ -648,6 +659,9 @@ function normalizeHostAssistance(value, fallback) {
         privateConnector: value.privateConnector,
         maxRequests: normalizeBoundedInteger(value.maxRequests, fallback.maxRequests, 0, 32, "Host Assistance request limit"),
         maxFanOut: normalizeBoundedInteger(value.maxFanOut, fallback.maxFanOut, 0, 8, "Host Assistance fan-out"),
+        reviewMode,
+        autoApprovalScope,
+        autoApproveDiscoveryGates,
     };
 }
 function normalizeAdvisor(value, fallback) {
@@ -781,7 +795,7 @@ function validateAdaptivePolicy(policy) {
         }
     }
 }
-function assertExecutionModels(execution, all, available, sandboxMode) {
+function assertExecutionModels(execution, all, available, sandboxMode, requireAdaptiveClassifier = true) {
     const selected = [
         ...Object.values(execution.rolePolicies).flatMap((policy) => policy?.models ?? []),
         ...execution.adaptivePolicy.classifierModels,
@@ -792,8 +806,17 @@ function assertExecutionModels(execution, all, available, sandboxMode) {
     const unavailable = selected.filter((model) => !available.has(model));
     if (unavailable.length)
         throw new Error(`Role or classifier models are not authenticated: ${[...new Set(unavailable)].join(", ")}`);
-    if (sandboxMode === "adaptive" && execution.adaptivePolicy.classifierModels.length === 0) {
+    if (requireAdaptiveClassifier &&
+        sandboxMode === "adaptive" &&
+        execution.adaptivePolicy.classifierModels.length === 0) {
         throw new Error("Adaptive mode requires at least one classifier model");
+    }
+}
+function applyAdaptiveClassifierDefault(execution, sandboxMode, primary) {
+    if (sandboxMode === "adaptive" &&
+        execution.adaptivePolicy.classifierModels.length === 0 &&
+        primary) {
+        execution.adaptivePolicy.classifierModels = [primary];
     }
 }
 function normalizeProviderFields(definition, authMethod, value) {

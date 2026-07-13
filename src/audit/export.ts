@@ -19,6 +19,7 @@ import { policySnapshotHash } from "../orchestration/roles.js";
 import {
   getJob,
   jobDirectory,
+  listJobHostRequests,
   modelConfigurationSnapshotHash,
   readJobRequest,
 } from "../state/jobs.js";
@@ -78,6 +79,7 @@ export async function exportJobAudit(cwd: string, jobId: string): Promise<JobAud
   const providerVerified = verifyProviderSnapshot(request);
   const policyVerified = verifyPolicySnapshot(request.policySnapshot);
   const events = parsePolicyEvents(sources.policyEvents, roots, counter);
+  const hostAssistance = await listJobHostRequests(cwd, jobId);
   if (
     policyVerified &&
     events.some((event) => event.policyHash && event.policyHash !== policyVerified.hash)
@@ -102,6 +104,9 @@ export async function exportJobAudit(cwd: string, jobId: string): Promise<JobAud
     ),
     leases: (snapshot.job.leases ?? []).map(
       (lease) => redactValue(lease, roots, counter) as AuditLease,
+    ),
+    hostAssistance: hostAssistance.map(
+      (record) => redactValue(record, roots, counter) as (typeof hostAssistance)[number],
     ),
     result: summarizeResult(snapshot.result, roots, counter),
     changes: {
@@ -261,12 +266,15 @@ function summarizeApproval(
     ...(approval.scopeHash ? { scopeHash: approval.scopeHash } : {}),
     toolName: approval.toolName,
     actionSummary: approval.actionSummary,
+    ...(approval.trustedReadOnly ? { trustedReadOnly: true } : {}),
     decision: approval.decision,
     status: approval.status,
     requestedAt: approval.requestedAt,
     expiresAt: approval.expiresAt,
     ...(approval.resolvedAt ? { resolvedAt: approval.resolvedAt } : {}),
     ...(approval.scope ? { scope: approval.scope } : {}),
+    ...(approval.workerAssessment ? { workerAssessment: approval.workerAssessment } : {}),
+    ...(approval.adjudication ? { adjudication: approval.adjudication } : {}),
   };
   return redactValue(value, roots, counter) as AuditApproval;
 }
@@ -310,6 +318,7 @@ function summarizeResult(
         }
       : {}),
     ...(result.artifact ? { artifact: result.artifact } : {}),
+    ...(result.hostAdjudications ? { hostAdjudications: result.hostAdjudications } : {}),
   };
   return redactValue(value, roots, counter) as AuditResultSummary;
 }

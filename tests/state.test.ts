@@ -20,13 +20,39 @@ import {
 } from "../src/state/jobs.js";
 import {
   clearConfiguration,
+  defaultState,
   loadState,
   resolveStateDir,
+  resolveStateFile,
   saveProfile,
   setSandboxMode,
   setModelPriority,
   updateState,
 } from "../src/state/state.js";
+
+test("new configuration defaults to adaptive without changing legacy normalization", () => {
+  assert.equal(defaultState().config.sandboxMode, "adaptive");
+  assert.equal(defaultState().config.hostAssistance?.reviewMode, "host-first");
+  assert.equal(defaultState().config.hostAssistance?.autoApprovalScope, "reversible");
+  assert.equal(defaultState().config.hostAssistance?.autoApproveDiscoveryGates, true);
+});
+
+test("legacy Host Assistance settings do not gain Host-first authority on load", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-legacy-host-policy-"));
+  await updateState(workspace, () => {});
+  const stateFile = await resolveStateFile(workspace);
+  const raw = JSON.parse(fs.readFileSync(stateFile, "utf8")) as {
+    config: { hostAssistance: Record<string, unknown> };
+  };
+  delete raw.config.hostAssistance.reviewMode;
+  delete raw.config.hostAssistance.autoApprovalScope;
+  delete raw.config.hostAssistance.autoApproveDiscoveryGates;
+  fs.writeFileSync(stateFile, `${JSON.stringify(raw, null, 2)}\n`);
+  const loaded = await loadState(workspace);
+  assert.equal(loaded.config.hostAssistance?.reviewMode, "user-only");
+  assert.equal(loaded.config.hostAssistance?.autoApprovalScope, "context-only");
+  assert.equal(loaded.config.hostAssistance?.autoApproveDiscoveryGates, false);
+});
 
 function workerResult(status: WorkerResult["status"] = "succeeded"): WorkerResult {
   return {
@@ -231,7 +257,7 @@ test("reset clears configuration while preserving Pi job history", async () => {
     const reset = await loadState(repository);
     assert.deepEqual(reset.config.modelPriority, []);
     assert.equal(reset.config.profile, undefined);
-    assert.equal(reset.config.sandboxMode, "strict");
+    assert.equal(reset.config.sandboxMode, "adaptive");
     assert.deepEqual(reset.jobs, [{ id: "pi-job", status: "succeeded" }]);
   });
 });

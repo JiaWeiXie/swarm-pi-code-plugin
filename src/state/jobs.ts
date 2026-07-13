@@ -30,6 +30,8 @@ import type {
   HostAssistanceRequest,
   HostAssistanceRequestSummary,
   HostAssistanceResult,
+  WorkerAssessment,
+  HostAdjudicationReceipt,
 } from "../core/contracts.js";
 import { loadState, resolveStateDir, updateState, type JobRecord } from "./state.js";
 import type { ModelConfiguration } from "./model-config.js";
@@ -206,6 +208,9 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       ...(input.model ? { model: input.model } : {}),
       ...(input.role ? { role: input.role } : {}),
       ...(input.policySnapshot ? { policyHash: input.policySnapshot.hash } : {}),
+      ...(input.policySnapshot?.version === 3 && input.policySnapshot.parentPolicyHash
+        ? { parentPolicyHash: input.policySnapshot.parentPolicyHash }
+        : {}),
       ...(input.policySnapshot?.version === 2 || input.policySnapshot?.version === 3
         ? { scopeHash: input.policySnapshot.scopeHash }
         : {}),
@@ -328,7 +333,13 @@ export async function finishJob(
     return;
   }
   const finishedAt = new Date().toISOString();
-  const finalResult = { ...result, jobId: result.jobId ?? jobId };
+  const currentJob = (await loadState(cwd)).jobs.find((job) => job.id === jobId);
+  const hostAdjudications = currentJob ? summarizeHostAdjudications(currentJob) : [];
+  const finalResult = {
+    ...result,
+    jobId: result.jobId ?? jobId,
+    ...(hostAdjudications.length > 0 ? { hostAdjudications } : {}),
+  };
   await fs.mkdir(directory, { recursive: true });
   await writeJson(path.join(directory, "result.json"), finalResult);
   if (diff)
@@ -337,6 +348,37 @@ export async function finishJob(
       mode: 0o600,
     });
   await applyResultToState(cwd, jobId, finalResult, finishedAt);
+}
+
+function summarizeHostAdjudications(
+  job: JobRecord,
+): NonNullable<WorkerResult["hostAdjudications"]> {
+  return [
+    ...(job.approvals ?? []).flatMap((approval) =>
+      approval.adjudication
+        ? [
+            {
+              source: "approval" as const,
+              requestId: approval.id,
+              ...structuredClone(approval.adjudication),
+              outcome: approval.status,
+            },
+          ]
+        : [],
+    ),
+    ...(job.hostAssistanceRequests ?? []).flatMap((request) =>
+      request.adjudication
+        ? [
+            {
+              source: "host-assistance" as const,
+              requestId: request.id,
+              ...structuredClone(request.adjudication),
+              outcome: request.status,
+            },
+          ]
+        : [],
+    ),
+  ];
 }
 
 async function applyResultToState(
@@ -536,7 +578,9 @@ export async function requestJobApproval(
     actionFingerprint: string;
     toolName: string;
     actionSummary: string;
+    trustedReadOnly?: boolean;
     decision: PolicyDecision;
+    workerAssessment?: WorkerAssessment;
     expiresAt: string;
   },
 ): Promise<ApprovalRequest> {
@@ -548,12 +592,16 @@ export async function requestJobApproval(
     actionFingerprint: input.actionFingerprint,
     toolName: input.toolName,
     actionSummary: input.actionSummary.slice(0, 2_000),
+    ...(input.trustedReadOnly ? { trustedReadOnly: true } : {}),
     decision: structuredClone(input.decision),
     status: "pending",
     requestedAt,
     expiresAt: input.expiresAt,
     notificationId: randomUUID(),
     notification: "pending",
+    ...(input.workerAssessment
+      ? { workerAssessment: structuredClone(input.workerAssessment) }
+      : {}),
   };
   await updateState(cwd, (state) => {
     const job = requireJob(state.jobs, jobId);
@@ -597,8 +645,14 @@ export async function approveJob(
   jobId: string,
   approvalId: string,
   scope: "once" | "job" = "once",
+  adjudicationInput?: unknown,
 ): Promise<{ job: JobRecord; approval: ApprovalRequest; lease: CapabilityLease }> {
   const now = new Date();
+  const request = adjudicationInput === undefined ? undefined : await readJobRequest(cwd, jobId);
+  const adjudication =
+    adjudicationInput === undefined
+      ? undefined
+      : normalizeHostAdjudicationReceipt(adjudicationInput);
   let resolvedApproval!: ApprovalRequest;
   let lease!: CapabilityLease;
   const state = await updateState(cwd, (current) => {
@@ -606,6 +660,10 @@ export async function approveJob(
     if (isTerminalJobStatus(job.status)) throw new Error(`Job is terminal: ${jobId}`);
     const approval = requireApproval(job, approvalId);
     assertApprovalPending(job, approval, now);
+    if (adjudication && request) {
+      assertHostCanAutoApproveCapability(job, request, approval, scope, adjudication);
+      approval.adjudication = structuredClone(adjudication);
+    }
     approval.status = "approved";
     approval.scope = scope;
     approval.resolvedAt = now.toISOString();
@@ -620,6 +678,8 @@ export async function approveJob(
       capabilities: [...approval.decision.capabilities],
       createdAt: now.toISOString(),
       expiresAt: approval.expiresAt,
+      principal: adjudication ? "host-model" : "user",
+      ...(adjudication ? { adjudication: structuredClone(adjudication) } : {}),
     };
     job.leases ??= [];
     job.leases.push(lease);
@@ -635,6 +695,57 @@ export async function approveJob(
   );
   await writeJson(path.join(await jobDirectory(cwd, jobId), "leases", `${lease.id}.json`), lease);
   return { job: requireJob(state.jobs, jobId), approval: resolvedApproval, lease };
+}
+
+export async function recordJobApprovalAdjudication(
+  cwd: string,
+  jobId: string,
+  approvalId: string,
+  adjudicationInput: unknown,
+): Promise<{
+  job: JobRecord;
+  approval: ApprovalRequest;
+  outcome: "ask-user" | "hard-deny";
+}> {
+  const request = await readJobRequest(cwd, jobId);
+  const adjudication = normalizeHostAdjudicationReceipt(adjudicationInput);
+  if (adjudication.decision === "allow") {
+    throw new Error("Allow adjudication must use the capability approval path");
+  }
+  const now = new Date();
+  let resolvedApproval!: ApprovalRequest;
+  const state = await updateState(cwd, (current) => {
+    const job = requireJob(current.jobs, jobId);
+    if (isTerminalJobStatus(job.status)) throw new Error(`Job is terminal: ${jobId}`);
+    const approval = requireApproval(job, approvalId);
+    assertApprovalPending(job, approval, now);
+    assertHostAdjudicationBinding(job, request, adjudication);
+    if (
+      adjudication.actionFingerprint !== approval.actionFingerprint ||
+      adjudication.actionFingerprint.length !== 64
+    ) {
+      throw new Error("Host adjudication fingerprint does not match the pending approval");
+    }
+    approval.adjudication = structuredClone(adjudication);
+    if (adjudication.decision === "hard-deny") {
+      approval.status = "denied";
+      approval.resolvedAt = now.toISOString();
+      acknowledgeApprovalNotification(job, approval, approval.resolvedAt);
+      delete job.pendingApprovalId;
+      job.status = activeWaitStatus(job);
+    }
+    job.updatedAt = now.toISOString();
+    resolvedApproval = structuredClone(approval);
+  });
+  await writeJson(
+    path.join(await jobDirectory(cwd, jobId), "approvals", `${approvalId}.json`),
+    resolvedApproval,
+  );
+  return {
+    job: requireJob(state.jobs, jobId),
+    approval: resolvedApproval,
+    outcome: adjudication.decision,
+  };
 }
 
 export async function denyJobApproval(
@@ -742,6 +853,7 @@ export async function requestJobHostAssistance(
     requestedAt,
     expiresAt: input.expiresAt,
     notificationId,
+    actionFingerprint: hostAssistanceFingerprint(input.request),
   };
   const record: HostAssistanceRecord = { ...summary, request: structuredClone(input.request) };
   const directory = path.join(await jobDirectory(cwd, jobId), "host-assistance");
@@ -836,6 +948,7 @@ export async function resolveJobHostRequest(
   jobId: string,
   requestId: string,
   response: unknown,
+  adjudicationInput?: unknown,
 ): Promise<HostAssistanceRecord> {
   const directory = path.join(await jobDirectory(cwd, jobId), "host-assistance");
   const file = await ensureHostAssistanceArtifact(path.dirname(directory), requestId);
@@ -854,6 +967,35 @@ export async function resolveJobHostRequest(
     if (!currentJob) throw new Error(`Unknown job: ${jobId}`);
     assertHostRequestPending(currentJob, requireHostRequest(currentJob, requestId));
     const record = await readRequiredJson<HostAssistanceRecord>(file);
+    const adjudication =
+      adjudicationInput === undefined
+        ? undefined
+        : normalizeHostAdjudicationReceipt(adjudicationInput);
+    if (adjudication) {
+      const jobRequest = await readJobRequest(cwd, jobId);
+      assertHostAdjudicationRequestBinding(currentJob, jobRequest, record, adjudication);
+      if (adjudication.decision === "ask-user") {
+        const updated = { ...record, adjudication: structuredClone(adjudication) };
+        await writeJson(file, updated);
+        await updateState(cwd, (state) => {
+          const job = requireJob(state.jobs, jobId);
+          const summary = requireHostRequest(job, requestId);
+          assertHostRequestPending(job, summary);
+          summary.adjudication = structuredClone(adjudication);
+          job.updatedAt = adjudication.decidedAt;
+        });
+        return structuredClone(updated);
+      }
+      if (adjudication.decision === "allow") {
+        assertHostCanAutoResolveRequest(currentJob, jobRequest, record, response, adjudication);
+      } else {
+        response = {
+          kind: "unavailable",
+          reason: "policy-denied",
+          message: adjudication.rationale,
+        };
+      }
+    }
     const normalized = normalizeHostAssistanceResponse(record, response);
     const resolvedAt = responseTimestamp(normalized);
     const updated: HostAssistanceRecord = {
@@ -862,6 +1004,7 @@ export async function resolveJobHostRequest(
       resolvedAt,
       responseHash: normalized.hash,
       response: normalized,
+      ...(adjudication ? { adjudication: structuredClone(adjudication) } : {}),
     };
     await writeJson(file, updated);
     await updateState(cwd, (state) => {
@@ -874,6 +1017,7 @@ export async function resolveJobHostRequest(
         status: updated.status,
         resolvedAt,
         responseHash: normalized.hash,
+        ...(adjudication ? { adjudication: structuredClone(adjudication) } : {}),
       });
       job.pendingHostRequestIds = (job.pendingHostRequestIds ?? []).filter(
         (id) => id !== requestId,
@@ -1297,6 +1441,235 @@ function stringList(value: unknown, limit: number): string[] {
         .slice(0, limit)
         .map((item) => item.slice(0, 4_000))
     : [];
+}
+
+export function hostAssistanceFingerprint(request: HostAssistanceRequest): string {
+  return valueHash({ kind: "host-assistance", request });
+}
+
+function normalizeHostAdjudicationReceipt(input: unknown): HostAdjudicationReceipt {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("Host adjudication receipt must be an object");
+  }
+  const value = input as Record<string, unknown>;
+  if (value.principal !== "host-model") {
+    throw new Error("Automated adjudication requires principal host-model");
+  }
+  if (value.host !== "codex" && value.host !== "claude") {
+    throw new Error("Host adjudication host is invalid");
+  }
+  if (
+    value.decision !== "allow" &&
+    value.decision !== "ask-user" &&
+    value.decision !== "hard-deny"
+  ) {
+    throw new Error("Host adjudication decision is invalid");
+  }
+  if (!["low", "medium", "high", "critical"].includes(String(value.assessedRisk))) {
+    throw new Error("Host adjudication risk is invalid");
+  }
+  const required = (field: string, limit: number): string => {
+    const candidate = value[field];
+    if (typeof candidate !== "string" || !candidate.trim()) {
+      throw new Error(`Host adjudication ${field} is required`);
+    }
+    return candidate.slice(0, limit);
+  };
+  const decidedAt = required("decidedAt", 100);
+  if (!Number.isFinite(Date.parse(decidedAt))) {
+    throw new Error("Host adjudication decidedAt is invalid");
+  }
+  return {
+    principal: "host-model",
+    host: value.host,
+    ...(typeof value.model === "string" && value.model.trim()
+      ? { model: value.model.slice(0, 500) }
+      : {}),
+    decision: value.decision,
+    assessedRisk: value.assessedRisk as HostAdjudicationReceipt["assessedRisk"],
+    rationale: required("rationale", 8_000),
+    constraints: stringList(value.constraints, 50),
+    intentMatch: value.intentMatch === true,
+    actionFingerprint: required("actionFingerprint", 200),
+    policyHash: required("policyHash", 200),
+    autoResolved: value.autoResolved === true,
+    decidedAt,
+  };
+}
+
+function assertHostAdjudicationBinding(
+  job: JobRecord,
+  request: JobRequest,
+  receipt: HostAdjudicationReceipt,
+): asserts request is JobRequest & { policySnapshot: Extract<PolicySnapshot, { version: 3 }> } {
+  const snapshot = request.policySnapshot;
+  if (snapshot?.version !== 3) throw new Error("Host-first review requires a v3 policy snapshot");
+  if ((snapshot.hostAssistance.reviewMode ?? "user-only") !== "host-first") {
+    throw new Error("Host-first review is disabled for this snapshotted Job");
+  }
+  if (receipt.host !== request.host || receipt.host !== job.host) {
+    throw new Error("Host adjudication identity does not match the Job");
+  }
+  if (receipt.policyHash !== snapshot.hash || receipt.policyHash !== job.policyHash) {
+    throw new Error("Host adjudication policy hash does not match the Job snapshot");
+  }
+  if (receipt.decision === "ask-user" && receipt.autoResolved) {
+    throw new Error("An ask-user adjudication cannot be marked auto-resolved");
+  }
+  if (receipt.decision === "hard-deny" && !receipt.autoResolved) {
+    throw new Error("A hard-deny adjudication must be marked auto-resolved");
+  }
+}
+
+function assertHostAutoAllow(
+  job: JobRecord,
+  request: JobRequest,
+  receipt: HostAdjudicationReceipt,
+): asserts request is JobRequest & { policySnapshot: Extract<PolicySnapshot, { version: 3 }> } {
+  assertHostAdjudicationBinding(job, request, receipt);
+  if (request.policySnapshot.sandboxMode === "strict" || job.sandboxMode === "strict") {
+    throw new Error("Strict mode cannot be expanded through Host auto-approval");
+  }
+  if (
+    receipt.decision !== "allow" ||
+    !receipt.autoResolved ||
+    !receipt.intentMatch ||
+    (receipt.assessedRisk !== "low" && receipt.assessedRisk !== "medium")
+  ) {
+    throw new Error("Host adjudication must be a confident low/medium-risk allow decision");
+  }
+}
+
+function assertWorkerAssessmentComplete(assessment: WorkerAssessment | undefined): void {
+  if (
+    !assessment ||
+    !assessment.purpose.trim() ||
+    !assessment.blockedBy.trim() ||
+    assessment.minimumAccess.length === 0 ||
+    assessment.targets.length === 0 ||
+    assessment.failureModes.length === 0 ||
+    assessment.mitigations.length === 0 ||
+    !assessment.rollback.trim() ||
+    assessment.verification.length === 0 ||
+    !assessment.fallback.trim()
+  ) {
+    throw new Error("Host auto-approval requires a complete WorkerAssessment");
+  }
+}
+
+function assertHostCanAutoApproveCapability(
+  job: JobRecord,
+  request: JobRequest,
+  approval: ApprovalRequest,
+  scope: "once" | "job",
+  receipt: HostAdjudicationReceipt,
+): void {
+  assertHostAutoAllow(job, request, receipt);
+  if (scope !== "once") throw new Error("Host-model leases are limited to one exact action");
+  if (
+    receipt.actionFingerprint !== approval.actionFingerprint ||
+    receipt.actionFingerprint.length !== 64
+  ) {
+    throw new Error("Host adjudication fingerprint does not match the pending approval");
+  }
+  assertWorkerAssessmentComplete(approval.workerAssessment);
+  const policy = request.policySnapshot.hostAssistance;
+  const autoScope = policy.autoApprovalScope ?? "context-only";
+  if (autoScope === "context-only") {
+    throw new Error("This Job permits Host auto-review for context only");
+  }
+  const capabilities = approval.decision.capabilities;
+  const readOnly =
+    capabilities.every(
+      (capability) => capability === "filesystem.read-workspace" || capability === "git.read",
+    ) ||
+    (approval.trustedReadOnly === true &&
+      approval.toolName === "bash" &&
+      capabilities.length === 1 &&
+      capabilities[0] === "shell.execute");
+  if (autoScope === "read-only" && !readOnly) {
+    throw new Error("This Job permits only read-only Host auto-approval");
+  }
+  const assessment = approval.workerAssessment!;
+  if (!readOnly) {
+    const mutationIntent =
+      request.kind === "implement" ||
+      request.kind === "setup" ||
+      request.kind === "scaffold" ||
+      (request.kind === "discover" && job.internalStage === "experiment");
+    if (!mutationIntent) throw new Error("The original Job has no mutation intent");
+    if (assessment.reversibility !== "reversible") {
+      throw new Error("Only fully reversible mutations may be auto-approved");
+    }
+  }
+  if (
+    approval.toolName === "role-escalation" ||
+    approval.toolName === "host-context-egress" ||
+    /(?:^|[\\/])\.git(?:[\\/]|$)|\b(?:rm|rmdir|unlink|git\s+(?:add|commit|merge|push|reset)|deploy|publish|transaction)\b/i.test(
+      approval.actionSummary,
+    )
+  ) {
+    throw new Error("The requested capability is outside the Host auto-approval ceiling");
+  }
+  for (const target of assessment.targets) {
+    if (/(?:^|[\\/])\.git(?:[\\/]|$)/.test(target)) {
+      throw new Error("Host auto-approval cannot target Git metadata");
+    }
+    if (path.isAbsolute(target)) {
+      const relative = path.relative(request.cwd, target);
+      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error("Host auto-approval target escapes the snapshotted workspace");
+      }
+    }
+  }
+}
+
+function assertHostAdjudicationRequestBinding(
+  job: JobRecord,
+  request: JobRequest,
+  record: HostAssistanceRecord,
+  receipt: HostAdjudicationReceipt,
+): void {
+  assertHostAdjudicationBinding(job, request, receipt);
+  const fingerprint = record.actionFingerprint ?? hostAssistanceFingerprint(record.request);
+  if (receipt.actionFingerprint !== fingerprint || receipt.actionFingerprint.length !== 64) {
+    throw new Error("Host adjudication fingerprint does not match the assistance request");
+  }
+}
+
+function assertHostCanAutoResolveRequest(
+  job: JobRecord,
+  request: JobRequest,
+  record: HostAssistanceRecord,
+  response: unknown,
+  receipt: HostAdjudicationReceipt,
+): void {
+  assertHostAutoAllow(job, request, receipt);
+  assertHostAdjudicationRequestBinding(job, request, record, receipt);
+  assertWorkerAssessmentComplete(record.request.workerAssessment);
+  if (record.request.kind === "action-recommendation") {
+    throw new Error("Action recommendations always require a user decision");
+  }
+  if (record.request.kind === "context") {
+    if (
+      record.request.contextClass === "connector" ||
+      record.request.dataClassification === "private" ||
+      record.request.dataClassification === "secret"
+    ) {
+      throw new Error("Private or connector context always requires a user decision");
+    }
+    return;
+  }
+  if (
+    request.policySnapshot.hostAssistance.autoApproveDiscoveryGates !== true ||
+    !record.perspective?.startsWith("discovery:")
+  ) {
+    throw new Error("Only snapshotted Discovery gates may be auto-decided");
+  }
+  const value = response as Record<string, unknown> | null;
+  if (!value || typeof value.decision !== "string" || value.decision.toLowerCase() !== "approve") {
+    throw new Error("Automated Discovery gate decisions may only approve a valid bounded gate");
+  }
 }
 
 function valueHash(value: unknown): string {

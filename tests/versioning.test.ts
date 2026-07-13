@@ -8,6 +8,17 @@ import test from "node:test";
 const repoRoot = process.cwd();
 const script = path.join(repoRoot, "scripts/plugin-version.mjs");
 const pluginName = "swarm-pi-code-plugin";
+const currentVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"))
+  .version as string;
+const currentVersionMatch = /^(\d+)\.(\d+)\.(\d+)$/.exec(currentVersion);
+if (!currentVersionMatch) throw new Error(`Test fixture requires stable SemVer: ${currentVersion}`);
+const currentMajor = Number(currentVersionMatch[1]);
+const currentMinor = Number(currentVersionMatch[2]);
+const currentPatch = Number(currentVersionMatch[3]);
+const expectedPatch = `${currentMajor}.${currentMinor}.${currentPatch + 1}`;
+const expectedMinor = `${currentMajor}.${currentMinor + 1}.0`;
+const expectedMajor = `${currentMajor + 1}.0.0`;
+const expectedExact = `${currentMajor + 2}.2.3`;
 const versionFiles = [
   "package.json",
   "package-lock.json",
@@ -19,10 +30,10 @@ const versionFiles = [
 ];
 
 for (const [target, expected] of [
-  ["patch", "0.6.1"],
-  ["minor", "0.7.0"],
-  ["major", "1.0.0"],
-  ["1.2.3", "1.2.3"],
+  ["patch", expectedPatch],
+  ["minor", expectedMinor],
+  ["major", expectedMajor],
+  [expectedExact, expectedExact],
 ] as const) {
   test(`version bump ${target} synchronizes every version source`, (context) => {
     const fixture = createFixture(context, { marketplacePluginIndex: 1 });
@@ -41,7 +52,7 @@ test("version dry-run reports the plan without modifying files", (context) => {
   const output = run(fixture, ["bump", "--reinstall", "patch", "--dry-run"]);
 
   assert.match(output, /Version bump dry run:/);
-  assert.match(output, /next: 0\.6\.1/);
+  assert.match(output, new RegExp(`next: ${expectedPatch.replaceAll(".", "\\.")}`));
   assert.deepEqual(snapshot(fixture), before);
 });
 
@@ -145,7 +156,7 @@ test("installed version check reports a stale Claude plugin", (context) => {
   assert.match(result.stderr, /Claude Code plugin is stale/);
 });
 
-for (const target of ["1.2", "v1.2.3", "1.2.3-beta.1", "0.6.0", "0.5.9"]) {
+for (const target of ["1.2", "v1.2.3", "1.2.3-beta.1", currentVersion, "0.0.0"]) {
   test(`version bump rejects ${target}`, (context) => {
     const fixture = createFixture(context);
     const before = snapshot(fixture);
@@ -161,7 +172,10 @@ test("version bump replaces one Codex cachebuster suffix", (context) => {
   run(fixture, ["bump", "patch"]);
   const manifest = readJson(fixture, "plugins/swarm-pi-code-plugin/.codex-plugin/plugin.json");
 
-  assert.match(manifest.version as string, /^0\.6\.1\+codex\.\d{14}$/);
+  assert.match(
+    manifest.version as string,
+    new RegExp(`^${expectedPatch.replaceAll(".", "\\.")}\\+codex\\.\\d{14}$`),
+  );
   assert.equal((manifest.version as string).match(/\+codex\./g)?.length, 1);
 });
 
@@ -186,7 +200,7 @@ test("version bump reinstalls the local Codex plugin before and after writing", 
     "plugin remove swarm-pi-code-plugin@swarm-pi-code-plugin-local",
     "plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local",
   ]);
-  assertVersionState(fixture, "0.6.1");
+  assertVersionState(fixture, expectedPatch);
 });
 
 test("post-write validation failure restores every original file", (context) => {

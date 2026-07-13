@@ -49,7 +49,7 @@ are recorded because Pi clamps thinking to model capabilities. Model fallback
 handles provider or model failure only and never bypasses a policy decision.
 
 `review-coordinator` is excluded from public `--role` selection, but version
-0.5.0 does not yet start a coordinator session or produce a dynamic
+The runtime does not yet start a coordinator session or produce a dynamic
 `ReviewPlan`. `orchestrate` uses a bounded fixed set of perspectives: Cost
 selects one, Balance two, and Power three. All selected perspectives are
 read-only. Any failed perspective currently fails the whole orchestration
@@ -118,8 +118,16 @@ edits affect only subsequently submitted jobs. The worker prompt includes the
 project goal and canonical rendered policy text, but enforcement never depends
 on model compliance with that prompt.
 
+New configuration uses Adaptive mode. Explicitly stored modes remain unchanged,
+and a legacy configuration with no mode stays Strict. New Host Assistance
+policy defaults to Host-first/Reversible with Discovery gate review; missing
+fields in a legacy saved policy remain User-only/Context-only with gate review
+off. These compatibility rules are applied before the immutable Job snapshot is
+created and never rewrite an existing Job.
+
 Decision Mode does not compile all review and context limits into a preset in
-0.5.0. It changes bounded orchestration depth and some decision-attempt limits;
+the current runtime. It changes bounded orchestration depth and some
+decision-attempt limits;
 Host Assistance, context budget, and Advisor quotas remain independent fields.
 The optional `first-principles-qds-v1` doctrine is snapshotted but is not yet
 executed by the runner. It is metadata, not an active gate.
@@ -166,7 +174,9 @@ violating paths, `policyHash`, `scopeHash`, and safe next actions.
 
 Policy-engine decisions are appended to the job's `policy-events.jsonl`.
 Scoped-tool `ProjectPolicyError` denials are also recorded there and increment
-`policySummary.denied`. The audit export includes `policy-events.jsonl`.
+`policySummary.denied`. The audit export includes `policy-events.jsonl`, full
+redacted Host Assistance records and WorkerAssessments, approval receipts, and
+lease principals/constraints.
 Postflight failure is reported in the terminal result and is not necessarily a
 separate policy event.
 
@@ -211,6 +221,14 @@ address. Loopback, private networks, cloud metadata, local binding, and Unix
 sockets remain hard-denied. Adaptive Bash calls are serialized within the
 worker because the sandbox runtime owns process-global state.
 
+Discover never holds that process-global manager across its whole workflow.
+Research owns a read-only stage manager and disposes it before gate waiting;
+the isolated Experiment child owns the next manager and reuses the parent's
+Adaptive network authorizer; Convergence and each Advisor tool stage create
+fresh read-only managers. Every path disposes in `finally`, so success, error,
+cancellation, and timeout preserve the one-live-manager invariant. A failed
+Experiment worktree remains durable until explicit cleanup.
+
 ## Classifier Boundary
 
 The classifier is an internal Pi completion with no tools or extensions. It
@@ -243,21 +261,35 @@ supervised even though the worker is detached from the initiating process, and
 the Host regains control within 15 seconds. Hosts use bounded waits and inspect
 the durable job phase; a detached Host relay is not reported as Pi background
 execution. `jobs watch --emit ndjson` replays allowlisted events for recovery,
-but it never auto-approves or acknowledges a notification.
+but it never writes a receipt, approves, denies, responds, issues a lease, or
+acknowledges a notification.
 
 The same managed relay is enabled when effective Host Assistance is active.
 `jobs wait` may return `host-assistance-required` or
 `human-decision-required`. Responses are fenced by Job, generation, session,
-attempt, optional perspective, and request ID. Only the first valid response
-can be consumed by the live session. Secret egress is denied; connector and
-non-public egress requests can enter the normal approval path. See
+attempt, optional perspective, and request ID. New Worker requests carry a
+complete WorkerAssessment, while legacy persisted requests remain readable.
+The active Host model reads the full request and `adjudicationContext`, then
+independently checks intent, role, roots, deny rules, action fingerprint,
+policy hash, reversibility, rollback, and verification. A valid allow receipt
+creates only one exact lease; an `ask-user` receipt leaves the request pending;
+a `hard-deny` receipt resolves it without a lease. Only the first valid
+response can be consumed by the live session. Secret egress is denied;
+connector and non-public egress always require the user or are denied. See
 [Host Assistance, Discovery, and Host Actions](host-assistance-discovery.md).
+
+Strict cannot be expanded by a Host receipt. Host auto-allow is limited to
+low/medium-risk public/read-only context or fully reversible in-scope changes
+already authorized by the original task. Git metadata, workspace escape,
+deletion, partial/irreversible changes, action recommendations, role escalation,
+adoption, materialization, delivery, deployment, publication, messaging,
+transactions, and uncertain live services stay outside the ceiling.
 
 ## Verification Boundaries
 
 Project scope, postflight changed-path validation, schema validation, hashes,
 and artifact/materialization checks are deterministic control-plane evidence.
-The implementation verifier in 0.5.0 is a separate strict read-only Pi review:
+The implementation verifier is a separate strict read-only Pi review:
 it is instructed not to run shell and classifies its response as verified,
 refuted, or inconclusive. It is useful semantic review, not a trusted
 command-running verification pipeline.
