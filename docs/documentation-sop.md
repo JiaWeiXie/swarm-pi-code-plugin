@@ -88,14 +88,59 @@ only usable connections.
 
 ## 5. Validate Before Commit
 
+The repository includes an AI-oriented documentation impact checker:
+
+```bash
+mise run docs-check
+mise run docs-check-staged
+mise run docs-check-ci -- --base <sha> --head <sha>
+```
+
+Functional changes require both README files. Configuration Web changes also
+require the Configuration reference and the current Web implementation; visual
+changes in `src/web/ui.ts` require a current setup screenshot or an explicit,
+reasoned `Screenshot-Impact: reviewed-current` declaration. The checker reads
+inline Markdown images, reference-style images, and HTML `img` sources, while
+ignoring remote and data URLs. It rejects broken local references and
+repository-escaping paths.
+
+The pre-commit hook is advisory for humans. AI agents must treat a failed
+`docs:check` report as unfinished work. CI uses explicit base/head revisions and
+blocks high-confidence missing obligations on pull requests. A declaration is
+valid only with a meaningful reason and must be preserved on the pull request's
+head commit; it cannot hide a broken image reference.
+
+The six current screenshots can be regenerated from the fictional fixture:
+
+```bash
+mise run docs-screenshots-install
+mise run docs-screenshots
+mise run docs-screenshots-validate
+```
+
+The generator uses a fixed 1440x1000 Chromium headless context, UTC, English,
+light mode, reduced motion, and one sequential browser session. It never reads
+real credentials or project state. The generated images are evidence of the
+current UI, not proof that every visual pixel is platform-independent.
+
 Run the checks that match the changed surface:
 
 ```bash
-npm run check
-npm run lint
-npm run fmt:check
+mise run check
+mise run lint
+mise run fmt-check
+mise run version-check
+mise run version-check-installed
 claude plugin validate plugins/swarm-pi-code-plugin
 ```
+
+`mise run version-check` validates the repository's synchronized version sources.
+`mise run version-check-installed` additionally compares the installed Claude
+Code and Codex plugin records with the repository, verifies that the local
+Codex source is correct and enabled, and rejects a Claude manifest that declares
+the automatically loaded `hooks/hooks.json`. Use `mise run version-bump -- patch`
+for releases; it reinstalls the local Codex plugin before and after writing the
+new version so the new Codex manifest value is loaded.
 
 When a documentation change mentions plugin commands, skills, manifests, or
 packaged runtime behavior, also run the plugin package validator. When it
@@ -109,7 +154,7 @@ reader's eye: the README should remain a usable guide rather than a changelog.
 
 For Codex skills, run the installed `quick_validate.py` from the skill-creator
 package against every changed skill. When source or packaged runtime behavior
-is mentioned, `npm run check:runtime-parity` is mandatory.
+is mentioned, `mise run check-runtime-parity` is mandatory.
 
 ## 6. Maintain Research Separately
 

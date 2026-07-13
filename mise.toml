@@ -38,6 +38,54 @@ run = "npm run fmt:check"
 description = "Compile the runner and library"
 run = "npm run build"
 
+[tasks.docs-check]
+description = "Check documentation obligations for the current worktree"
+run = "node scripts/check-documentation-impact.mjs worktree"
+
+[tasks.docs-check-staged]
+description = "Check documentation obligations for staged changes"
+run = "node scripts/check-documentation-impact.mjs staged"
+
+[tasks.docs-check-ci]
+description = "Check documentation obligations for an explicit CI revision range"
+run = "node scripts/check-documentation-impact.mjs ci"
+
+[tasks.docs-screenshots-install]
+description = "Install the pinned Chromium headless shell"
+run = "npm exec -- playwright install --only-shell chromium"
+
+[tasks.docs-screenshots]
+description = "Generate the six documentation screenshots"
+run = "npm run docs:screenshots"
+
+[tasks.docs-screenshots-validate]
+description = "Validate documentation screenshot dimensions and inventory"
+run = "node scripts/validate-doc-screenshots.mjs"
+
+[tasks.hooks-install]
+description = "Enable repository-local Git hooks"
+run = "node scripts/install-git-hooks.mjs"
+
+[tasks.hooks-uninstall]
+description = "Disable repository-local Git hooks"
+run = "node scripts/install-git-hooks.mjs --uninstall"
+
+[tasks.version-check]
+description = "Check synchronized plugin versions"
+run = "node scripts/plugin-version.mjs check"
+
+[tasks.version-check-installed]
+description = "Check installed Claude Code and Codex plugin versions"
+run = "node scripts/plugin-version.mjs check --installed"
+
+[tasks.version-bump]
+description = "Reinstall local Codex, then bump and synchronize plugin versions"
+run = "node scripts/plugin-version.mjs bump --reinstall"
+
+[tasks.check-runtime-parity]
+description = "Check generated plugin runtime parity"
+run = "node scripts/check-runtime-parity.mjs"
+
 [tasks.check]
 description = "Run all project quality gates"
 run = "npm run check"

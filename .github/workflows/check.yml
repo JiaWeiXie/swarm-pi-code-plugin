@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: Install mise and project tools
         uses: jdx/mise-action@v4.2.0
@@ -27,8 +29,51 @@ jobs:
           version: 2026.6.3
           cache: true
 
+      - name: Check plugin version consistency
+        run: npm run version:check
+
       - name: Install locked dependencies
         run: npm ci
+
+      - name: Check documentation impact
+        id: docs-impact
+        continue-on-error: true
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$BASE_SHA"
+            head="$HEAD_SHA"
+          else
+            base="$BEFORE_SHA"
+            head="$CURRENT_SHA"
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+              base="$(git hash-object -t tree /dev/null)"
+            fi
+          fi
+          set +e
+          npm run --silent docs:check:ci -- --base "$base" --head "$head" --format json > "$RUNNER_TEMP/docs-impact.json"
+          status=$?
+          cat "$RUNNER_TEMP/docs-impact.json"
+          node -e 'const fs=require("node:fs"); const r=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/docs-impact.json","utf8")); fs.appendFileSync(process.env.GITHUB_OUTPUT, `result=${r.result}\nscreenshots_required=${r.screenshotsRequired}\n`);'
+          exit "$status"
+
+      - name: Generate documentation screenshot smoke set
+        if: steps.docs-impact.outputs.screenshots_required == 'true'
+        run: |
+          npm run docs:screenshots:install:ci
+          npm run docs:screenshots -- --output "$RUNNER_TEMP/doc-screenshots"
+          npm run docs:screenshots:validate -- --directory "$RUNNER_TEMP/doc-screenshots"
+
+      - name: Enforce documentation impact on pull requests
+        if: github.event_name == 'pull_request' && steps.docs-impact.outputs.result == 'fail'
+        run: |
+          echo "Documentation impact obligations are missing. See the JSON report above."
+          exit 1
 
       - name: Run quality checks
         run: mise run check

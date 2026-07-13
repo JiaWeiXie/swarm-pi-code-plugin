@@ -68,20 +68,20 @@ remain responsible for verification, commits, pushes, and delivery decisions.
 The runner accepts these public command surfaces:
 
 ```text
-node scripts/pi-runner.mjs init --host <claude|codex> --json
-node scripts/pi-runner.mjs models --json
-node scripts/pi-runner.mjs providers --json
-node scripts/pi-runner.mjs configure --host <host> [--section project] [--no-open]
-node scripts/pi-runner.mjs ask --host <host> --prompt-file <file> --json
-node scripts/pi-runner.mjs review --host <host> [--base <ref>] [--scope <scope>] --json
-node scripts/pi-runner.mjs plan --host <host> --prompt-file <file> [--discovery-from <job-id>] --json
-node scripts/pi-runner.mjs implement --host <host> --prompt-file <file> --json
-node scripts/pi-runner.mjs orchestrate --host <host> --prompt-file <file> --json
-node scripts/pi-runner.mjs discover --host <host> --prompt-file <file> --json
-node scripts/pi-runner.mjs roles list --json
-node scripts/pi-runner.mjs status|doctor|resume [options] --json
-node scripts/pi-runner.mjs scaffold|setup --host <claude|codex> [options] --json
-node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|approvals|approve|deny|host-requests|host-respond|host-decline|decisions|decide|action-start|cleanup|materialize|export> [options] --json
+mise exec -- node scripts/pi-runner.mjs init --host <claude|codex> --json
+mise exec -- node scripts/pi-runner.mjs models --json
+mise exec -- node scripts/pi-runner.mjs providers --json
+mise exec -- node scripts/pi-runner.mjs configure --host <host> [--section project] [--no-open]
+mise exec -- node scripts/pi-runner.mjs ask --host <host> --prompt-file <file> --json
+mise exec -- node scripts/pi-runner.mjs review --host <host> [--base <ref>] [--scope <scope>] --json
+mise exec -- node scripts/pi-runner.mjs plan --host <host> --prompt-file <file> [--discovery-from <job-id>] --json
+mise exec -- node scripts/pi-runner.mjs implement --host <host> --prompt-file <file> --json
+mise exec -- node scripts/pi-runner.mjs orchestrate --host <host> --prompt-file <file> --json
+mise exec -- node scripts/pi-runner.mjs discover --host <host> --prompt-file <file> --json
+mise exec -- node scripts/pi-runner.mjs roles list --json
+mise exec -- node scripts/pi-runner.mjs status|doctor|resume [options] --json
+mise exec -- node scripts/pi-runner.mjs scaffold|setup --host <claude|codex> [options] --json
+mise exec -- node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|approvals|approve|deny|host-requests|host-respond|host-decline|decisions|decide|action-start|cleanup|materialize|export> [options] --json
 ```
 
 Every worker result includes the task kind, status, success flag, selected

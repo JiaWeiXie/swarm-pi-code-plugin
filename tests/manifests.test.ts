@@ -95,6 +95,20 @@ test("plugin package contains both host adapters and a self-contained runner", (
   );
   assert.match(orchestration, /EvidencePack/);
   assert.match(orchestration, /source job ID/i);
+  assert.match(
+    orchestration,
+    /must not independently repeat expensive full builds or test suites/i,
+  );
+  assert.match(orchestration, /resource-aware bounded verification/i);
+
+  for (const skill of ["implement", "setup", "scaffold", "discover"]) {
+    const source = fs.readFileSync(
+      path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
+      "utf8",
+    );
+    assert.match(source, /resource-aware/i, `missing resource-aware guidance: ${skill}`);
+    assert.match(source, /sequential/i, `missing sequential execution guidance: ${skill}`);
+  }
 
   for (const skill of ["ask", "review", "plan", "implement", "orchestrate"]) {
     const source = fs.readFileSync(
@@ -127,6 +141,16 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(protocol, /wait-timeout-ms 15000/);
   assert.match(protocol, /Host Assistance and Discovery/);
   assert.match(protocol, /UNTRUSTED_HOST_CONTEXT/);
+  assert.match(protocol, /Resource-Aware Command Execution/i);
+  assert.match(protocol, /commands, not as a limit on Pi sessions or orchestration perspectives/i);
+  assert.match(
+    protocol,
+    /do not let separate sessions or perspectives duplicate the same full build or test suite/i,
+  );
+  assert.match(
+    protocol,
+    /adds no capability approval, resource lease, runtime classifier, or hard execution gate/i,
+  );
 
   const workerAgent = fs.readFileSync(path.join(pluginRoot, "agents/pi-worker.md"), "utf8");
   assert.match(workerAgent, /swarm-pi-orchestrate/);
@@ -162,6 +186,8 @@ test("plugin package contains both host adapters and a self-contained runner", (
 });
 
 test("repo marketplaces point at the shared plugin root", () => {
+  const packageManifest = readJson("package.json");
+  const version = packageManifest.version as string;
   const claude = readJson(".claude-plugin/marketplace.json") as {
     name: string;
     metadata: { version: string };
@@ -175,8 +201,8 @@ test("repo marketplaces point at the shared plugin root", () => {
   assert.equal(claude.name, "swarm-pi-code-plugin");
   assert.equal(claude.plugins[0]?.name, "swarm-pi-code-plugin");
   assert.equal(claude.plugins[0]?.source, "./plugins/swarm-pi-code-plugin");
-  assert.equal(claude.metadata.version, "0.6.0");
-  assert.equal(claude.plugins[0]?.version, "0.6.0");
+  assert.equal(claude.metadata.version, version);
+  assert.equal(claude.plugins[0]?.version, version);
   assert.equal(codex.name, "swarm-pi-code-plugin-local");
   assert.equal(codex.plugins[0]?.name, "swarm-pi-code-plugin");
   assert.equal(codex.plugins[0]?.source.path, "./plugins/swarm-pi-code-plugin");

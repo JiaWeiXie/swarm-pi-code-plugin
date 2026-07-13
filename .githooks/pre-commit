@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set +e
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$repo_root" ]; then
+  exit 0
+fi
+
+node "$repo_root/scripts/check-documentation-impact.mjs" staged
+status=$?
+if [ "$status" -ne 0 ]; then
+  printf '%s\n' "Documentation-impact reminder: this commit was not blocked; AI agents and CI must resolve the report." >&2
+fi
+exit 0

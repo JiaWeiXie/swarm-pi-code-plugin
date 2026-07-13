@@ -11,7 +11,8 @@ import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { getProviderDefinition } from "../src/providers/capabilities.js";
 import { CredentialDraftVault } from "../src/providers/credentials.js";
 import { compileEffectiveProjectPolicy } from "../src/policy/project-policy.js";
-import { loadState, resolveStateFile } from "../src/state/state.js";
+import { createModelCatalog, modelId } from "../src/pi/models.js";
+import { loadState, resolveStateFile, updateState } from "../src/state/state.js";
 import {
   defaultModelConfiguration,
   resolveModelConfigurationFile,
@@ -119,6 +120,15 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   assert.match(html, /id="host-assistance-mode"/);
   assert.match(html, /id="advisor-enabled"/);
   assert.match(html, /id="host-actions-enabled"/);
+  assert.match(html, /<option>max<\/option>/);
+  assert.match(html, /\["off","minimal","low","medium","high","xhigh","max"\]/);
+  assert.match(html, /id="host-max-requests" type="number" min="0" max="6"/);
+  assert.match(html, /id="host-max-fanout" type="number" min="0" max="3"/);
+  assert.match(html, /id="advisor-max-requests" type="number" min="0" max="3"/);
+  assert.match(html, /id="advisor-max-perspectives" type="number" min="0" max="4"/);
+  assert.match(html, /draft\.baseRevision === bootRevision/);
+  assert.match(html, /baseRevision:bootRevision/);
+  assert.match(html, /Saved model unavailable/);
   assert.match(html, /class="brand-logo"/);
   assert.match(html, />Close setup</);
   assert.match(html, /id="closed-screen"/);
@@ -139,6 +149,42 @@ test("configuration page starts from connections and uses the original Swarm Pi 
 
   const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
   assert.doesNotThrow(() => new Function(scripts.at(-1)?.[1] ?? ""));
+});
+
+test("configuration view retains models referenced only by saved role and classifier policies", async () => {
+  const { workspace, env } = fixture();
+  const configuration = defaultModelConfiguration();
+  const catalog = createModelCatalog(configuration, env);
+  const available = new Set(catalog.available().map(modelId));
+  const unavailable = catalog.all?.().find((model) => !available.has(modelId(model)));
+  assert.ok(unavailable, "the pinned Pi catalog should expose an unavailable model");
+  const selected = modelId(unavailable);
+
+  await updateState(workspace, (state) => {
+    state.config.rolePolicies = { planner: { models: [selected], thinkingLevel: "max" } };
+    state.config.adaptivePolicy = {
+      classifierModels: [selected],
+      classifierThinkingLevel: "max",
+      approvalPolicy: "deny",
+      trustedDomains: [],
+      rules: [],
+      diagnostics: false,
+    };
+  });
+
+  const first = await loadConfigurationView(workspace, env);
+  assert.equal(first.models.find((model) => model.id === selected)?.available, false);
+  assert.equal(first.rolePolicies?.planner?.models?.[0], selected);
+  assert.equal(first.rolePolicies?.planner?.thinkingLevel, "max");
+  assert.deepEqual(first.adaptivePolicy?.classifierModels, [selected]);
+  assert.equal(first.adaptivePolicy?.classifierThinkingLevel, "max");
+  assert.match(first.configurationRevision ?? "", /^[a-f0-9]{24}$/);
+
+  await updateState(workspace, (state) => {
+    state.config.rolePolicies = { planner: { models: [selected], thinkingLevel: "high" } };
+  });
+  const second = await loadConfigurationView(workspace, env);
+  assert.notEqual(second.configurationRevision, first.configurationRevision);
 });
 
 test("project-only page starts from the guided project setup", () => {

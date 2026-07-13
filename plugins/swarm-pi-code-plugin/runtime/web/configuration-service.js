@@ -312,7 +312,14 @@ export async function loadConfigurationView(cwd, env = process.env) {
     const all = catalog.all?.() ?? catalog.available();
     const availableModels = catalog.available();
     const available = new Set(availableModels.map(modelId));
-    const selected = new Set(modelPriority(configuration));
+    const rolePolicies = structuredClone(state.config.rolePolicies ?? {});
+    const adaptivePolicy = normalizeAdaptivePolicy(state.config.adaptivePolicy);
+    const backgroundRolePolicy = structuredClone(state.config.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY);
+    const selected = new Set([
+        ...modelPriority(configuration),
+        ...Object.values(rolePolicies).flatMap((policy) => policy.models ?? []),
+        ...adaptivePolicy.classifierModels,
+    ]);
     const custom = new Set(configuration.customProviders.map((provider) => provider.id));
     const relevant = all.filter((model) => available.has(modelId(model)) || selected.has(modelId(model)) || custom.has(model.provider));
     const providerIds = [...new Set(all.map((model) => model.provider))];
@@ -345,13 +352,31 @@ export async function loadConfigurationView(cwd, env = process.env) {
         registryError: registryProblems.length ? registryProblems.join("\n") : null,
         sandboxMode: state.config.sandboxMode ?? "strict",
         sandboxAvailability: detectSandboxAvailability(),
-        rolePolicies: structuredClone(state.config.rolePolicies ?? {}),
-        adaptivePolicy: normalizeAdaptivePolicy(state.config.adaptivePolicy),
-        backgroundRolePolicy: structuredClone(state.config.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY),
+        rolePolicies,
+        adaptivePolicy,
+        backgroundRolePolicy,
         roles: listDefaultRoles(),
         workspace: await assessWorkspace(cwd),
         workspaceId: createHash("sha256")
             .update(await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd)))
+            .digest("hex")
+            .slice(0, 24),
+        configurationRevision: createHash("sha256")
+            .update(JSON.stringify({
+            primary: configuration.primary,
+            fallbacks: configuration.fallbacks,
+            profile: state.config.profile ?? null,
+            sandboxMode: state.config.sandboxMode ?? "strict",
+            rolePolicies,
+            adaptivePolicy,
+            backgroundRolePolicy,
+            decisionMode: state.config.decisionMode ?? "balance",
+            hostAssistance: state.config.hostAssistance ?? defaultHostAssistancePolicy(),
+            contextBudget: state.config.contextBudget ?? 4,
+            advisor: state.config.advisor ?? defaultAdvisorPolicy(),
+            doctrine: state.config.doctrine ?? null,
+            hostActions: state.config.hostActions ?? defaultHostActionPolicy(),
+        }))
             .digest("hex")
             .slice(0, 24),
         decisionMode: state.config.decisionMode ?? "balance",

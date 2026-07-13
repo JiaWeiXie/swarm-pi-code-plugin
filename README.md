@@ -251,22 +251,22 @@ for the technical contract.
 The shared runner is useful for automation and host integration:
 
 ```bash
-node scripts/pi-runner.mjs models --json
-node scripts/pi-runner.mjs providers --json
-node scripts/pi-runner.mjs configure --host codex --section project --no-open
-node scripts/pi-runner.mjs init --json
-node scripts/pi-runner.mjs status --json
-node scripts/pi-runner.mjs doctor --smoke-test --json
-node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/question.md --json
-node scripts/pi-runner.mjs review --host codex --scope working-tree --json
-node scripts/pi-runner.mjs plan --host codex --prompt-file /path/to/plan.md --json
-node scripts/pi-runner.mjs implement --host codex --prompt-file /path/to/task.md --json
-node scripts/pi-runner.mjs orchestrate --host codex --prompt-file /path/to/task.md --json
-node scripts/pi-runner.mjs discover --host codex --prompt-file /path/to/discovery.md --json
-node scripts/pi-runner.mjs plan --host codex --prompt-file /path/to/plan.md --discovery-from <job-id> --json
-node scripts/pi-runner.mjs scaffold --host codex --spec-file /path/to/scaffold.json --target /path/to/new-project --json
-node scripts/pi-runner.mjs setup --host codex --prompt-file /path/to/setup.md --json
-node scripts/pi-runner.mjs roles list --json
+mise exec -- node scripts/pi-runner.mjs models --json
+mise exec -- node scripts/pi-runner.mjs providers --json
+mise exec -- node scripts/pi-runner.mjs configure --host codex --section project --no-open
+mise exec -- node scripts/pi-runner.mjs init --json
+mise exec -- node scripts/pi-runner.mjs status --json
+mise exec -- node scripts/pi-runner.mjs doctor --smoke-test --json
+mise exec -- node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/question.md --json
+mise exec -- node scripts/pi-runner.mjs review --host codex --scope working-tree --json
+mise exec -- node scripts/pi-runner.mjs plan --host codex --prompt-file /path/to/plan.md --json
+mise exec -- node scripts/pi-runner.mjs implement --host codex --prompt-file /path/to/task.md --json
+mise exec -- node scripts/pi-runner.mjs orchestrate --host codex --prompt-file /path/to/task.md --json
+mise exec -- node scripts/pi-runner.mjs discover --host codex --prompt-file /path/to/discovery.md --json
+mise exec -- node scripts/pi-runner.mjs plan --host codex --prompt-file /path/to/plan.md --discovery-from <job-id> --json
+mise exec -- node scripts/pi-runner.mjs scaffold --host codex --spec-file /path/to/scaffold.json --target /path/to/new-project --json
+mise exec -- node scripts/pi-runner.mjs setup --host codex --prompt-file /path/to/setup.md --json
+mise exec -- node scripts/pi-runner.mjs roles list --json
 ```
 
 Delegated task commands also accept `--decision-mode cost|balance|power`,
@@ -286,9 +286,9 @@ This keeps approval decisions visible instead of leaving one blocked shell
 command. Read-only commands also accept durable background execution:
 
 ```bash
-node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/question.md \
+mise exec -- node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/question.md \
   --execution-mode background --json
-node scripts/pi-runner.mjs jobs wait --job <job-id> --wait-timeout-ms 15000 --json
+mise exec -- node scripts/pi-runner.mjs jobs wait --job <job-id> --wait-timeout-ms 15000 --json
 ```
 
 The host relay uses bounded waits and reports the durable job phase, elapsed
@@ -313,25 +313,25 @@ deadline with `--timeout-ms` from 1000 through 86400000 milliseconds.
 Durable job inspection and control are available through:
 
 ```bash
-node scripts/pi-runner.mjs jobs list --json
-node scripts/pi-runner.mjs jobs list --pending-notifications --json
-node scripts/pi-runner.mjs jobs status --job <job-id> --json
-node scripts/pi-runner.mjs jobs wait --job <job-id> --wait-timeout-ms 15000 --json
-node scripts/pi-runner.mjs jobs watch --emit ndjson --once
-node scripts/pi-runner.mjs jobs watch --emit ndjson --job <job-id>
-node scripts/pi-runner.mjs jobs cancel --job <job-id> --json
-node scripts/pi-runner.mjs jobs acknowledge --job <job-id> --json
-node scripts/pi-runner.mjs jobs approvals --job <job-id> --json
-node scripts/pi-runner.mjs jobs approve --job <job-id> --approval <approval-id> --json
-node scripts/pi-runner.mjs jobs deny --job <job-id> --approval <approval-id> --json
-node scripts/pi-runner.mjs jobs host-requests --job <job-id> --json
-node scripts/pi-runner.mjs jobs host-respond --job <job-id> --request <request-id> --response-file <bundle.json> --json
-node scripts/pi-runner.mjs jobs host-decline --job <job-id> --request <request-id> --reason <reason> --json
-node scripts/pi-runner.mjs jobs decisions --job <job-id> --json
-node scripts/pi-runner.mjs jobs decide --job <job-id> --request <request-id> --response-file <decision.json> --json
-node scripts/pi-runner.mjs jobs action-start --job <parent-job-id> --request <recommendation-id> --json
-node scripts/pi-runner.mjs jobs cleanup --job <job-id> [--discard] --json
-node scripts/pi-runner.mjs jobs materialize --job <job-id> --target /path/to/new-project --json
+mise exec -- node scripts/pi-runner.mjs jobs list --json
+mise exec -- node scripts/pi-runner.mjs jobs list --pending-notifications --json
+mise exec -- node scripts/pi-runner.mjs jobs status --job <job-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs wait --job <job-id> --wait-timeout-ms 15000 --json
+mise exec -- node scripts/pi-runner.mjs jobs watch --emit ndjson --once
+mise exec -- node scripts/pi-runner.mjs jobs watch --emit ndjson --job <job-id>
+mise exec -- node scripts/pi-runner.mjs jobs cancel --job <job-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs acknowledge --job <job-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs approvals --job <job-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs approve --job <job-id> --approval <approval-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs deny --job <job-id> --approval <approval-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs host-requests --job <job-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs host-respond --job <job-id> --request <request-id> --response-file <bundle.json> --json
+mise exec -- node scripts/pi-runner.mjs jobs host-decline --job <job-id> --request <request-id> --reason <reason> --json
+mise exec -- node scripts/pi-runner.mjs jobs decisions --job <job-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs decide --job <job-id> --request <request-id> --response-file <decision.json> --json
+mise exec -- node scripts/pi-runner.mjs jobs action-start --job <parent-job-id> --request <recommendation-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs cleanup --job <job-id> [--discard] --json
+mise exec -- node scripts/pi-runner.mjs jobs materialize --job <job-id> --target /path/to/new-project --json
 ```
 
 For a verified isolated implementation artifact, omit `--target` to apply its
@@ -522,6 +522,23 @@ contains API keys.
 
 ## Development
 
+Documentation is part of every product change. After modifying functional
+code, run `mise run docs-check`; Configuration changes must also update the Web
+guidance and current setup screenshots. The repository hook is advisory for
+human commits, while AI agents must treat a failed report as unfinished work.
+
+The pinned screenshot fixture can be refreshed with:
+
+```bash
+mise run docs-screenshots-install
+mise run docs-screenshots
+mise run docs-screenshots-validate
+```
+
+Before delivery, stage the intended files and run `mise run docs-check-staged`.
+The complete policy is in [CLAUDE.md](CLAUDE.md) and the
+[documentation SOP](docs/documentation-sop.md).
+
 The repository uses mise to provide the pinned Node.js environment:
 
 ```bash
@@ -544,14 +561,64 @@ mise run test
 mise run build
 ```
 
+### Plugin versions
+
+The root `package.json` is the canonical plugin version. Check that the runtime
+package, lockfiles, Claude manifests and marketplace, and the Codex manifest all
+agree with it:
+
+```bash
+mise run version-check
+mise run version-check-installed
+```
+
+Use the version tool for a stable SemVer release. It updates every version
+source and replaces the Codex cachebuster with one UTC timestamp. The public
+version-bump task first reinstalls the local Codex plugin from the configured
+marketplace, applies the synchronized versions, then reinstalls it again so
+the new Codex manifest value is actually loaded:
+
+```bash
+mise run version-bump -- patch
+mise run version-bump -- minor
+mise run version-bump -- major
+mise run version-bump -- 1.2.3
+mise run version-bump -- patch --dry-run
+```
+
+The command rejects prereleases, downgrades, unchanged versions, and existing
+version drift before writing. `mise run version-check-installed` checks both
+Claude Code and Codex installed records, including stale versions, disabled
+plugins, wrong local sources, and a Claude manifest that declares duplicate
+`hooks/hooks.json`. After a real bump, update Claude Code if it is installed,
+then run `mise run check`, review the diff, and verify both installations:
+
+```bash
+mise run version-check-installed
+```
+
+The Claude Code manifest intentionally has no `hooks` field: Claude Code loads
+the standard `hooks/hooks.json` path automatically. After upgrading, validate
+and reload the Claude installation so an old cached manifest is not reused:
+
+```bash
+claude plugin validate plugins/swarm-pi-code-plugin
+claude plugin update swarm-pi-code-plugin@swarm-pi-code-plugin
+```
+
+When the SemVer must remain unchanged and only the Codex skill cache needs a
+refresh, use the plugin-creator `update_plugin_cachebuster.py` workflow instead
+of `version:bump`, reinstall the local Codex plugin, run
+`mise run version-check-installed`, then start a new Codex task.
+
 Follow the [documentation update SOP](docs/documentation-sop.md) when changing
 user-facing guides, technical references, or committed screenshots. It defines
 the product-evidence, screenshot-safety, cross-link, and validation steps for
 documentation work.
 
-`npm test` runs the built Node test suite, including mocked Pi sessions,
+`mise run test` runs the built Node test suite, including mocked Pi sessions,
 state migration, manifest validation, endpoint discovery, and loopback web
-server tests. `npm run build` compiles the source and copies the production
+server tests. `mise run build` compiles the source and copies the production
 runtime into the self-contained plugin package. Local host testing uses:
 
 ```bash
@@ -560,13 +627,13 @@ codex plugin marketplace add /absolute/path/to/swarm-pi-code-plugin
 codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 ```
 
-Validate packaged JavaScript with `node --check` on every plugin script and
+Validate packaged JavaScript with `mise exec -- node --check` on every plugin script and
 validate the Codex manifest and skills with the Codex plugin validation tool
 when it is available in the local development environment.
 
-After changing Codex skills or the plugin manifest, update the Codex plugin
-cachebuster and start a new task. Keep runtime changes in `src/` and rebuild
-before validating the packaged plugin.
+After changing Codex skills or the plugin manifest, use `mise run version-check`
+and start a new task. Keep runtime changes in `src/` and rebuild before
+validating the packaged plugin.
 
 ## Built With and References
 

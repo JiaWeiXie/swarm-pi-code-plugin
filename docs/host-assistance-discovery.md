@@ -81,11 +81,11 @@ be reused by a new Job, but the unfinished call stack is not resumed.
 ### Host commands and events
 
 ```bash
-node scripts/pi-runner.mjs jobs host-requests --job <job-id> --json
-node scripts/pi-runner.mjs jobs host-respond --job <job-id> --request <request-id> --response-file <bundle.json> --json
-node scripts/pi-runner.mjs jobs host-decline --job <job-id> --request <request-id> --reason <reason> --json
-node scripts/pi-runner.mjs jobs decisions --job <job-id> --json
-node scripts/pi-runner.mjs jobs decide --job <job-id> --request <request-id> --response-file <decision.json> --json
+mise exec -- node scripts/pi-runner.mjs jobs host-requests --job <job-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs host-respond --job <job-id> --request <request-id> --response-file <bundle.json> --json
+mise exec -- node scripts/pi-runner.mjs jobs host-decline --job <job-id> --request <request-id> --reason <reason> --json
+mise exec -- node scripts/pi-runner.mjs jobs decisions --job <job-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs decide --job <job-id> --request <request-id> --response-file <decision.json> --json
 ```
 
 Live Jobs use `awaiting-host` or `awaiting-decision`. The event stream adds
@@ -138,7 +138,7 @@ criteria, non-goals, and a citation-backed `DecisionLedger`. A final Human
 Decision gate controls whether the result can feed:
 
 ```bash
-node scripts/pi-runner.mjs plan --host <host> --prompt-file <plan.md> --discovery-from <discovery-job-id> --json
+mise exec -- node scripts/pi-runner.mjs plan --host <host> --prompt-file <plan.md> --discovery-from <discovery-job-id> --json
 ```
 
 The handoff revalidates that the source is a successful Discovery Job with a
@@ -165,7 +165,7 @@ An action recommendation is inert until all of these are true:
 5. the user explicitly confirms `jobs action-start`.
 
 ```bash
-node scripts/pi-runner.mjs jobs action-start --job <parent-job-id> --request <recommendation-id> --json
+mise exec -- node scripts/pi-runner.mjs jobs action-start --job <parent-job-id> --request <recommendation-id> --json
 ```
 
 The runner creates a separate isolated child with `principal: host-broker`, the

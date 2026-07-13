@@ -125,7 +125,8 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
             <label>Classifier models</label>
             <div id="classifier-models" class="check-list"></div>
             <label for="classifier-thinking">Classifier thinking</label>
-            <select id="classifier-thinking"><option>low</option><option selected>medium</option><option>high</option></select>
+            <select id="classifier-thinking"><option>off</option><option>minimal</option><option>low</option><option selected>medium</option><option>high</option><option>xhigh</option><option>max</option></select>
+            <span class="field-hint">The runtime reduces this value when the selected model supports a lower maximum.</span>
             <label>When classification cannot decide</label>
             <div class="scope-toggle" role="radiogroup" aria-label="Approval policy">
               <button id="approval-deny" type="button" role="radio">Deny</button>
@@ -162,8 +163,8 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
             <select id="host-assistance-mode"><option value="on">On</option><option value="inherit">Inherit</option><option value="off">Off</option></select>
             <label>Allowed context classes</label><div id="host-context-classes" class="check-list"></div>
             <label for="context-budget">Context budget</label><input id="context-budget" type="number" min="0" max="64">
-            <label for="host-max-requests">Requests per Job</label><input id="host-max-requests" type="number" min="0" max="32">
-            <label for="host-max-fanout">Concurrent fan-out</label><input id="host-max-fanout" type="number" min="0" max="8">
+            <label for="host-max-requests">Requests per Job</label><input id="host-max-requests" type="number" min="0" max="6">
+            <label for="host-max-fanout">Concurrent fan-out</label><input id="host-max-fanout" type="number" min="0" max="3">
             <label for="private-connector">Private connectors</label><select id="private-connector"><option value="deny">Deny</option><option value="ask">Ask each time</option></select>
           </div>
         </div>
@@ -172,8 +173,8 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
           <div class="form-control">
             <label class="inline-check"><input id="advisor-enabled" type="checkbox"> Enable Advisor</label>
             <label>Advisor targets</label><div id="advisor-targets" class="check-list"></div>
-            <label for="advisor-max-requests">Consultations per Job</label><input id="advisor-max-requests" type="number" min="0" max="8">
-            <label for="advisor-max-perspectives">Maximum Advisor perspectives</label><input id="advisor-max-perspectives" type="number" min="0" max="8">
+            <label for="advisor-max-requests">Consultations per Job</label><input id="advisor-max-requests" type="number" min="0" max="3">
+            <label for="advisor-max-perspectives">Maximum Advisor perspectives</label><input id="advisor-max-perspectives" type="number" min="0" max="4">
           </div>
         </div>
         <div class="form-band">
@@ -628,9 +629,16 @@ const clientScript = String.raw `
     state.providerFieldValues[profile.provider] = structuredClone(profile.settings || {});
   });
   const draftKey = "swarm-pi-setup-draft:" + (boot.workspaceId || "default");
+  const bootRevision = boot.configurationRevision || JSON.stringify({
+    primary:boot.configuration.primary,fallbacks:boot.configuration.fallbacks,profile:boot.profile,
+    sandboxMode:boot.sandboxMode,rolePolicies:boot.rolePolicies,adaptivePolicy:boot.adaptivePolicy,
+    backgroundRolePolicy:boot.backgroundRolePolicy,decisionMode:boot.decisionMode,
+    hostAssistance:boot.hostAssistance,contextBudget:boot.contextBudget,advisor:boot.advisor,
+    doctrine:boot.doctrine,hostActions:boot.hostActions,
+  });
   try {
     const draft = JSON.parse(localStorage.getItem(draftKey) || "null");
-    if (draft && typeof draft === "object") {
+    if (draft && typeof draft === "object" && draft.baseRevision === bootRevision) {
       if (typeof draft.primary === "string") state.primary = draft.primary;
       if (Array.isArray(draft.fallbacks)) state.fallbacks = draft.fallbacks;
       if (draft.rolePolicies) state.rolePolicies = draft.rolePolicies;
@@ -644,13 +652,14 @@ const clientScript = String.raw `
       if (draft.hostActions) state.hostActions = draft.hostActions;
       if (["strict","adaptive","lenient"].includes(draft.sandboxMode)) state.sandboxMode = draft.sandboxMode;
       if (draft.profile) state.profile = draft.profile;
-    }
+    } else if (draft) localStorage.removeItem(draftKey);
   } catch {}
   const $ = id => document.getElementById(id);
 
   function persistDraft() {
     if (state.closed) return;
     localStorage.setItem(draftKey, JSON.stringify({
+      baseRevision:bootRevision,
       primary:state.primary,fallbacks:state.fallbacks,rolePolicies:state.rolePolicies,
       adaptivePolicy:state.adaptivePolicy,backgroundRolePolicy:state.backgroundRolePolicy,
       sandboxMode:state.sandboxMode,profile:state.profile,decisionMode:state.decisionMode,
@@ -676,6 +685,7 @@ const clientScript = String.raw `
   function selectedModelIds() {
     const ids = [state.primary, ...state.fallbacks];
     for (const policy of Object.values(state.rolePolicies)) if (Array.isArray(policy.models)) ids.push(...policy.models);
+    if (Array.isArray(state.adaptivePolicy.classifierModels)) ids.push(...state.adaptivePolicy.classifierModels);
     return new Set(ids.filter(Boolean));
   }
   function preferredVerifyModel(id) {
@@ -686,18 +696,24 @@ const clientScript = String.raw `
   }
   function providerName(id) { return connection(id)?.name || state.providerCatalog.find(item => item.id === id)?.name || id; }
   function modelLabel(model) { return model.name === model.model ? model.model : model.name + " - " + model.model; }
+  function modelOptionLabel(model) { return modelLabel(model) + (model.available ? "" : " (saved; currently unavailable)"); }
+  function savedModelLabel(id) { return "Saved model unavailable - " + id; }
+  function addSavedModelOption(select, id) {
+    if (id && ![...select.options].some(option => option.value === id)) select.add(new Option(savedModelLabel(id), id));
+  }
   function sourceLabel(source) {
     return ({"endpoint":"Endpoint", "pi-catalog":"Pi catalog", "models-dev":"models.dev", "compatibility-default":"Compatibility default", "user":"Custom"})[source] || "Automatic";
   }
   function usableModels() {
     const ready = new Set(state.connections.filter(item => item.ready).map(item => item.id));
-    return state.models.filter(item => item.available || ready.has(item.provider) || state.credentialDrafts[item.provider]);
+    const selected = selectedModelIds();
+    return state.models.filter(item => item.available || ready.has(item.provider) || state.credentialDrafts[item.provider] || selected.has(item.id));
   }
   function normalizeSelection() {
     const usable = usableModels();
-    if (!usable.some(item => item.id === state.primary)) state.primary = usable[0]?.id || "";
+    if (!state.primary) state.primary = usable[0]?.id || "";
     state.fallbacks = state.fallbacks.filter((value, index, values) =>
-      value !== state.primary && values.indexOf(value) === index && usable.some(item => item.id === value),
+      Boolean(value) && value !== state.primary && values.indexOf(value) === index,
     );
   }
   function upsertConnection(value) {
@@ -800,18 +816,22 @@ const clientScript = String.raw `
     for (const [provider, models] of groups) {
       const group = document.createElement("optgroup"); group.label = providerName(provider);
       for (const item of models.sort((left, right) => left.name.localeCompare(right.name))) {
-        group.append(new Option(modelLabel(item), item.id, false, item.id === state.primary));
+        group.append(new Option(modelOptionLabel(item), item.id, false, item.id === state.primary));
       }
       select.append(group);
     }
-    select.disabled = usableModels().length === 0;
+    addSavedModelOption(select, state.primary);
+    select.disabled = usableModels().length === 0 && !state.primary;
     select.value = state.primary;
     renderModelDetails();
   }
   function renderModelDetails() {
     const target = $("model-details"); target.replaceChildren();
     const selected = modelById(state.primary);
-    if (!selected) { target.textContent = "Connect an AI service before choosing a model."; return; }
+    if (!selected) {
+      target.textContent = state.primary ? savedModelLabel(state.primary) : "Connect an AI service before choosing a model.";
+      return;
+    }
     const title = document.createElement("div"); title.className = "model-title"; title.textContent = selected.name;
     const reference = document.createElement("div"); reference.className = "model-reference"; reference.textContent = selected.id;
     const tags = document.createElement("div"); tags.className = "model-tags";
@@ -857,8 +877,9 @@ const clientScript = String.raw `
       const row = document.createElement("div"); row.className = "fallback-row";
       const select = document.createElement("select"); select.setAttribute("aria-label", "Fallback model " + (index + 1));
       for (const item of usableModels().filter(model => model.id !== state.primary && (model.id === value || !state.fallbacks.includes(model.id)))) {
-        select.add(new Option(providerName(item.provider) + " / " + modelLabel(item), item.id, false, item.id === value));
+        select.add(new Option(providerName(item.provider) + " / " + modelOptionLabel(item), item.id, false, item.id === value));
       }
+      addSavedModelOption(select, value);
       select.value = value; select.addEventListener("change", () => { state.fallbacks[index] = select.value; renderFallbacks(); });
       const up = iconButton("Up", "^", () => { if (index > 0) { [state.fallbacks[index - 1], state.fallbacks[index]] = [state.fallbacks[index], state.fallbacks[index - 1]]; renderFallbacks(); } });
       const down = iconButton("Down", "v", () => { if (index < state.fallbacks.length - 1) { [state.fallbacks[index + 1], state.fallbacks[index]] = [state.fallbacks[index], state.fallbacks[index + 1]]; renderFallbacks(); } });
@@ -922,15 +943,15 @@ const clientScript = String.raw `
       title.textContent = role.role; detail.textContent = role.taskKinds.join(", ") + " · " + role.executionModes.join(", "); copy.append(title, detail);
       const modelField = document.createElement("label"); modelField.textContent = "Primary model";
       const model = document.createElement("select"); model.add(new Option("Inherit project model chain", ""));
-      usableModels().forEach(item => model.add(new Option(providerName(item.provider) + " / " + modelLabel(item), item.id)));
-      model.value = current.models?.[0] || "";
+      usableModels().forEach(item => model.add(new Option(providerName(item.provider) + " / " + modelOptionLabel(item), item.id)));
+      const selectedRoleModel = current.models?.[0] || ""; addSavedModelOption(model, selectedRoleModel); model.value = selectedRoleModel;
       model.addEventListener("change", () => {
         state.rolePolicies[role.role] ||= {};
         if (!model.value) delete state.rolePolicies[role.role].models;
         else state.rolePolicies[role.role].models = [model.value, ...state.fallbacks.filter(item => item !== model.value)];
       }); modelField.append(model);
       const thinkingField = document.createElement("label"); thinkingField.textContent = "Thinking";
-      const thinking = document.createElement("select"); ["off","minimal","low","medium","high","xhigh"].forEach(level => thinking.add(new Option(level, level)));
+      const thinking = document.createElement("select"); ["off","minimal","low","medium","high","xhigh","max"].forEach(level => thinking.add(new Option(level, level)));
       thinking.value = current.thinkingLevel || role.thinkingLevel;
       thinking.addEventListener("change", () => { state.rolePolicies[role.role] ||= {}; state.rolePolicies[role.role].thinkingLevel = thinking.value; }); thinkingField.append(thinking);
       const attemptsField = document.createElement("label"); attemptsField.textContent = "Attempts";
@@ -952,8 +973,12 @@ const clientScript = String.raw `
       : "Adaptive sends limited action context to the selected classifier provider and pauses high-risk bounded actions for approval.";
     const classifier = $("classifier-models"); classifier.replaceChildren();
     usableModels().forEach(item => classifier.append(checkRow({
-      value:item.id,label:providerName(item.provider) + " / " + modelLabel(item),checked:state.adaptivePolicy.classifierModels.includes(item.id),
+      value:item.id,label:providerName(item.provider) + " / " + modelOptionLabel(item),checked:state.adaptivePolicy.classifierModels.includes(item.id),
       onChange:checked => { state.adaptivePolicy.classifierModels = checked ? [...new Set([...state.adaptivePolicy.classifierModels,item.id])] : state.adaptivePolicy.classifierModels.filter(value => value !== item.id); },
+    })));
+    state.adaptivePolicy.classifierModels.filter(id => !modelById(id)).forEach(id => classifier.append(checkRow({
+      value:id,label:savedModelLabel(id),checked:true,
+      onChange:checked => { if (!checked) state.adaptivePolicy.classifierModels = state.adaptivePolicy.classifierModels.filter(value => value !== id); },
     })));
     $("classifier-thinking").value = state.adaptivePolicy.classifierThinkingLevel;
     const wait = state.adaptivePolicy.approvalPolicy === "wait";
@@ -1076,12 +1101,12 @@ const clientScript = String.raw `
     $("connections-screen").hidden = state.phase !== 1; $("models-screen").hidden = state.phase !== 2; $("roles-screen").hidden = state.phase !== 3; $("safety-screen").hidden = state.phase !== 4; $("project-screen").hidden = state.phase !== 5; $("review-screen").hidden = state.phase !== 6;
     $("cancel-button").hidden = state.phase !== initialPhase; $("back-button").hidden = state.phase === initialPhase; $("next-button").hidden = state.phase === 6; $("save-button").hidden = state.phase !== 6;
     $("next-button").textContent = state.phase === 1 ? "Choose models" : state.phase === 2 ? "Configure roles" : state.phase === 3 ? "Execution safety" : state.phase === 4 ? "Workspace" : "Review";
-    $("next-button").disabled = setupMode === "full" && (usableModels().length === 0 || (state.phase === 2 && !state.primary));
+    $("next-button").disabled = setupMode === "full" && ((usableModels().length === 0 && !state.primary) || (state.phase === 2 && !state.primary));
     $("save-button").textContent = setupMode === "project" ? "Save project setup" : "Save configuration";
     const warning = $("registry-warning"); warning.hidden = !boot.registryError; warning.textContent = boot.registryError ? "Pi model registry: " + boot.registryError : "";
     persistDraft();
   }
-  function setPhase(phase) { if (setupMode === "full" && phase > 1 && usableModels().length === 0) return; state.phase = phase; render(); window.scrollTo({top: 0, behavior: "smooth"}); }
+  function setPhase(phase) { if (setupMode === "full" && phase > 1 && usableModels().length === 0 && !state.primary) return; state.phase = phase; render(); window.scrollTo({top: 0, behavior: "smooth"}); }
 
   function protocolLabel(value) {
     return ({
@@ -1378,12 +1403,12 @@ const clientScript = String.raw `
   $("decision-doctrine").addEventListener("change", () => { state.doctrine = $("decision-doctrine").checked ? "first-principles-qds-v1" : null; });
   $("host-assistance-mode").addEventListener("change", () => { state.hostAssistance.mode = $("host-assistance-mode").value; state.hostAssistance.enabled = state.hostAssistance.mode !== "off"; });
   $("context-budget").addEventListener("input", () => { state.contextBudget = Math.max(0, Math.min(64, Number($("context-budget").value) || 0)); });
-  $("host-max-requests").addEventListener("input", () => { state.hostAssistance.maxRequests = Math.max(0, Math.min(32, Number($("host-max-requests").value) || 0)); });
-  $("host-max-fanout").addEventListener("input", () => { state.hostAssistance.maxFanOut = Math.max(0, Math.min(8, Number($("host-max-fanout").value) || 0)); });
+  $("host-max-requests").addEventListener("input", () => { state.hostAssistance.maxRequests = Math.max(0, Math.min(6, Number($("host-max-requests").value) || 0)); });
+  $("host-max-fanout").addEventListener("input", () => { state.hostAssistance.maxFanOut = Math.max(0, Math.min(3, Number($("host-max-fanout").value) || 0)); });
   $("private-connector").addEventListener("change", () => { state.hostAssistance.privateConnector = $("private-connector").value; });
   $("advisor-enabled").addEventListener("change", () => { state.advisor.enabled = $("advisor-enabled").checked; });
-  $("advisor-max-requests").addEventListener("input", () => { state.advisor.maxRequests = Math.max(0, Math.min(8, Number($("advisor-max-requests").value) || 0)); });
-  $("advisor-max-perspectives").addEventListener("input", () => { state.advisor.maxPerspectives = Math.max(0, Math.min(8, Number($("advisor-max-perspectives").value) || 0)); });
+  $("advisor-max-requests").addEventListener("input", () => { state.advisor.maxRequests = Math.max(0, Math.min(3, Number($("advisor-max-requests").value) || 0)); });
+  $("advisor-max-perspectives").addEventListener("input", () => { state.advisor.maxPerspectives = Math.max(0, Math.min(4, Number($("advisor-max-perspectives").value) || 0)); });
   $("host-actions-enabled").addEventListener("change", () => { state.hostActions.enabled = $("host-actions-enabled").checked; });
   $("host-actions-remote").addEventListener("change", () => { state.hostActions.remoteActionsEnabled = $("host-actions-remote").checked; });
   $("host-action-max-uses").addEventListener("input", () => { state.hostActions.maxUses = Math.max(1, Math.min(100, Number($("host-action-max-uses").value) || 1)); });

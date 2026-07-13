@@ -11,15 +11,29 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && npm run build:plugin",
     "build:plugin": "tsc -p tsconfig.plugin.json",
+    "prepare": "node scripts/install-git-hooks.mjs --automatic",
     "test:build": "tsc -p tsconfig.test.json",
     "test": "npm run test:build && SWARM_PI_CODE_PLUGIN_USER_STATE_DIR=/tmp/swarm-pi-code-plugin-test-state node --test .test-dist/tests/*.test.js",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --deny-warnings src tests",
+    "lint:tooling": "oxlint --deny-warnings scripts/check-documentation-impact.mjs scripts/generate-doc-screenshots.mjs scripts/install-git-hooks.mjs scripts/plugin-version.mjs scripts/validate-doc-screenshots.mjs",
     "lint:fix": "oxlint --fix --deny-warnings src tests",
-    "fmt": "oxfmt src tests",
-    "fmt:check": "oxfmt --check src tests",
+    "fmt": "oxfmt src tests scripts/check-documentation-impact.mjs scripts/generate-doc-screenshots.mjs scripts/install-git-hooks.mjs scripts/plugin-version.mjs scripts/validate-doc-screenshots.mjs",
+    "fmt:check": "oxfmt --check src tests scripts/check-documentation-impact.mjs scripts/generate-doc-screenshots.mjs scripts/install-git-hooks.mjs scripts/plugin-version.mjs scripts/validate-doc-screenshots.mjs",
+    "docs:check": "node scripts/check-documentation-impact.mjs worktree",
+    "docs:check:staged": "node scripts/check-documentation-impact.mjs staged",
+    "docs:check:ci": "node scripts/check-documentation-impact.mjs ci",
+    "docs:screenshots:install": "playwright install --only-shell chromium",
+    "docs:screenshots:install:ci": "playwright install --with-deps --only-shell chromium",
+    "docs:screenshots": "npm run build:plugin && node scripts/generate-doc-screenshots.mjs",
+    "docs:screenshots:validate": "node scripts/validate-doc-screenshots.mjs",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "hooks:uninstall": "node scripts/install-git-hooks.mjs --uninstall",
+    "version:check": "node scripts/plugin-version.mjs check",
+    "version:check:installed": "node scripts/plugin-version.mjs check --installed",
+    "version:bump": "node scripts/plugin-version.mjs bump --reinstall",
     "check:runtime-parity": "node scripts/check-runtime-parity.mjs",
-    "check": "npm run typecheck && npm run lint && npm run fmt:check && npm test && npm run check:runtime-parity"
+    "check": "npm run version:check && npm run typecheck && npm run lint && npm run lint:tooling && npm run fmt:check && npm test && npm run docs:screenshots:validate && npm run check:runtime-parity"
   },
   "dependencies": {
     "@carderne/sandbox-runtime": "0.0.49",
@@ -29,6 +43,7 @@
     "@types/node": "24.10.1",
     "oxfmt": "0.58.0",
     "oxlint": "1.73.0",
+    "playwright": "1.61.0",
     "typescript": "5.9.3"
   }
 }

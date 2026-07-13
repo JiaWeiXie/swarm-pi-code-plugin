@@ -41,6 +41,19 @@ toggle is persisted in PolicySnapshot v3, but version 0.5.0 does not yet run an
 automatic Question/Delete/Simplify convergence pass. It must not be treated as
 an active review or safety control.
 
+## Current setup screens
+
+The screenshots below are generated from the pinned local fixture with a fixed
+desktop viewport. They are documentation evidence for the current flow, not a
+provider or credential tutorial.
+
+![Empty connections state](assets/setup/01-empty-connections.png)
+![Custom endpoint discovery](assets/setup/02-endpoint-discovery.png)
+![Project setup](assets/setup/03-project-setup.png)
+![Worker role routing](assets/setup/04-role-routing.png)
+![Execution and safety settings](assets/setup/05-execution-safety.png)
+![Configuration review](assets/setup/06-review.png)
+
 | Setting | Default | Runtime effect in 0.5.0 |
 | --- | --- | --- |
 | Decision Mode | `balance` | 1/2/3 base orchestration perspectives for Cost/Balance/Power; bounded decision attempts |
