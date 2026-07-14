@@ -85,19 +85,24 @@ fingerprint/policy hash, auto-resolution flag, and timestamp.
 - `hard-deny` resolves the matching request without a capability lease.
 
 An approval carrying `shell.execute` is not read-only by declaration. Before
-persisting the request, the trusted runner evaluates the complete Bash command
-against a deliberately small inspection grammar. Only commands without shell
-expansion, redirection, backgrounding, alternate branches, path escape, or
-write/exec flags receive `trustedReadOnly: true`; composed commands are accepted
-only when every `&&` or pipeline segment is independently allowlisted. Bounded
+the classifier, the trusted runner evaluates the complete Bash command against
+a deliberately small structure-aware inspection grammar. Proven commands take
+the Adaptive deterministic read-only fast path; if an approval record remains,
+it carries both `trustedReadOnly: true` and a trusted runtime
+`effectAssessment`. Composed commands are accepted only when every `&&`, `||`,
+pipeline, semicolon, or newline segment is independently allowlisted. Quoted
+patterns and heredoc bodies are data rather than executable hard-deny matches.
+Bounded
 `sha256sum`/`shasum` inspection commands, `rustc`/`cargo` version probes, and
 two-file `cmp`/`diff` comparisons are included for fixture and dependency
 reproducibility evidence. Compilation, test execution, comparison output files,
-traversal, workspace-external absolute paths, redirection, expansion, command
-substitution, and mixed mutation statements remain excluded. The Host must
+loops, interpreters, traversal, workspace-external absolute paths, redirection,
+expansion, command substitution, and mixed mutation statements remain excluded
+and supervisor-gated. The Host must
 still verify the visible command, original intent, roots, and exact fingerprint.
-Missing classification and unknown syntax always fall back to the normal
-mutation ceiling or the user.
+Runtime effect evidence is authoritative; WorkerAssessment remains untrusted
+advice. Missing classification and unknown syntax always fall back to the
+normal mutation ceiling or the user.
 
 Strict cannot gain a capability through a receipt. Secrets, private connectors,
 Git metadata, protected/out-of-workspace targets, deletion, partial or

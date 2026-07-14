@@ -57,13 +57,15 @@ For human clarification, use a decision request rather than a capability lease. 
 
 Only the model handling the active Codex or Claude Code turn may adjudicate. For a capability request, read `$RUNNER jobs approvals --job <id> --json`; for assistance, read `$RUNNER jobs host-requests --job <id> --json` or `jobs decisions`. These commands return the full pending record plus `adjudicationContext`, including the original intent and immutable policy snapshot. Do not decide from an event summary.
 
-Independently compare the original intent, role ceiling, project roots and deny rules, Sandbox mode, complete WorkerAssessment, exact action fingerprint, policy hash, side effects, rollback, and verification. The worker's proposed risk is not authoritative. Then choose exactly one receipt decision:
+Independently compare the original intent, role ceiling, project roots and deny rules, Sandbox mode, complete WorkerAssessment, exact action fingerprint, policy hash, side effects, rollback, and verification. The worker's proposed risk is not authoritative. For capability approvals, prefer the runner-produced `effectAssessment`: verify its runtime capabilities, effect, source, and reversibility, and treat WorkerAssessment as advisory. Do not infer executable behavior from `actionSummary` prose, quoted search patterns, or heredoc data. A legacy request without effect evidence remains eligible only under the older conservative checks. Then choose exactly one receipt decision:
 
 - `allow`: only for a low/medium-risk intent match within the snapshotted automatic scope. Public read-only context is eligible. A local mutation is eligible only when the original Job already has mutation intent, the exact target is inside its workspace or job-owned worktree, and the change is fully reversible. A Discovery gate is eligible only when the snapshot enables gate auto-review and the bounded answer is `approve`.
 - `ask-user`: use when evidence, intent match, target, reversibility, recovery, or confidence is insufficient. Keep the request pending and present the full risk and alternatives to the user.
 - `hard-deny`: use for a policy violation. It resolves the matching request without a lease.
 
 Never auto-allow secrets, credentials, private connectors, Git metadata, protected or out-of-workspace paths, deletions, partially reversible or irreversible changes, action recommendations, role escalation, adoption, materialization, commit/push/merge, publishing, deployment, messages, transactions, or uncertain live-service operations. Strict mode cannot gain a capability through Host adjudication.
+
+Adaptive deterministic read-only Bash actions normally complete before an approval is created. If one still reaches the approval relay, allow it only when the trusted effect is `read-only` and the exact fingerprint, roots, and intent match. Expansion, redirection, loops, interpreters, build/test execution, and unknown effects remain user decisions; an inert dangerous word in a quoted pattern is not itself a reason to deny.
 
 Write the receipt to a temporary JSON file with `principal: "host-model"`, the active `host` and optional model identifier, `decision`, assessed risk, rationale, constraints, `intentMatch`, exact `actionFingerprint`, exact `policyHash`, `autoResolved`, and ISO `decidedAt`. Use:
 

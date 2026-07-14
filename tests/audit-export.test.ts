@@ -80,6 +80,11 @@ async function terminalFixture() {
       reason: "Review bounded command",
       policyHash: policySnapshot.hash,
       classifierCache: "miss",
+      classifierEvidence: {
+        claimedCapabilities: ["shell.execute", "filesystem.read-workspace"],
+        runtimeCapabilities: ["shell.execute"],
+        normalized: true,
+      },
     })}\n`,
   );
   return { cwd, job, directory };
@@ -96,6 +101,7 @@ test("audit export returns a safe single-job evidence package", async () => {
   assert.equal(audit.result.agentVerification?.output.includes("[redacted]"), true);
   assert.equal(audit.changes.patch?.includes("[redacted]"), true);
   assert.equal(audit.policy.events[0]?.classifierCache, "miss");
+  assert.equal(audit.policy.events[0]?.classifierEvidence?.normalized, true);
   assert.equal(audit.integrity.policySnapshot?.verified, true);
   assert.equal(audit.integrity.providerSnapshot?.verified, true);
   assert.doesNotMatch(serialized, /sk-(?:prompt|output|verifier|patch)-secret/);
@@ -165,6 +171,14 @@ test("audit export includes redacted WorkerAssessment, Host receipts, and lease 
     actionFingerprint: approvalFingerprint,
     toolName: "read",
     actionSummary: "read README.md",
+    effectAssessment: {
+      version: 1,
+      source: "deterministic-tool",
+      effect: "read-only",
+      reversibility: "read-only",
+      capabilities: ["filesystem.read-workspace"],
+      reasonCode: "read-only-tool",
+    },
     decision: {
       decision: "require-approval",
       risk: "high",
@@ -234,6 +248,7 @@ test("audit export includes redacted WorkerAssessment, Host receipts, and lease 
   });
   const audit = await exportJobAudit(cwd, job.id);
   assert.equal(audit.approvals[0]?.workerAssessment?.reversibility, "read-only");
+  assert.equal(audit.approvals[0]?.effectAssessment?.reasonCode, "read-only-tool");
   assert.equal(audit.approvals[0]?.adjudication?.principal, "host-model");
   assert.equal(audit.leases[0]?.principal, "host-model");
   assert.equal(

@@ -81,10 +81,10 @@ import {
   ClassifierDecisionCache,
   PolicyEngine,
   actionFingerprint,
+  assessPolicyActionEffect,
   type PolicyAction,
   type PolicyClassifier,
 } from "../policy/engine.js";
-import { isReadOnlyShellCommand } from "../policy/read-only-shell.js";
 import {
   assertTaskAdmitted,
   assertPathAllowed,
@@ -1487,6 +1487,9 @@ async function runStartedJob(options: {
             ? { action: summarizePolicyAction(action) }
             : {}),
           ...(metadata?.classifierCache ? { classifierCache: metadata.classifierCache } : {}),
+          ...(decision.classifierEvidence
+            ? { classifierEvidence: decision.classifierEvidence }
+            : {}),
           model: decision.model,
           policyHash: decision.policyHash,
         });
@@ -3217,6 +3220,9 @@ async function runIsolatedExperimentChild(options: {
           decision: decision.decision,
           risk: decision.risk,
           reason: decision.reason.slice(0, 500),
+          ...(decision.classifierEvidence
+            ? { classifierEvidence: decision.classifierEvidence }
+            : {}),
           policyHash: decision.policyHash,
         });
       },
@@ -3552,13 +3558,15 @@ async function handlePolicyApproval(options: {
 }): Promise<"approved" | "denied" | "expired"> {
   return withApprovalQueue(options.jobId, async () => {
     if (options.signal?.aborted) throw new Error("Approval wait was cancelled");
+    const effectAssessment = assessPolicyActionEffect(options.action);
     const approval = await requestJobApproval(options.cwd, options.jobId, options.workerToken, {
       actionFingerprint: options.fingerprint,
       toolName: options.action.toolName,
       actionSummary: summarizePolicyAction(options.action),
-      ...(isReadOnlyPolicyAction(options.action) ? { trustedReadOnly: true } : {}),
+      ...(effectAssessment.effect === "read-only" ? { trustedReadOnly: true } : {}),
+      effectAssessment,
       decision: options.decision,
-      workerAssessment: policyWorkerAssessment(options.action, options.decision),
+      workerAssessment: policyWorkerAssessment(options.action, options.decision, effectAssessment),
       expiresAt: new Date(options.deadline).toISOString(),
     });
     return waitForApprovalResolution(
@@ -3636,9 +3644,13 @@ function summarizePolicyAction(action: PolicyAction): string {
   return `${action.toolName} ${command.slice(0, 1_500)}`;
 }
 
-function policyWorkerAssessment(action: PolicyAction, decision: PolicyDecision): WorkerAssessment {
+function policyWorkerAssessment(
+  action: PolicyAction,
+  decision: PolicyDecision,
+  effectAssessment = assessPolicyActionEffect(action),
+): WorkerAssessment {
   const summary = summarizePolicyAction(action);
-  const trustedReadOnly = isReadOnlyPolicyAction(action);
+  const trustedReadOnly = effectAssessment.effect === "read-only";
   const mutation = decision.capabilities.some(
     (capability) =>
       capability === "filesystem.write-workspace" ||
@@ -3667,11 +3679,7 @@ function policyWorkerAssessment(action: PolicyAction, decision: PolicyDecision):
       ...decision.constraints,
       "Bind any approval to this exact action fingerprint and policy snapshot.",
     ],
-    reversibility: mutation
-      ? reversibleFileMutation
-        ? "reversible"
-        : "partially-reversible"
-      : "read-only",
+    reversibility: effectAssessment.reversibility,
     rollback: reversibleFileMutation
       ? "Restore the affected path from the job worktree baseline before delivery."
       : mutation
@@ -3683,11 +3691,6 @@ function policyWorkerAssessment(action: PolicyAction, decision: PolicyDecision):
     proposedRisk: decision.risk,
     fallback: "Ask the user when the active Host cannot validate the bounded request.",
   };
-}
-
-function isReadOnlyPolicyAction(action: PolicyAction): boolean {
-  if (action.toolName !== "bash" || typeof action.input.command !== "string") return false;
-  return isReadOnlyShellCommand(action.input.command);
 }
 
 function hostAssistanceUnavailable(

@@ -179,13 +179,108 @@ test("policy engine enforces hard denies before classifier decisions", async () 
   });
   assert.equal(git.decision, "deny");
   assert.equal(classifierCalls, 0);
+  const branch = await engine.authorize({
+    toolName: "bash",
+    input: { command: "git branch --show-current" },
+    cwd: workspace,
+  });
+  assert.equal(branch.decision, "allow");
+  const inertLiterals = await engine.authorize({
+    toolName: "bash",
+    input: { command: "git show HEAD | grep -E 'sudo|rm -rf|git push'" },
+    cwd: workspace,
+  });
+  assert.equal(inertLiterals.decision, "allow");
+  const heredoc = await engine.authorize({
+    toolName: "bash",
+    input: { command: "python3 <<'PY'\nprint('.env')\nPY" },
+    cwd: workspace,
+  });
+  assert.equal(heredoc.decision, "require-approval");
+  const branchMutation = await engine.authorize({
+    toolName: "bash",
+    input: { command: "git branch new-branch" },
+    cwd: workspace,
+  });
+  assert.equal(branchMutation.decision, "deny");
+  const destructiveShell = await engine.authorize({
+    toolName: "bash",
+    input: { command: "rm -rf generated-output" },
+    cwd: workspace,
+  });
+  assert.equal(destructiveShell.decision, "require-approval");
+  const writeFlag = await engine.authorize({
+    toolName: "bash",
+    input: { command: "sed -i '' README.md" },
+    cwd: workspace,
+  });
+  assert.equal(writeFlag.decision, "require-approval");
   const bounded = await engine.authorize({
     toolName: "bash",
     input: { command: "npm test" },
     cwd: workspace,
   });
   assert.equal(bounded.decision, "require-approval");
-  assert.equal(classifierCalls, 1);
+  assert.equal(classifierCalls, 0);
+});
+
+test("classifier capabilities are normalized to authoritative runtime effects", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "swarm-classifier-normalize-"));
+  const snapshot = createPolicySnapshot({
+    sandboxMode: "adaptive",
+    approvalMode: "wait",
+    rolePolicy: resolveRolePolicy("executor"),
+    adaptivePolicy: { classifierModels: ["test/model"] },
+  });
+  const result = await new PolicyEngine({
+    snapshot,
+    classifier: {
+      async classify() {
+        return {
+          decision: "allow",
+          risk: "low",
+          capabilities: ["shell.execute", "filesystem.read-workspace"],
+          reason: "bounded custom inspection",
+          constraints: [],
+          policyHash: snapshot.hash,
+        };
+      },
+    },
+  }).authorize({
+    toolName: "bash",
+    input: { command: "custom-inspect --summary" },
+    cwd: workspace,
+  });
+  assert.equal(result.decision, "allow");
+  assert.deepEqual(result.capabilities, ["shell.execute"]);
+  assert.deepEqual(result.classifierEvidence, {
+    claimedCapabilities: ["shell.execute", "filesystem.read-workspace"],
+    runtimeCapabilities: ["shell.execute"],
+    normalized: true,
+  });
+  assert.match(result.constraints.join(" "), /normalized to runtime-derived effects/);
+
+  const material = await new PolicyEngine({
+    snapshot,
+    classifier: {
+      async classify() {
+        return {
+          decision: "allow",
+          risk: "low",
+          capabilities: ["shell.execute", "network.connect"],
+          reason: "may contact a service",
+          constraints: [],
+          policyHash: snapshot.hash,
+        };
+      },
+    },
+  }).authorize({
+    toolName: "bash",
+    input: { command: "custom-action --remote" },
+    cwd: workspace,
+  });
+  assert.equal(material.decision, "require-approval");
+  assert.match(material.reason, /unproven material effect: network\.connect/);
 });
 
 test("strict mode preserves scoped implementation writes without exposing Bash", async () => {
@@ -528,7 +623,7 @@ test("classifier cache reuses validated approvals but never caches denies", asyn
       },
     },
   });
-  const bounded = { toolName: "bash", input: { command: "npm test" }, cwd: workspace };
+  const bounded = { toolName: "bash", input: { command: "custom-action" }, cwd: workspace };
   assert.equal((await engine.authorize(bounded)).decision, "require-approval");
   assert.equal((await engine.authorize(bounded)).decision, "require-approval");
   assert.equal(calls, 1);
@@ -567,7 +662,7 @@ test("classifier cache coalesces concurrent calls and expires entries", async ()
       },
     },
   });
-  const action = { toolName: "bash", input: { command: "npm test" }, cwd: workspace };
+  const action = { toolName: "bash", input: { command: "custom-action" }, cwd: workspace };
   const results = await Promise.all([engine.authorize(action), engine.authorize(action)]);
   assert.deepEqual(
     results.map((result) => result.decision),

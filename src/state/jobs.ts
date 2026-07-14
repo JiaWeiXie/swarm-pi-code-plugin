@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import type {
+  ActionEffectAssessment,
   ApprovalMode,
   ApprovalRequest,
   CapabilityLease,
@@ -582,6 +583,7 @@ export async function requestJobApproval(
     toolName: string;
     actionSummary: string;
     trustedReadOnly?: boolean;
+    effectAssessment?: ActionEffectAssessment;
     decision: PolicyDecision;
     workerAssessment?: WorkerAssessment;
     expiresAt: string;
@@ -596,6 +598,9 @@ export async function requestJobApproval(
     toolName: input.toolName,
     actionSummary: input.actionSummary.slice(0, 2_000),
     ...(input.trustedReadOnly ? { trustedReadOnly: true } : {}),
+    ...(input.effectAssessment
+      ? { effectAssessment: structuredClone(input.effectAssessment) }
+      : {}),
     decision: structuredClone(input.decision),
     status: "pending",
     requestedAt,
@@ -1585,35 +1590,46 @@ function assertHostCanAutoApproveCapability(
     throw new Error("This Job permits Host auto-review for context only");
   }
   const capabilities = approval.decision.capabilities;
-  const readOnly =
-    capabilities.every(
+  const effectAssessment = approval.effectAssessment;
+  if (effectAssessment) assertTrustedEffectAssessment(approval, effectAssessment);
+  const legacyReadOnly =
+    !effectAssessment &&
+    (capabilities.every(
       (capability) => capability === "filesystem.read-workspace" || capability === "git.read",
     ) ||
-    (approval.trustedReadOnly === true &&
-      approval.toolName === "bash" &&
-      capabilities.length === 1 &&
-      capabilities[0] === "shell.execute");
+      (approval.trustedReadOnly === true &&
+        approval.toolName === "bash" &&
+        capabilities.length === 1 &&
+        capabilities[0] === "shell.execute"));
+  const readOnly = effectAssessment?.effect === "read-only" || legacyReadOnly;
   if (autoScope === "read-only" && !readOnly) {
     throw new Error("This Job permits only read-only Host auto-approval");
   }
   const assessment = approval.workerAssessment!;
   if (!readOnly) {
+    if (effectAssessment && effectAssessment.effect !== "reversible-workspace-write") {
+      throw new Error("Host auto-approval requires trusted reversible effect evidence");
+    }
     const mutationIntent =
       request.kind === "implement" ||
       request.kind === "setup" ||
       request.kind === "scaffold" ||
       (request.kind === "discover" && job.internalStage === "experiment");
     if (!mutationIntent) throw new Error("The original Job has no mutation intent");
-    if (assessment.reversibility !== "reversible") {
+    if (
+      (effectAssessment && effectAssessment.reversibility !== "reversible") ||
+      assessment.reversibility !== "reversible"
+    ) {
       throw new Error("Only fully reversible mutations may be auto-approved");
     }
   }
   if (
     approval.toolName === "role-escalation" ||
     approval.toolName === "host-context-egress" ||
-    /(?:^|[\\/])\.git(?:[\\/]|$)|\b(?:rm|rmdir|unlink|git\s+(?:add|commit|merge|push|reset)|deploy|publish|transaction)\b/i.test(
-      approval.actionSummary,
-    )
+    (!effectAssessment &&
+      /(?:^|[\\/])\.git(?:[\\/]|$)|\b(?:rm|rmdir|unlink|git\s+(?:add|commit|merge|push|reset)|deploy|publish|transaction)\b/i.test(
+        approval.actionSummary,
+      ))
   ) {
     throw new Error("The requested capability is outside the Host auto-approval ceiling");
   }
@@ -1628,6 +1644,43 @@ function assertHostCanAutoApproveCapability(
       }
     }
   }
+}
+
+function assertTrustedEffectAssessment(
+  approval: ApprovalRequest,
+  assessment: ActionEffectAssessment,
+): void {
+  if (
+    assessment.version !== 1 ||
+    !["deterministic-tool", "deterministic-shell"].includes(assessment.source)
+  ) {
+    throw new Error("Action effect evidence is invalid");
+  }
+  const decisionCapabilities = [...new Set(approval.decision.capabilities)].sort();
+  const effectCapabilities = [...new Set(assessment.capabilities)].sort();
+  if (JSON.stringify(decisionCapabilities) !== JSON.stringify(effectCapabilities)) {
+    throw new Error("Action effect evidence does not match runtime capabilities");
+  }
+  if (assessment.effect === "read-only") {
+    if (assessment.reversibility !== "read-only") {
+      throw new Error("Read-only effect evidence has invalid reversibility");
+    }
+    if (approval.toolName === "bash" && assessment.source !== "deterministic-shell") {
+      throw new Error("Read-only Bash requires deterministic shell evidence");
+    }
+    return;
+  }
+  if (assessment.effect === "reversible-workspace-write") {
+    if (
+      assessment.source !== "deterministic-tool" ||
+      assessment.reversibility !== "reversible" ||
+      (approval.toolName !== "write" && approval.toolName !== "edit")
+    ) {
+      throw new Error("Reversible write effect evidence is invalid");
+    }
+    return;
+  }
+  throw new Error("The trusted effect is outside the Host auto-approval ceiling");
 }
 
 function assertHostAdjudicationRequestBinding(

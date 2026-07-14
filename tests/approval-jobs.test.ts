@@ -488,7 +488,7 @@ test("Host-first can independently allow a trusted read-only shell inspection", 
     purpose: "Inspect tracked repository state without mutation.",
     blockedBy: "The classifier broadened a read-only shell capability.",
     minimumAccess: ["shell.execute"],
-    targets: ["git status --short --branch && git ls-files"],
+    targets: ["git diff -- README.md | grep -E 'rm -rf|git push'"],
     sideEffects: ["No mutation capability is requested."],
     dataExposure: ["No data leaves the workspace."],
     failureModes: ["The inspection command may fail without changing state."],
@@ -503,8 +503,16 @@ test("Host-first can independently allow a trusted read-only shell inspection", 
   const approval = await requestJobApproval(cwd, job.id, job.workerToken, {
     actionFingerprint: fingerprint,
     toolName: "bash",
-    actionSummary: "bash git status --short --branch && git ls-files",
+    actionSummary: "bash git diff -- README.md | grep -E 'rm -rf|git push'",
     trustedReadOnly: true,
+    effectAssessment: {
+      version: 1,
+      source: "deterministic-shell",
+      effect: "read-only",
+      reversibility: "read-only",
+      capabilities: ["shell.execute"],
+      reasonCode: "read-only-shell",
+    },
     decision: {
       decision: "require-approval",
       risk: "high",
@@ -532,6 +540,7 @@ test("Host-first can independently allow a trusted read-only shell inspection", 
   };
   const approved = await approveJob(cwd, job.id, approval.id, "once", receipt);
   assert.equal(approved.approval.trustedReadOnly, true);
+  assert.equal(approved.approval.effectAssessment?.effect, "read-only");
   assert.equal(approved.lease.principal, "host-model");
 
   const untrustedFingerprint = "d".repeat(64);

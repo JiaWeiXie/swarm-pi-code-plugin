@@ -261,20 +261,28 @@ Host Assistance is on by default. A new project uses Host-first review with a
 Reversible automatic ceiling and Discovery gate review. The Worker supplies a
 detailed purpose, minimum access, exact targets, failure modes, reversibility,
 rollback, verification, risk, and fallback. The active Codex or Claude model
-independently compares that assessment with the original intent and immutable
-policy. It may auto-resolve bounded public/read-only context or one exact
+independently compares that untrusted Worker assessment with the original
+intent, immutable policy, and a trusted runtime `effectAssessment`. It may
+auto-resolve bounded public/read-only context or one exact
 in-scope reversible action by writing an auditable receipt; insufficient or
 high-risk evidence falls back to the user. Legacy policies missing these fields
 remain User-only until resaved. Strict never gains a capability through a Host
 receipt, and secrets, private connectors, Git metadata, deletion, delivery,
 deployment, messaging, and transactions are never auto-approved.
 
-For Bash approvals, `shell.execute` alone is never considered read-only. The
-runner derives a `trustedReadOnly` marker from the complete command using a
-small fail-closed inspection grammar that rejects expansion, redirection,
-backgrounding, alternate branches, path escape, and write/exec flags. The Host
-still reviews the exact command and fingerprint independently; unknown shell
-syntax falls back to the user instead of broadening the lease.
+In Adaptive mode, a structure-aware, fail-closed Bash analyzer now provides a
+real deterministic read-only fast path before the model classifier. It accepts
+only allowlisted inspection executables and proves every `&&`, `||`, pipeline,
+semicolon, or newline segment independently. Quoted patterns and heredoc data
+are not interpreted as executable commands by hard-deny checks. Expansion,
+redirection, backgrounding, loops, interpreters, build/test execution, path
+escape, and write/exec flags remain supervisor-gated. Remaining classifier
+capability claims are normalized to the runtime-derived action capabilities and
+retained as audit evidence instead of turning a harmless mismatch into a
+denial; a claimed unproven write or network effect still requires approval. If
+an approval is still required, the runner persists both the legacy
+`trustedReadOnly` marker and authoritative `effectAssessment`; unknown effects
+fall back to the user rather than broadening a lease.
 
 Role routing keeps each responsibility's primary model, Thinking level, retry
 limit, and supported execution modes visible. Adaptive mode separately selects

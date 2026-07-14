@@ -267,6 +267,7 @@ function summarizeApproval(
     toolName: approval.toolName,
     actionSummary: approval.actionSummary,
     ...(approval.trustedReadOnly ? { trustedReadOnly: true } : {}),
+    ...(approval.effectAssessment ? { effectAssessment: approval.effectAssessment } : {}),
     decision: approval.decision,
     status: approval.status,
     requestedAt: approval.requestedAt,
@@ -353,6 +354,7 @@ function parsePolicyEvents(
           "reason",
           "action",
           "classifierCache",
+          "classifierEvidence",
           "model",
           "policyHash",
         ]

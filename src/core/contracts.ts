@@ -75,6 +75,30 @@ export interface WorkerAssessment {
   fallback: string;
 }
 
+export type ActionEffectKind = "read-only" | "reversible-workspace-write" | "network" | "unknown";
+
+/** Trusted runtime evidence; unlike WorkerAssessment, this is not worker-authored advice. */
+export interface ActionEffectAssessment {
+  version: 1;
+  source: "deterministic-tool" | "deterministic-shell";
+  effect: ActionEffectKind;
+  reversibility: Reversibility;
+  capabilities: Capability[];
+  reasonCode:
+    | "read-only-tool"
+    | "read-only-shell"
+    | "reversible-file-tool"
+    | "network-action"
+    | "unproven-shell-effect"
+    | "unclassified-action";
+}
+
+export interface ClassifierEvidence {
+  claimedCapabilities: string[];
+  runtimeCapabilities: Capability[];
+  normalized: boolean;
+}
+
 export interface HostAssistanceRequestBase {
   /** Optional only for persisted legacy requests; new tool calls require it. */
   workerAssessment?: WorkerAssessment;
@@ -553,6 +577,7 @@ export interface PolicyDecision {
   policyHash: string;
   scopeHash?: string;
   model?: string;
+  classifierEvidence?: ClassifierEvidence;
 }
 
 export interface ApprovalRequest {
@@ -564,6 +589,7 @@ export interface ApprovalRequest {
   toolName: string;
   actionSummary: string;
   trustedReadOnly?: boolean;
+  effectAssessment?: ActionEffectAssessment;
   decision: PolicyDecision;
   status: "pending" | "approved" | "denied" | "expired" | "consumed";
   requestedAt: string;
@@ -791,6 +817,7 @@ export interface AuditPolicyEvent {
   reason?: string;
   action?: Record<string, unknown>;
   classifierCache?: "miss" | "hit" | "coalesced";
+  classifierEvidence?: ClassifierEvidence;
   model?: string;
   policyHash?: string;
 }
@@ -804,6 +831,7 @@ export interface AuditApproval {
   toolName: string;
   actionSummary: string;
   trustedReadOnly?: boolean;
+  effectAssessment?: ActionEffectAssessment;
   decision: PolicyDecision;
   status: ApprovalRequest["status"];
   requestedAt: string;

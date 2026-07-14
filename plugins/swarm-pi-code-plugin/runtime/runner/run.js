@@ -16,8 +16,7 @@ import { createModelCatalog, describeModels, describeProviders, modelId, orderMo
 import { createWorkerSession } from "../pi/runtime.js";
 import { createSandboxRunner } from "../sandbox/runner.js";
 import { PiPolicyClassifier } from "../policy/classifier.js";
-import { ClassifierDecisionCache, PolicyEngine, actionFingerprint, } from "../policy/engine.js";
-import { isReadOnlyShellCommand } from "../policy/read-only-shell.js";
+import { ClassifierDecisionCache, PolicyEngine, actionFingerprint, assessPolicyActionEffect, } from "../policy/engine.js";
 import { assertTaskAdmitted, assertPathAllowed, assertChangedPathsAllowed, bindProjectPolicy, compileEffectiveProjectPolicy, loadRepositoryDenyRules, ProjectPolicyError, renderProjectPolicy, } from "../policy/project-policy.js";
 import { exportJobAudit } from "../audit/export.js";
 import { acknowledgeJob, attachJobProcess, cancelJob, finishJob, getJob, heartbeatJob, JOB_HEARTBEAT_INTERVAL_MS, listJobs, markJobRunning, modelConfigurationSnapshotHash, readJobPrompt, readJobRequest, updateJobExecutionWorkspace, updateJobProgress, requestJobApproval, startJob, waitForApprovalResolution, createJobLeaseProvider, appendPolicyEvent, waitForJob, approveJob, denyJobApproval, listJobApprovals, recordJobApprovalAdjudication, isTerminalJobStatus, requestJobHostAssistance, waitForHostAssistanceResolution, listJobHostRequests, resolveJobHostRequest, declineJobHostRequest, } from "../state/jobs.js";
@@ -987,6 +986,9 @@ async function runStartedJob(options) {
                         ? { action: summarizePolicyAction(action) }
                         : {}),
                     ...(metadata?.classifierCache ? { classifierCache: metadata.classifierCache } : {}),
+                    ...(decision.classifierEvidence
+                        ? { classifierEvidence: decision.classifierEvidence }
+                        : {}),
                     model: decision.model,
                     policyHash: decision.policyHash,
                 });
@@ -2443,6 +2445,9 @@ async function runIsolatedExperimentChild(options) {
                     decision: decision.decision,
                     risk: decision.risk,
                     reason: decision.reason.slice(0, 500),
+                    ...(decision.classifierEvidence
+                        ? { classifierEvidence: decision.classifierEvidence }
+                        : {}),
                     policyHash: decision.policyHash,
                 });
             },
@@ -2685,13 +2690,15 @@ async function handlePolicyApproval(options) {
     return withApprovalQueue(options.jobId, async () => {
         if (options.signal?.aborted)
             throw new Error("Approval wait was cancelled");
+        const effectAssessment = assessPolicyActionEffect(options.action);
         const approval = await requestJobApproval(options.cwd, options.jobId, options.workerToken, {
             actionFingerprint: options.fingerprint,
             toolName: options.action.toolName,
             actionSummary: summarizePolicyAction(options.action),
-            ...(isReadOnlyPolicyAction(options.action) ? { trustedReadOnly: true } : {}),
+            ...(effectAssessment.effect === "read-only" ? { trustedReadOnly: true } : {}),
+            effectAssessment,
             decision: options.decision,
-            workerAssessment: policyWorkerAssessment(options.action, options.decision),
+            workerAssessment: policyWorkerAssessment(options.action, options.decision, effectAssessment),
             expiresAt: new Date(options.deadline).toISOString(),
         });
         return waitForApprovalResolution(options.cwd, options.jobId, options.workerToken, approval.id, options.signal);
@@ -2750,9 +2757,9 @@ function summarizePolicyAction(action) {
     const command = typeof action.input.command === "string" ? action.input.command : JSON.stringify(action.input);
     return `${action.toolName} ${command.slice(0, 1_500)}`;
 }
-function policyWorkerAssessment(action, decision) {
+function policyWorkerAssessment(action, decision, effectAssessment = assessPolicyActionEffect(action)) {
     const summary = summarizePolicyAction(action);
-    const trustedReadOnly = isReadOnlyPolicyAction(action);
+    const trustedReadOnly = effectAssessment.effect === "read-only";
     const mutation = decision.capabilities.some((capability) => capability === "filesystem.write-workspace" ||
         (capability === "shell.execute" && !trustedReadOnly) ||
         capability === "network.connect");
@@ -2778,11 +2785,7 @@ function policyWorkerAssessment(action, decision) {
             ...decision.constraints,
             "Bind any approval to this exact action fingerprint and policy snapshot.",
         ],
-        reversibility: mutation
-            ? reversibleFileMutation
-                ? "reversible"
-                : "partially-reversible"
-            : "read-only",
+        reversibility: effectAssessment.reversibility,
         rollback: reversibleFileMutation
             ? "Restore the affected path from the job worktree baseline before delivery."
             : mutation
@@ -2794,11 +2797,6 @@ function policyWorkerAssessment(action, decision) {
         proposedRisk: decision.risk,
         fallback: "Ask the user when the active Host cannot validate the bounded request.",
     };
-}
-function isReadOnlyPolicyAction(action) {
-    if (action.toolName !== "bash" || typeof action.input.command !== "string")
-        return false;
-    return isReadOnlyShellCommand(action.input.command);
 }
 function hostAssistanceUnavailable(reason, message) {
     const base = {

@@ -2,12 +2,24 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 
 import type {
+  ActionEffectAssessment,
   Capability,
   CapabilityLease,
   PolicyDecision,
   PolicySnapshot,
   RiskLevel,
 } from "../core/contracts.js";
+import {
+  analyzeShellCommand,
+  isReadOnlyGitBranch,
+  isReadOnlyShellCommand,
+  isReadOnlyShellInvocation,
+  isVersionProbeInvocation,
+  parseGitInvocation,
+  shellPathOperands,
+  type ShellCommandAnalysis,
+  type ShellCommandInvocation,
+} from "./read-only-shell.js";
 
 export interface PolicyAction {
   toolName: string;
@@ -219,6 +231,20 @@ export class PolicyEngine {
         fingerprint,
       );
     }
+    const effectAssessment = assessPolicyActionEffect(action);
+    if (effectAssessment.effect === "read-only") {
+      return this.record(
+        action,
+        decision(
+          "allow",
+          "low",
+          capabilities,
+          "Adaptive deterministic read-only fast path.",
+          this.snapshot,
+        ),
+        fingerprint,
+      );
+    }
     if (
       action.domain &&
       trustedDomain(action.domain, this.snapshot.adaptivePolicy.trustedDomains)
@@ -348,14 +374,63 @@ export function capabilitiesFor(action: PolicyAction): Capability[] {
   return [];
 }
 
+export function assessPolicyActionEffect(action: PolicyAction): ActionEffectAssessment {
+  const capabilities = capabilitiesFor(action);
+  if (isReadonlyTool(action.toolName)) {
+    return {
+      version: 1,
+      source: "deterministic-tool",
+      effect: "read-only",
+      reversibility: "read-only",
+      capabilities,
+      reasonCode: "read-only-tool",
+    };
+  }
+  if (action.toolName === "bash" && typeof action.input.command === "string") {
+    const readOnly = isReadOnlyShellCommand(action.input.command, action.cwd);
+    return {
+      version: 1,
+      source: "deterministic-shell",
+      effect: readOnly ? "read-only" : "unknown",
+      reversibility: readOnly ? "read-only" : "partially-reversible",
+      capabilities,
+      reasonCode: readOnly ? "read-only-shell" : "unproven-shell-effect",
+    };
+  }
+  if (action.toolName === "write" || action.toolName === "edit") {
+    return {
+      version: 1,
+      source: "deterministic-tool",
+      effect: "reversible-workspace-write",
+      reversibility: "reversible",
+      capabilities,
+      reasonCode: "reversible-file-tool",
+    };
+  }
+  if (action.domain) {
+    return {
+      version: 1,
+      source: "deterministic-tool",
+      effect: "network",
+      reversibility: "partially-reversible",
+      capabilities,
+      reasonCode: "network-action",
+    };
+  }
+  return {
+    version: 1,
+    source: "deterministic-tool",
+    effect: "unknown",
+    reversibility: "partially-reversible",
+    capabilities,
+    reasonCode: "unclassified-action",
+  };
+}
+
 function hardDeny(action: PolicyAction, snapshot: PolicySnapshot): PolicyDecision | null {
   if (action.toolName === "bash" && typeof action.input.command === "string") {
-    const command = action.input.command;
-    if (
-      /\b(?:sudo|su)\b|\bgit\s+(?:add|commit|checkout|switch|branch|merge|rebase|reset|push|tag|worktree)\b|\b(?:kubectl\s+(?:apply|delete)|helm\s+(?:install|upgrade|uninstall)|terraform\s+(?:apply|destroy))\b/.test(
-        command,
-      )
-    ) {
+    const analysis = analyzeShellCommand(action.input.command);
+    if (analysis.commands.some(isImmutableShellInvocation)) {
       return decision(
         "deny",
         "critical",
@@ -364,11 +439,7 @@ function hardDeny(action: PolicyAction, snapshot: PolicySnapshot): PolicyDecisio
         snapshot,
       );
     }
-    if (
-      /\b(?:brew|apt(?:-get)?|dnf|yum|pacman)\s+(?:install|upgrade)\b|\bnpm\s+(?:install|i)\s+(?:-g|--global)\b|\bpnpm\s+(?:add|install)\s+(?:-g|--global)\b/.test(
-        command,
-      )
-    ) {
+    if (analysis.commands.some(isHostProvisioningInvocation)) {
       return decision(
         "deny",
         "critical",
@@ -379,7 +450,7 @@ function hardDeny(action: PolicyAction, snapshot: PolicySnapshot): PolicyDecisio
     }
     if (
       snapshot.rolePolicy.role === "scaffolder" &&
-      /\b(?:npm|pnpm|yarn|bun|pip|pip3|uv)\s+(?:install|ci|add|sync)\b/.test(command)
+      analysis.commands.some(isDependencyInstallInvocation)
     ) {
       return decision(
         "deny",
@@ -391,8 +462,16 @@ function hardDeny(action: PolicyAction, snapshot: PolicySnapshot): PolicyDecisio
     }
     if (
       snapshot.rolePolicy.role === "environment-engineer" &&
-      /\b(?:npm|pnpm|yarn|bun|pip|pip3|uv)\s+(?:install|ci|add|sync)\b/.test(command) &&
-      !/--ignore-scripts|--mode[= ]skip-build/.test(command)
+      analysis.commands.some(
+        (invocation) =>
+          isDependencyInstallInvocation(invocation) &&
+          !invocation.args.some(
+            (arg, index) =>
+              arg === "--ignore-scripts" ||
+              arg === "--mode=skip-build" ||
+              (arg === "--mode" && invocation.args[index + 1] === "skip-build"),
+          ),
+      )
     ) {
       return approvalDecision(
         ["shell.execute"],
@@ -400,9 +479,7 @@ function hardDeny(action: PolicyAction, snapshot: PolicySnapshot): PolicyDecisio
         snapshot,
       );
     }
-    if (
-      /(?:^|[\s'"])(?:\.git|\.swarm-pi-code-plugin|\.env(?:\.local)?)(?:[\s/'"]|$)/.test(command)
-    ) {
+    if (shellPathOperands(analysis).some(isProtectedShellPath)) {
       return decision(
         "deny",
         "critical",
@@ -410,6 +487,17 @@ function hardDeny(action: PolicyAction, snapshot: PolicySnapshot): PolicyDecisio
         "Shell access to protected control and credential paths is denied.",
         snapshot,
       );
+    }
+    if (shellPathOperands(analysis).some((value) => shellPathEscapesWorkspace(value, action.cwd))) {
+      return approvalDecision(
+        ["shell.execute"],
+        "Workspace-external shell paths require supervisor approval.",
+        snapshot,
+      );
+    }
+    const reviewReason = shellHumanReviewReason(analysis);
+    if (reviewReason) {
+      return approvalDecision(["shell.execute"], reviewReason, snapshot);
     }
   }
   if (action.domain && isForbiddenDomain(action.domain)) {
@@ -485,30 +573,259 @@ function validateClassifierDecision(
     throw new Error("invalid decision");
   if (!["low", "medium", "high", "critical"].includes(value.risk)) throw new Error("invalid risk");
   if (value.policyHash !== snapshot.hash) throw new Error("policy hash mismatch");
-  if (value.capabilities.some((item) => !capabilities.includes(item)))
-    throw new Error("classifier broadened capabilities");
+  const claimedCapabilities = [...new Set(value.capabilities)];
+  const normalized =
+    claimedCapabilities.length !== capabilities.length ||
+    claimedCapabilities.some((item) => !capabilities.includes(item));
+  const materialUnexpectedCapabilities = claimedCapabilities.filter(
+    (item) =>
+      !capabilities.includes(item) && item !== "filesystem.read-workspace" && item !== "git.read",
+  );
+  const classifierEvidence = {
+    claimedCapabilities,
+    runtimeCapabilities: [...capabilities],
+    normalized,
+  };
   if (value.risk === "critical" && value.decision !== "deny") {
-    return decision(
-      "deny",
-      "critical",
-      capabilities,
-      "Critical classifier decisions cannot be approved.",
-      snapshot,
-    );
+    return {
+      ...decision(
+        "deny",
+        "critical",
+        capabilities,
+        "Critical classifier decisions cannot be approved.",
+        snapshot,
+      ),
+      classifierEvidence,
+    };
   }
   if (value.risk === "high" && value.decision === "allow") {
-    return approvalDecision(
-      capabilities,
-      value.reason || "High-risk action requires approval.",
-      snapshot,
-      value.model,
-    );
+    return {
+      ...approvalDecision(
+        capabilities,
+        value.reason || "High-risk action requires approval.",
+        snapshot,
+        value.model,
+      ),
+      classifierEvidence,
+    };
+  }
+  if (materialUnexpectedCapabilities.length > 0 && value.decision === "allow") {
+    return {
+      ...approvalDecision(
+        capabilities,
+        `Classifier reported an unproven material effect: ${materialUnexpectedCapabilities.join(", ")}.`,
+        snapshot,
+        value.model,
+      ),
+      classifierEvidence,
+    };
   }
   return {
     ...value,
     capabilities,
-    constraints: Array.isArray(value.constraints) ? value.constraints : [],
+    constraints: [
+      ...(Array.isArray(value.constraints) ? value.constraints : []),
+      ...(normalized
+        ? ["Classifier capability claims normalized to runtime-derived effects."]
+        : []),
+    ],
+    classifierEvidence,
   };
+}
+
+function isImmutableShellInvocation(invocation: ShellCommandInvocation): boolean {
+  if (invocation.executable === "sudo" || invocation.executable === "su") return true;
+  if (invocation.executable === "git") {
+    const parsed = parseGitInvocation(invocation.args);
+    if (!parsed) return false;
+    if (
+      ["add", "commit", "checkout", "switch", "merge", "rebase", "reset", "push"].includes(
+        parsed.subcommand,
+      )
+    ) {
+      return true;
+    }
+    if (parsed.subcommand === "branch") return !isReadOnlyGitBranch(parsed.args);
+    if (parsed.subcommand === "tag") {
+      return !(
+        parsed.args.length === 0 ||
+        parsed.args.some((arg) =>
+          [
+            "-l",
+            "--list",
+            "--contains",
+            "--no-contains",
+            "--merged",
+            "--no-merged",
+            "--points-at",
+            "--format",
+            "--sort",
+          ].some((option) => arg === option || arg.startsWith(`${option}=`)),
+        )
+      );
+    }
+    if (parsed.subcommand === "worktree") return parsed.args[0] !== "list";
+  }
+  if (invocation.executable === "kubectl")
+    return ["apply", "delete"].includes(invocation.args[0] ?? "");
+  if (invocation.executable === "helm")
+    return ["install", "upgrade", "uninstall"].includes(invocation.args[0] ?? "");
+  return (
+    invocation.executable === "terraform" && ["apply", "destroy"].includes(invocation.args[0] ?? "")
+  );
+}
+
+function isHostProvisioningInvocation(invocation: ShellCommandInvocation): boolean {
+  if (["brew", "apt", "apt-get", "dnf", "yum", "pacman"].includes(invocation.executable)) {
+    return invocation.args.some((arg) => arg === "install" || arg === "upgrade");
+  }
+  if (!["npm", "pnpm"].includes(invocation.executable)) return false;
+  const lifecycle = invocation.args.some((arg) => ["install", "i", "add"].includes(arg));
+  const global = invocation.args.some((arg) => arg === "-g" || arg === "--global");
+  return lifecycle && global;
+}
+
+function isDependencyInstallInvocation(invocation: ShellCommandInvocation): boolean {
+  if (!["npm", "pnpm", "yarn", "bun", "pip", "pip3", "uv"].includes(invocation.executable)) {
+    return false;
+  }
+  return invocation.args.some((arg) => ["install", "i", "ci", "add", "sync"].includes(arg));
+}
+
+function isProtectedShellPath(value: string): boolean {
+  const segments = value.replaceAll("\\", "/").split("/").filter(Boolean);
+  return (
+    segments.includes(".git") ||
+    segments.includes(".swarm-pi-code-plugin") ||
+    segments.some((segment) => [".env", ".env.local", ".swarm-pi-policy.json"].includes(segment))
+  );
+}
+
+function shellPathEscapesWorkspace(value: string, cwd: string): boolean {
+  const normalized = value.replaceAll("\\", "/");
+  if (normalized.split("/").includes("..")) return true;
+  if (!path.isAbsolute(value)) return false;
+  const relative = path.relative(path.resolve(cwd), path.resolve(value));
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+function shellHumanReviewReason(analysis: ShellCommandAnalysis): string | null {
+  if (
+    analysis.malformed ||
+    analysis.hasExpansion ||
+    analysis.hasCommandSubstitution ||
+    analysis.hasBackticks ||
+    analysis.hasHereDoc ||
+    analysis.hasControlFlow ||
+    analysis.hasAssignments ||
+    analysis.redirectionTargets.length > 0
+  ) {
+    return "Shell expansion, control flow, or redirection requires supervisor approval.";
+  }
+  if (
+    analysis.commands.some(
+      (invocation) =>
+        [
+          "sh",
+          "bash",
+          "zsh",
+          "fish",
+          "env",
+          "exec",
+          "eval",
+          "builtin",
+          "nohup",
+          "nice",
+          "timeout",
+          "setsid",
+          "parallel",
+          "source",
+          ".",
+          "xargs",
+          "python",
+          "python3",
+          "node",
+          "ruby",
+          "perl",
+          "awk",
+          "osascript",
+        ].includes(invocation.executable) && !isVersionProbeInvocation(invocation),
+    )
+  ) {
+    return "Shell wrappers and interpreters require supervisor approval.";
+  }
+  if (
+    analysis.commands.some((invocation) =>
+      [
+        "rm",
+        "rmdir",
+        "unlink",
+        "mv",
+        "cp",
+        "touch",
+        "mkdir",
+        "chmod",
+        "chown",
+        "ln",
+        "truncate",
+        "install",
+        "tee",
+        "dd",
+        "patch",
+        "curl",
+        "wget",
+        "ssh",
+        "scp",
+        "rsync",
+      ].includes(invocation.executable),
+    )
+  ) {
+    return "Filesystem mutation and shell network tools require supervisor approval.";
+  }
+  if (analysis.commands.some(isBuildOrTestInvocation)) {
+    return "Build, test, and package lifecycle commands require supervisor approval.";
+  }
+  if (
+    analysis.commands.some(
+      (invocation) =>
+        ["git", "find", "rg", "fd", "sed", "sort", "tree", "file", "diff", "cmp", "tail"].includes(
+          invocation.executable,
+        ) && !isReadOnlyShellInvocation(invocation),
+    )
+  ) {
+    return "Unproven write or executable flags require supervisor approval.";
+  }
+  if (
+    analysis.commands.some((invocation) => {
+      if (invocation.executable !== "command") return false;
+      return invocation.args.length !== 2 || invocation.args[0] !== "-v";
+    })
+  ) {
+    return "Shell command wrappers require supervisor approval.";
+  }
+  return null;
+}
+
+function isBuildOrTestInvocation(invocation: ShellCommandInvocation): boolean {
+  if (
+    ["make", "ninja", "gradle", "gradlew", "mvn", "bazel", "xcodebuild"].includes(
+      invocation.executable,
+    )
+  ) {
+    return true;
+  }
+  if (["npm", "pnpm", "yarn", "bun"].includes(invocation.executable)) {
+    return invocation.args.some((arg) =>
+      ["test", "run", "exec", "build", "install", "i", "ci", "add"].includes(arg),
+    );
+  }
+  if (invocation.executable === "cargo") {
+    return invocation.args.some((arg) =>
+      ["test", "build", "check", "run", "install"].includes(arg),
+    );
+  }
+  if (["pytest", "go", "dotnet", "swift", "swiftc"].includes(invocation.executable)) return true;
+  return false;
 }
 
 function decision(

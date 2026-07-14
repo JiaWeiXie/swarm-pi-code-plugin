@@ -82,9 +82,22 @@ Every proposed action is evaluated in this order:
 8. a command-specific sandbox profile and independent tool enforcement.
 
 Policy decisions are `allow`, `deny`, or `require-approval`, with a risk level,
-capabilities, constraints, reason, model, and policy hash. Low and medium risk
-actions may be allowed within the effective ceiling. High risk actions require
-approval. Critical and hard-denied actions cannot be approved.
+capabilities, constraints, reason, model, and policy hash. Action capabilities
+are derived by the runtime and are authoritative. A classifier's claimed
+capabilities are normalized to that exact set and retained in
+`classifierEvidence`; a harmless over- or under-claim no longer fails the whole
+decision. An unexpected material write, network, or unknown capability still
+requires approval. Low and medium risk actions may be allowed within the effective
+ceiling. High risk actions require approval. Critical and hard-denied actions
+cannot be approved.
+
+Adaptive Bash hard-deny checks use executable positions and path operands from
+a bounded shell analysis rather than scanning undifferentiated command text.
+Quoted grep patterns, output prose, and heredoc bodies are inert data. Actual
+privilege, Git delivery/mutation, deployment, host provisioning, and protected
+path operands retain their existing ceilings. The same analysis supplies the
+deterministic read-only fast path when every command and composition operator is
+proven safe.
 
 An approval creates a capability lease scoped to one matching action or to the
 same normalized action family for the current job. Leases include the job
@@ -175,8 +188,9 @@ violating paths, `policyHash`, `scopeHash`, and safe next actions.
 Policy-engine decisions are appended to the job's `policy-events.jsonl`.
 Scoped-tool `ProjectPolicyError` denials are also recorded there and increment
 `policySummary.denied`. The audit export includes `policy-events.jsonl`, full
-redacted Host Assistance records and WorkerAssessments, approval receipts, and
-lease principals/constraints.
+redacted Host Assistance records and WorkerAssessments, runtime
+`effectAssessment` and classifier-normalization evidence, approval receipts,
+and lease principals/constraints.
 Postflight failure is reported in the terminal result and is not necessarily a
 separate policy event.
 

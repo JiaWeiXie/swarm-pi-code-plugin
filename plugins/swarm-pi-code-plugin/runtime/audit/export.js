@@ -191,6 +191,7 @@ function summarizeApproval(approval, roots, counter) {
         toolName: approval.toolName,
         actionSummary: approval.actionSummary,
         ...(approval.trustedReadOnly ? { trustedReadOnly: true } : {}),
+        ...(approval.effectAssessment ? { effectAssessment: approval.effectAssessment } : {}),
         decision: approval.decision,
         status: approval.status,
         requestedAt: approval.requestedAt,
@@ -268,6 +269,7 @@ function parsePolicyEvents(raw, roots, counter) {
             "reason",
             "action",
             "classifierCache",
+            "classifierEvidence",
             "model",
             "policyHash",
         ]
