@@ -7,9 +7,12 @@ import test from "node:test";
 import {
   assertPolicySnapshotValid,
   createPolicySnapshot,
+  defaultAdvisorPolicy,
+  defaultHostAssistancePolicy,
   defaultRoleForTask,
   policySnapshotHash,
   resolveRolePolicy,
+  WORKFLOW_BOUNDS,
 } from "../src/orchestration/roles.js";
 import { ClassifierDecisionCache, PolicyEngine, actionFingerprint } from "../src/policy/engine.js";
 import { shouldBypassGenericPolicy } from "../src/policy/extension.js";
@@ -54,6 +57,41 @@ test("role registry keeps task compatibility and requested thinking defaults", (
       "background",
     ),
     false,
+  );
+});
+
+test("workflow defaults and new snapshots share canonical bounds", () => {
+  assert.equal(
+    defaultHostAssistancePolicy().maxRequests,
+    WORKFLOW_BOUNDS.hostAssistance.requests.default,
+  );
+  assert.equal(
+    defaultHostAssistancePolicy().maxFanOut,
+    WORKFLOW_BOUNDS.hostAssistance.fanOut.default,
+  );
+  assert.equal(defaultAdvisorPolicy().maxRequests, WORKFLOW_BOUNDS.advisor.requests.default);
+  assert.equal(
+    defaultAdvisorPolicy().maxPerspectives,
+    WORKFLOW_BOUNDS.advisor.perspectives.default,
+  );
+  assert.throws(
+    () =>
+      createPolicySnapshot({
+        sandboxMode: "adaptive",
+        approvalMode: "wait",
+        rolePolicy: resolveRolePolicy("scout"),
+        adaptivePolicy: {
+          rules: [
+            {
+              id: "bad-domain",
+              effect: "allow",
+              capability: "network.connect",
+              domain: "https://example.test",
+            },
+          ],
+        },
+      }),
+    /Adaptive policy rule 1/,
   );
 });
 
@@ -223,11 +261,20 @@ test("v3 policy snapshot carries bounded decision, host, and advisor controls", 
   const effectiveProjectPolicy = await compileEffectiveProjectPolicy({
     cwd: workspace,
     profile: { dirs: ["src"], tasks: ["discover"] },
+    repositoryDenyRules: [
+      {
+        id: "repo:no-network",
+        effect: "deny",
+        capability: "network.connect",
+        domain: "example.test",
+      },
+    ],
   });
   const snapshot = createPolicySnapshot({
     sandboxMode: "adaptive",
     approvalMode: "wait",
     rolePolicy: resolveRolePolicy("analyst"),
+    adaptivePolicy: { rules: effectiveProjectPolicy.repositoryDenyRules },
     effectiveProjectPolicy,
     decisionMode: "power",
     hostAssistance: {
@@ -247,6 +294,7 @@ test("v3 policy snapshot carries bounded decision, host, and advisor controls", 
     sandboxMode: snapshot.sandboxMode,
     approvalMode: snapshot.approvalMode,
     rolePolicy: resolveRolePolicy("experimenter"),
+    adaptivePolicy: snapshot.adaptivePolicy,
     effectiveProjectPolicy,
     parentPolicyHash: snapshot.hash,
     decisionMode: snapshot.decisionMode,
@@ -255,6 +303,7 @@ test("v3 policy snapshot carries bounded decision, host, and advisor controls", 
     contextBudget: snapshot.contextBudget,
   });
   assert.equal(childSnapshot.parentPolicyHash, snapshot.hash);
+  assert.equal(childSnapshot.adaptivePolicy.rules[0]?.id, "repo:no-network");
   assert.notEqual(childSnapshot.hash, snapshot.hash);
   assert.doesNotThrow(() => assertPolicySnapshotValid(childSnapshot));
   const invalidParentHash = structuredClone(childSnapshot);
@@ -273,6 +322,20 @@ test("v3 policy snapshot carries bounded decision, host, and advisor controls", 
   invalidDoctrine.doctrine = "unsupported" as never;
   invalidDoctrine.hash = policySnapshotHash(invalidDoctrine);
   assert.throws(() => assertPolicySnapshotValid(invalidDoctrine), /v3 controls|invalid/i);
+  assert.throws(
+    () =>
+      createPolicySnapshot({
+        sandboxMode: "adaptive",
+        approvalMode: "wait",
+        rolePolicy: resolveRolePolicy("analyst"),
+        adaptivePolicy: {
+          rules: [{ id: "repo:forged", effect: "deny", capability: "network.connect" }],
+        },
+        effectiveProjectPolicy,
+        decisionMode: "balance",
+      }),
+    /reserved repository rule/,
+  );
 });
 
 test("a snapshot without an effective project policy stays version 1", () => {

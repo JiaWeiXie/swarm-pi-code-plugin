@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import type { WorkerResult } from "../src/core/contracts.js";
+import { WORKFLOW_BOUNDS } from "../src/orchestration/roles.js";
 import {
   acknowledgeJob,
   attachJobProcess,
@@ -52,6 +53,57 @@ test("legacy Host Assistance settings do not gain Host-first authority on load",
   assert.equal(loaded.config.hostAssistance?.reviewMode, "user-only");
   assert.equal(loaded.config.hostAssistance?.autoApprovalScope, "context-only");
   assert.equal(loaded.config.hostAssistance?.autoApproveDiscoveryGates, false);
+});
+
+test("legacy workflow values clamp to canonical bounds and malformed rules fail closed", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-legacy-workflow-bounds-"));
+  await updateState(workspace, (state) => {
+    state.config.contextBudget = 999;
+    state.config.hostAssistance = {
+      enabled: true,
+      mode: "on",
+      contextClasses: ["workspace"],
+      privateConnector: "ask",
+      maxRequests: 1,
+      maxFanOut: 99,
+    };
+    state.config.advisor = {
+      enabled: false,
+      targets: ["review"],
+      maxRequests: 99,
+      maxPerspectives: 99,
+    };
+    state.config.adaptivePolicy = {
+      classifierModels: [],
+      classifierThinkingLevel: "medium",
+      approvalPolicy: "deny",
+      trustedDomains: [],
+      rules: [
+        { id: "valid", effect: "ask", capability: "shell.execute" },
+        { id: "invalid", effect: "allow", capability: "invalid" as never },
+      ],
+      diagnostics: false,
+    };
+  });
+  const loaded = await loadState(workspace);
+  assert.equal(loaded.config.contextBudget, WORKFLOW_BOUNDS.contextBudget.max);
+  assert.equal(loaded.config.hostAssistance?.maxFanOut, 1);
+  assert.equal(loaded.config.advisor?.maxRequests, WORKFLOW_BOUNDS.advisor.requests.max);
+  assert.equal(loaded.config.advisor?.maxPerspectives, WORKFLOW_BOUNDS.advisor.perspectives.max);
+  assert.deepEqual(loaded.config.adaptivePolicy?.rules, [
+    { id: "valid", effect: "ask", capability: "shell.execute" },
+  ]);
+
+  const stateFile = await resolveStateFile(workspace);
+  const partial = JSON.parse(fs.readFileSync(stateFile, "utf8")) as {
+    config: { hostAssistance: Record<string, unknown> };
+  };
+  partial.config.hostAssistance.maxRequests = 0;
+  delete partial.config.hostAssistance.maxFanOut;
+  fs.writeFileSync(stateFile, `${JSON.stringify(partial, null, 2)}\n`);
+  const reloaded = await loadState(workspace);
+  assert.equal(reloaded.config.hostAssistance?.maxRequests, 0);
+  assert.equal(reloaded.config.hostAssistance?.maxFanOut, 0);
 });
 
 function workerResult(status: WorkerResult["status"] = "succeeded"): WorkerResult {

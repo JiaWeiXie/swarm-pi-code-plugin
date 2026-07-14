@@ -60,7 +60,10 @@ credential store. Browser input becomes an opaque, session-local draft and
 never enters project artifacts or localStorage.
 
 See the [architecture reference](docs/architecture.md) and
-[configuration reference](docs/configuration.md) for implementation details.
+[configuration reference](docs/configuration.md), plus the
+[configuration field guide](docs/configuration-field-guide.md) for field
+defaults, plain-language keyword definitions, worked examples, safety tradeoffs,
+and setup-page Tips.
 See [Host Assistance and Discovery](docs/host-assistance-discovery.md) for the
 live worker-to-host context loop, schema-gated experiment micro-SDLC, Advisor
 boundaries, discover-to-plan handoff, and isolated Host Actions.
@@ -217,6 +220,12 @@ Existing projects keep their explicitly saved mode; a legacy configuration
 with no mode remains Strict. Jobs keep the mode and policy snapshot captured at
 start, so a later settings change affects only new Jobs.
 
+Repository deny rules keep their internal `repo:` identity across new and child
+snapshots only when they exactly match the immutable effective project policy;
+ordinary configuration cannot claim that reserved namespace. Partial legacy
+Host Assistance records also clamp default fan-out to their normalized request
+limit, so loading an older zero/one-request policy remains valid and fail-closed.
+
 Discovery Experiment children derive their stage-specific `experimenter`
 capability view from that frozen parent snapshot. Because different policy
 content must never reuse the same hash, the child has its own stage hash and
@@ -230,8 +239,10 @@ sent to external services. Unsupported platforms and missing dependencies fail
 closed and never fall back to an unsandboxed shell.
 
 Decision Mode controls bounded orchestration depth: Cost runs one base
-perspective, Balance two, and Power three. Host Assistance context budget and
-Advisor quotas are configured separately. Advisor is off by default and adds
+perspective, Balance two, and Power three. Host Assistance context allowance
+(Off, Compact, Standard, or Extended) and Advisor quotas are configured
+separately. Standard caps one returned context answer at 32,768 characters.
+Advisor is off by default and adds
 read-only, non-recursive consultations when enabled. The
 `first-principles-qds-v1` toggle is currently persisted metadata; the runtime does
 not yet execute an automatic Question/Delete/Simplify convergence pass.
@@ -618,10 +629,11 @@ mise run build
 
 ### Plugin versions
 
-Version 0.7.0 introduces stage-scoped Discover Sandboxes and Host-first
-adjudication as a backward-compatible minor release. Existing projects missing
-the new Host Assistance fields retain `user-only` behavior until explicitly
-resaved, so the upgrade does not silently expand authority.
+Version 0.8.0 adds guided configuration terminology, strict structured-policy
+validation, named Host context allowances, and clearer Host Action trigger
+boundaries. Existing projects keep readable legacy values and do not gain new
+authority until explicitly resaved. Version 0.7.0 introduced stage-scoped
+Discover Sandboxes and Host-first adjudication.
 
 The root `package.json` is the canonical plugin version. Check that the runtime
 package, lockfiles, Claude manifests and marketplace, and the Codex manifest all

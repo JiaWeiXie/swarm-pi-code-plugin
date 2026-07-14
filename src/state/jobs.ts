@@ -33,6 +33,7 @@ import type {
   WorkerAssessment,
   HostAdjudicationReceipt,
 } from "../core/contracts.js";
+import { hostContextCharacterLimit } from "../host-assistance/context-allowance.js";
 import { loadState, resolveStateDir, updateState, type JobRecord } from "./state.js";
 import type { ModelConfiguration } from "./model-config.js";
 
@@ -1422,7 +1423,10 @@ function normalizeHostAssistanceResponse(
   const base = {
     kind: "context" as const,
     requestId: record.id,
-    answer: `[UNTRUSTED_HOST_CONTEXT]\n${value.answer.slice(0, 64_000)}`,
+    answer: `[UNTRUSTED_HOST_CONTEXT]\n${value.answer.slice(
+      0,
+      hostContextCharacterLimit(record.request.budget),
+    )}`,
     claims,
     citations,
     conflicts: stringList(value.conflicts, 100),

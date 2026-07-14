@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_ADAPTIVE_POLICY, DEFAULT_BACKGROUND_ROLE_POLICY, isThinkingLevel, isWorkerRole, normalizeAdaptivePolicy, listDefaultRoles, defaultHostAssistancePolicy, defaultAdvisorPolicy, } from "../orchestration/roles.js";
+import { DEFAULT_ADAPTIVE_POLICY, DEFAULT_BACKGROUND_ROLE_POLICY, isThinkingLevel, isWorkerRole, normalizeAdaptivePolicy, normalizeAdaptivePolicyStrict, listDefaultRoles, defaultHostAssistancePolicy, defaultAdvisorPolicy, WORKFLOW_BOUNDS, } from "../orchestration/roles.js";
 import { createPiEnvironment, customProviderHeaderVariable } from "../pi/environment.js";
 import { executeSession } from "../pi/execute.js";
 import { createWorkerSession } from "../pi/runtime.js";
@@ -12,6 +12,7 @@ import { CredentialDraftVault } from "../providers/credentials.js";
 import { normalizeModelsEndpoint, normalizeProtocolRoot, stableCustomProviderId, } from "../providers/endpoints.js";
 import { detectSandboxAvailability } from "../sandbox/availability.js";
 import { assessWorkspace } from "../git/worktree.js";
+import { normalizeDelegatedTaskSelections } from "../policy/project-policy.js";
 import { loadModelConfiguration, modelPriority, parseModelConfiguration, saveModelConfiguration, resolveModelConfigurationFile, providerHeaderSecretRef, providerSecretRef, } from "../state/model-config.js";
 import { loadState, resolveStateDir, resolveStateFile, resolveWorkspaceRoot, saveProjectSettings, saveExecutionSettings, setModelPriority, defaultHostActionPolicy, } from "../state/state.js";
 import { discoverEndpoint, discoverLocalEndpoints, } from "./model-discovery.js";
@@ -315,6 +316,12 @@ export async function loadConfigurationView(cwd, env = process.env) {
     const rolePolicies = structuredClone(state.config.rolePolicies ?? {});
     const adaptivePolicy = normalizeAdaptivePolicy(state.config.adaptivePolicy);
     const backgroundRolePolicy = structuredClone(state.config.backgroundRolePolicy ?? DEFAULT_BACKGROUND_ROLE_POLICY);
+    const storedHostAssistance = structuredClone(state.config.hostAssistance ?? defaultHostAssistancePolicy());
+    const hostAssistance = {
+        ...storedHostAssistance,
+        mode: storedHostAssistance.enabled === false ? "off" : "on",
+        enabled: storedHostAssistance.enabled !== false,
+    };
     const selected = new Set([
         ...modelPriority(configuration),
         ...Object.values(rolePolicies).flatMap((policy) => policy.models ?? []),
@@ -371,8 +378,8 @@ export async function loadConfigurationView(cwd, env = process.env) {
             adaptivePolicy,
             backgroundRolePolicy,
             decisionMode: state.config.decisionMode ?? "balance",
-            hostAssistance: state.config.hostAssistance ?? defaultHostAssistancePolicy(),
-            contextBudget: state.config.contextBudget ?? 4,
+            hostAssistance,
+            contextBudget: state.config.contextBudget ?? WORKFLOW_BOUNDS.contextBudget.default,
             advisor: state.config.advisor ?? defaultAdvisorPolicy(),
             doctrine: state.config.doctrine ?? null,
             hostActions: state.config.hostActions ?? defaultHostActionPolicy(),
@@ -380,11 +387,12 @@ export async function loadConfigurationView(cwd, env = process.env) {
             .digest("hex")
             .slice(0, 24),
         decisionMode: state.config.decisionMode ?? "balance",
-        hostAssistance: structuredClone(state.config.hostAssistance ?? defaultHostAssistancePolicy()),
-        contextBudget: state.config.contextBudget ?? 4,
+        hostAssistance,
+        contextBudget: state.config.contextBudget ?? WORKFLOW_BOUNDS.contextBudget.default,
         advisor: structuredClone(state.config.advisor ?? defaultAdvisorPolicy()),
         doctrine: state.config.doctrine ?? null,
         hostActions: structuredClone(state.config.hostActions ?? defaultHostActionPolicy()),
+        workflowBounds: structuredClone(WORKFLOW_BOUNDS),
     };
 }
 function browserModel(model, available, configuration) {
@@ -634,15 +642,19 @@ function normalizeBoundedInteger(value, fallback, min, max, label) {
 function normalizeHostAssistance(value, fallback) {
     if (value === undefined)
         return structuredClone(fallback);
+    if (value.maxRequests === undefined || value.maxFanOut === undefined)
+        throw new Error("Host Assistance requests and fan-out are required when the section is submitted");
     const reviewMode = value.reviewMode ?? fallback.reviewMode ?? "user-only";
     const autoApprovalScope = value.autoApprovalScope ?? fallback.autoApprovalScope ?? "context-only";
     const autoApproveDiscoveryGates = value.autoApproveDiscoveryGates ?? fallback.autoApproveDiscoveryGates ?? false;
-    const contextClasses = Array.isArray(value.contextClasses)
-        ? [
-            ...new Set(value.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item))),
-        ]
-        : [];
-    if (value.mode !== "on" && value.mode !== "off" && value.mode !== "inherit")
+    const allowedContextClasses = ["workspace", "web", "docs", "paper", "connector", "skill"];
+    if (!Array.isArray(value.contextClasses) ||
+        value.contextClasses.some((item) => !allowedContextClasses.includes(item)))
+        throw new Error("Host Assistance context classes contain an unsupported value");
+    const contextClasses = [...new Set(value.contextClasses)];
+    if (value.mode === "inherit")
+        throw new Error("Project configuration cannot inherit Host Assistance; choose On or Off. CLI job overrides may still use inherit.");
+    if (value.mode !== "on" && value.mode !== "off")
         throw new Error("Invalid Host Assistance mode");
     if (value.privateConnector !== "ask" && value.privateConnector !== "deny")
         throw new Error("Invalid private connector policy");
@@ -652,13 +664,17 @@ function normalizeHostAssistance(value, fallback) {
         autoApprovalScope !== "read-only" &&
         autoApprovalScope !== "reversible")
         throw new Error("Invalid Host Assistance auto-approval scope");
+    const maxRequests = normalizeBoundedInteger(value.maxRequests, fallback.maxRequests, WORKFLOW_BOUNDS.hostAssistance.requests.min, WORKFLOW_BOUNDS.hostAssistance.requests.max, "Host Assistance request limit");
+    const maxFanOut = normalizeBoundedInteger(value.maxFanOut, fallback.maxFanOut, WORKFLOW_BOUNDS.hostAssistance.fanOut.min, WORKFLOW_BOUNDS.hostAssistance.fanOut.max, "Host Assistance fan-out");
+    if (maxFanOut > maxRequests)
+        throw new Error("Host Assistance fan-out cannot exceed its request limit");
     return {
         enabled: value.mode === "off" ? false : value.enabled !== false,
         mode: value.mode,
         contextClasses,
         privateConnector: value.privateConnector,
-        maxRequests: normalizeBoundedInteger(value.maxRequests, fallback.maxRequests, 0, 32, "Host Assistance request limit"),
-        maxFanOut: normalizeBoundedInteger(value.maxFanOut, fallback.maxFanOut, 0, 8, "Host Assistance fan-out"),
+        maxRequests,
+        maxFanOut,
         reviewMode,
         autoApprovalScope,
         autoApproveDiscoveryGates,
@@ -667,42 +683,53 @@ function normalizeHostAssistance(value, fallback) {
 function normalizeAdvisor(value, fallback) {
     if (value === undefined)
         return structuredClone(fallback);
-    const targets = Array.isArray(value.targets)
-        ? [
-            ...new Set(value.targets.filter((item) => [
-                "ask",
-                "review",
-                "plan",
-                "implement",
-                "orchestrate",
-                "scaffold",
-                "setup",
-                "discover",
-            ].includes(item))),
-        ]
-        : [];
+    if (value.maxRequests === undefined || value.maxPerspectives === undefined)
+        throw new Error("Advisor consultations and perspectives are required when the section is submitted");
+    const allowedTargets = [
+        "ask",
+        "review",
+        "plan",
+        "implement",
+        "orchestrate",
+        "scaffold",
+        "setup",
+        "discover",
+    ];
+    if (!Array.isArray(value.targets) || value.targets.some((item) => !allowedTargets.includes(item)))
+        throw new Error("Advisor targets contain an unsupported task kind");
+    const targets = [...new Set(value.targets)];
+    const maxRequests = normalizeBoundedInteger(value.maxRequests, fallback.maxRequests, WORKFLOW_BOUNDS.advisor.requests.min, WORKFLOW_BOUNDS.advisor.requests.max, "Advisor request limit");
+    const maxPerspectives = normalizeBoundedInteger(value.maxPerspectives, fallback.maxPerspectives, WORKFLOW_BOUNDS.advisor.perspectives.min, WORKFLOW_BOUNDS.advisor.perspectives.max, "Advisor perspective limit");
+    if (value.enabled === true &&
+        (targets.length === 0 || maxRequests === 0 || maxPerspectives === 0))
+        throw new Error("Enabled Advisor requires a target, at least one consultation, and one perspective");
     return {
         enabled: value.enabled === true,
         targets,
-        maxRequests: normalizeBoundedInteger(value.maxRequests, fallback.maxRequests, 0, 8, "Advisor request limit"),
-        maxPerspectives: normalizeBoundedInteger(value.maxPerspectives, fallback.maxPerspectives, 0, 8, "Advisor perspective limit"),
+        maxRequests,
+        maxPerspectives,
     };
 }
 function normalizeHostActions(value, fallback) {
     if (value === undefined)
         return structuredClone(fallback);
-    const allowedActionClasses = Array.isArray(value.allowedActionClasses)
-        ? [
-            ...new Set(value.allowedActionClasses.filter((item) => [
-                "local-mutation",
-                "draft",
-                "remote-write",
-                "message",
-                "deploy",
-                "transaction",
-            ].includes(item))),
-        ]
-        : [];
+    if (value.maxUses === undefined || value.maxCost === undefined || value.ttlMs === undefined)
+        throw new Error("Host Action uses, cost metadata, and lease TTL are required when submitted");
+    const actionClasses = [
+        "local-mutation",
+        "draft",
+        "remote-write",
+        "message",
+        "deploy",
+        "transaction",
+    ];
+    if (!Array.isArray(value.allowedActionClasses) ||
+        value.allowedActionClasses.some((item) => !actionClasses.includes(item)))
+        throw new Error("Host Action classes contain an unsupported value");
+    const allowedActionClasses = [...new Set(value.allowedActionClasses)];
+    if (value.remoteActionsEnabled === true &&
+        !allowedActionClasses.some((item) => ["remote-write", "message", "deploy", "transaction"].includes(item)))
+        throw new Error("Remote Host Actions require at least one remote action class");
     return {
         enabled: value.enabled === true,
         allowedActionClasses,
@@ -711,7 +738,7 @@ function normalizeHostActions(value, fallback) {
         maxCost: typeof value.maxCost === "number" && Number.isFinite(value.maxCost) && value.maxCost >= 0
             ? value.maxCost
             : (() => {
-                throw new Error("Host Action cost limit must be non-negative");
+                throw new Error("Host Action recommendation cost metadata must be non-negative");
             })(),
         ttlMs: normalizeBoundedInteger(value.ttlMs, fallback.ttlMs, 60_000, 86_400_000, "Host Action TTL"),
     };
@@ -743,8 +770,8 @@ function normalizeExecutionSettings(value, fallback) {
             ...(policy.maxAttempts ? { maxAttempts: policy.maxAttempts } : {}),
         };
     }
-    const adaptivePolicy = normalizeAdaptivePolicy(value.adaptivePolicy ?? fallback.adaptivePolicy ?? DEFAULT_ADAPTIVE_POLICY);
-    validateAdaptivePolicy(adaptivePolicy);
+    const adaptivePolicy = normalizeAdaptivePolicyStrict(value.adaptivePolicy ?? fallback.adaptivePolicy ?? DEFAULT_ADAPTIVE_POLICY);
+    validateTrustedDomains(adaptivePolicy);
     return {
         rolePolicies,
         adaptivePolicy,
@@ -755,7 +782,7 @@ function normalizeExecutionSettings(value, fallback) {
         },
         decisionMode: normalizeDecisionMode(value.decisionMode, fallback.decisionMode),
         hostAssistance: normalizeHostAssistance(value.hostAssistance, fallback.hostAssistance),
-        contextBudget: normalizeBoundedInteger(value.contextBudget, fallback.contextBudget, 0, 64, "Context budget"),
+        contextBudget: normalizeBoundedInteger(value.contextBudget, fallback.contextBudget, WORKFLOW_BOUNDS.contextBudget.min, WORKFLOW_BOUNDS.contextBudget.max, "Context budget"),
         advisor: normalizeAdvisor(value.advisor, fallback.advisor),
         doctrine: value.doctrine === undefined
             ? fallback.doctrine
@@ -767,31 +794,12 @@ function normalizeExecutionSettings(value, fallback) {
         hostActions: normalizeHostActions(value.hostActions, fallback.hostActions),
     };
 }
-function validateAdaptivePolicy(policy) {
-    const capabilities = new Set([
-        "filesystem.read-workspace",
-        "filesystem.write-workspace",
-        "filesystem.write-temp",
-        "git.read",
-        "shell.execute",
-        "network.connect",
-    ]);
+function validateTrustedDomains(policy) {
     for (const domain of policy.trustedDomains) {
         if (!/^(?:\*\.)?[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/.test(domain) ||
             domain === "localhost" ||
             /^\d+(?:\.\d+){3}$/.test(domain)) {
             throw new Error(`Invalid trusted domain: ${domain}`);
-        }
-    }
-    if (policy.rules.length > 128)
-        throw new Error("Adaptive policy supports at most 128 rules");
-    for (const rule of policy.rules) {
-        if (!rule ||
-            typeof rule.id !== "string" ||
-            !rule.id ||
-            !["deny", "ask", "allow"].includes(rule.effect) ||
-            !capabilities.has(rule.capability)) {
-            throw new Error("Adaptive policy rules require an id, valid effect, and capability");
         }
     }
 }
@@ -1006,7 +1014,7 @@ async function normalizeProjectProfile(cwd, submission) {
             throw new Error(`Project scope is not a directory: ${raw}`);
         dirs.push(relative.split(path.sep).join("/"));
     }
-    const tasks = [...new Set(submission.tasks.map((entry) => entry.trim()).filter(Boolean))];
+    const tasks = normalizeDelegatedTaskSelections(submission.tasks.map((entry) => entry.trim()).filter(Boolean));
     if (tasks.length === 0)
         throw new Error("Choose at least one delegated task type");
     if (tasks.some((entry) => entry.length > 80))

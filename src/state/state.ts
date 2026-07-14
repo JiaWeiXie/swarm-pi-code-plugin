@@ -33,10 +33,7 @@ import {
   normalizeAdaptivePolicy,
   defaultAdvisorPolicy,
   defaultHostAssistancePolicy,
-  MAX_HOST_ASSISTANCE_REQUESTS,
-  MAX_HOST_ASSISTANCE_FAN_OUT,
-  MAX_ADVISOR_REQUESTS,
-  MAX_ADVISOR_PERSPECTIVES,
+  WORKFLOW_BOUNDS,
   type RolePolicyOverrides,
 } from "../orchestration/roles.js";
 
@@ -352,7 +349,10 @@ function applyWorkflowSettings(config: SwarmConfig, settings: WorkflowSettings |
   if (settings.hostAssistance)
     config.hostAssistance = normalizeHostAssistancePolicy(settings.hostAssistance);
   if (settings.contextBudget !== undefined)
-    config.contextBudget = Math.min(64, Math.max(0, Math.trunc(settings.contextBudget)));
+    config.contextBudget = Math.min(
+      WORKFLOW_BOUNDS.contextBudget.max,
+      Math.max(WORKFLOW_BOUNDS.contextBudget.min, Math.trunc(settings.contextBudget)),
+    );
   if (settings.advisor) config.advisor = normalizeAdvisorPolicy(settings.advisor);
   if (settings.hostActions) config.hostActions = normalizeHostActionPolicy(settings.hostActions);
   if (settings.doctrine === "first-principles-qds-v1") config.doctrine = settings.doctrine;
@@ -489,6 +489,19 @@ function normalizeHostAssistancePolicy(value: unknown): HostAssistancePolicy {
   }
   const candidate = value as Record<string, unknown>;
   const mode = candidate.mode === "off" || candidate.mode === "inherit" ? candidate.mode : "on";
+  const maxRequests = Number.isInteger(candidate.maxRequests)
+    ? Math.min(
+        WORKFLOW_BOUNDS.hostAssistance.requests.max,
+        Math.max(WORKFLOW_BOUNDS.hostAssistance.requests.min, candidate.maxRequests as number),
+      )
+    : defaults.maxRequests;
+  const maxFanOut = Number.isInteger(candidate.maxFanOut)
+    ? Math.min(
+        maxRequests,
+        WORKFLOW_BOUNDS.hostAssistance.fanOut.max,
+        Math.max(WORKFLOW_BOUNDS.hostAssistance.fanOut.min, candidate.maxFanOut as number),
+      )
+    : Math.min(defaults.maxFanOut, maxRequests);
   return {
     enabled: mode === "off" ? false : candidate.enabled !== false,
     mode,
@@ -499,12 +512,8 @@ function normalizeHostAssistancePolicy(value: unknown): HostAssistancePolicy {
         )
       : defaults.contextClasses,
     privateConnector: candidate.privateConnector === "deny" ? "deny" : "ask",
-    maxRequests: Number.isInteger(candidate.maxRequests)
-      ? Math.min(MAX_HOST_ASSISTANCE_REQUESTS, Math.max(0, candidate.maxRequests as number))
-      : defaults.maxRequests,
-    maxFanOut: Number.isInteger(candidate.maxFanOut)
-      ? Math.min(MAX_HOST_ASSISTANCE_FAN_OUT, Math.max(0, candidate.maxFanOut as number))
-      : defaults.maxFanOut,
+    maxRequests,
+    maxFanOut,
     reviewMode: candidate.reviewMode === "host-first" ? "host-first" : "user-only",
     autoApprovalScope:
       candidate.autoApprovalScope === "read-only" || candidate.autoApprovalScope === "reversible"
@@ -535,10 +544,16 @@ function normalizeAdvisorPolicy(value: unknown): AdvisorPolicy {
         )
       : defaults.targets,
     maxRequests: Number.isInteger(candidate.maxRequests)
-      ? Math.min(MAX_ADVISOR_REQUESTS, Math.max(0, candidate.maxRequests as number))
+      ? Math.min(
+          WORKFLOW_BOUNDS.advisor.requests.max,
+          Math.max(WORKFLOW_BOUNDS.advisor.requests.min, candidate.maxRequests as number),
+        )
       : defaults.maxRequests,
     maxPerspectives: Number.isInteger(candidate.maxPerspectives)
-      ? Math.min(MAX_ADVISOR_PERSPECTIVES, Math.max(0, candidate.maxPerspectives as number))
+      ? Math.min(
+          WORKFLOW_BOUNDS.advisor.perspectives.max,
+          Math.max(WORKFLOW_BOUNDS.advisor.perspectives.min, candidate.maxPerspectives as number),
+        )
       : defaults.maxPerspectives,
   };
 }

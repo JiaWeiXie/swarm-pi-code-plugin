@@ -37,6 +37,7 @@ import {
   createActionFamilyLease,
   createHostActionReceipt,
 } from "../host-actions/policy.js";
+import { hostContextCharacterLimit } from "../host-assistance/context-allowance.js";
 import { buildReviewRequest } from "../git/review.js";
 import { parseDiscoveryStageOutput } from "../discovery/schema.js";
 import {
@@ -571,7 +572,7 @@ export async function runCommand(
     policySnapshot.hostAssistance.contextClasses.includes("workspace")
   ) {
     try {
-      const budget = Math.min(32_768, policySnapshot.contextBudget * 8_192);
+      const budget = hostContextCharacterLimit(policySnapshot.contextBudget);
       if (budget > 0) {
         const contextPath = effectiveProjectPolicy
           ? await assertPathAllowed(

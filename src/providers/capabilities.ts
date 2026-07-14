@@ -21,6 +21,7 @@ export type ProviderAuthMethod = "api-key" | "oauth" | "ambient" | "none" | "cus
 export type ProviderCategory = "common" | "subscription" | "cloud" | "local" | "custom";
 export type ProviderProtocolMode = "fixed" | "managed-per-model" | "selectable";
 export type ConnectionReadiness = "configured" | "discovered" | "verified" | "blocked";
+
 export type PromptCacheSupport =
   | "native-explicit"
   | "native-automatic"
@@ -37,6 +38,12 @@ export interface ProviderFieldOption {
   label: string;
 }
 
+export interface ProviderFieldGuidance {
+  hint: string;
+  example?: string;
+  guideAnchor: string;
+}
+
 export interface ProviderFieldDefinition {
   id: string;
   label: string;
@@ -45,7 +52,7 @@ export interface ProviderFieldDefinition {
   secret: boolean;
   advanced?: boolean;
   placeholder?: string;
-  help?: string;
+  guidance?: ProviderFieldGuidance;
   options?: ProviderFieldOption[];
   visibleWhen?: ProviderFieldCondition;
   destination?: {
@@ -53,6 +60,73 @@ export interface ProviderFieldDefinition {
     key?: string;
   };
 }
+
+export const CUSTOM_ENDPOINT_GUIDANCE: Readonly<Record<string, ProviderFieldGuidance>> =
+  Object.freeze({
+    "endpoint-protocol": {
+      hint: "Choose the one wire protocol documented by the server; discovery does not safely guess between protocols.",
+      guideAnchor: "custom-protocol",
+    },
+    "endpoint-url": {
+      hint: "Use a service root, not a generation URL. Keep credentials and query secrets out of the URL.",
+      example: "http://127.0.0.1:11434",
+      guideAnchor: "custom-server-url",
+    },
+    "endpoint-auth-method": {
+      hint: "Use no authentication only for an intentionally unauthenticated local service.",
+      guideAnchor: "custom-authentication",
+    },
+    "endpoint-header": {
+      hint: "Select the server's documented secret-header name; the secret value stays in the credential boundary.",
+      guideAnchor: "custom-authentication",
+    },
+    "endpoint-key": {
+      hint: "Leave blank while editing to keep the saved credential. Never place this value in URLs or controlled headers.",
+      guideAnchor: "custom-authentication",
+    },
+    "models-endpoint": {
+      hint: "Optional same-origin model inventory endpoint. Leave blank for the protocol default.",
+      example: "/v1/models",
+      guideAnchor: "custom-models-endpoint",
+    },
+    "custom-http-referer": {
+      hint: "Optional non-secret attribution URL. It is not an authentication field.",
+      example: "https://app.example.test",
+      guideAnchor: "custom-controlled-headers",
+    },
+    "custom-app-title": {
+      hint: "Optional non-secret application title sent as X-Title.",
+      example: "Internal support tool",
+      guideAnchor: "custom-controlled-headers",
+    },
+    "custom-anthropic-beta": {
+      hint: "Optional literal feature header; set it only when the server documents an exact beta value.",
+      example: "feature-name-YYYY-MM-DD",
+      guideAnchor: "custom-controlled-headers",
+    },
+    "manual-model-ids": {
+      hint: "Use exact documented IDs, one per line. Manual entries are configured, not verified.",
+      example: "model-id-from-server-docs",
+      guideAnchor: "custom-manual-models",
+    },
+    "endpoint-name": {
+      hint: "A local display label only; it does not change provider identity or routing.",
+      example: "Local development model",
+      guideAnchor: "custom-advanced-settings",
+    },
+    "endpoint-canonical-url": {
+      hint: "Review the normalized API root before saving; changing it changes where future requests are sent.",
+      guideAnchor: "custom-advanced-settings",
+    },
+    "endpoint-api": {
+      hint: "Read-only runtime adapter selected from the chosen protocol.",
+      guideAnchor: "custom-advanced-settings",
+    },
+    "advanced-model-limits": {
+      hint: "Leave limits blank for provider metadata. Overrides must be positive integers and do not verify server capacity.",
+      guideAnchor: "custom-advanced-settings",
+    },
+  });
 
 export interface ProviderPromptCaching {
   support: PromptCacheSupport;
@@ -143,6 +217,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         secret: false,
         advanced: true,
         placeholder: "org_...",
+        guidance: {
+          hint: "Leave blank unless the API account requires explicit organization scoping.",
+          example: "org_example",
+          guideAnchor: "openai-organization",
+        },
         destination: { kind: "profile", key: "OPENAI_ORGANIZATION" },
       },
       {
@@ -153,6 +232,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         secret: false,
         advanced: true,
         placeholder: "proj_...",
+        guidance: {
+          hint: "Leave blank to use the credential's default project; enter an ID only when explicit project routing is required.",
+          example: "proj_example",
+          guideAnchor: "openai-project",
+        },
         destination: { kind: "profile", key: "OPENAI_PROJECT" },
       },
       {
@@ -162,7 +246,10 @@ const DEFINITIONS: ProviderDefinition[] = [
         required: false,
         secret: false,
         advanced: true,
-        help: "Automatic uses Pi's short retention; Extended keeps supported direct API prompts cached for 24 hours.",
+        guidance: {
+          hint: "Automatic uses short retention. Extended keeps supported direct API prompts cached for 24 hours.",
+          guideAnchor: "prompt-cache-retention",
+        },
         options: [
           { value: "", label: "Automatic (short)" },
           { value: "long", label: "Extended (24 hours)" },
@@ -196,6 +283,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         secret: false,
         advanced: true,
         placeholder: "feature-name-YYYY-MM-DD",
+        guidance: {
+          hint: "Leave blank unless Anthropic documents an exact beta feature value for the request.",
+          example: "feature-name-YYYY-MM-DD",
+          guideAnchor: "anthropic-beta",
+        },
         destination: { kind: "header-literal", key: "Anthropic-Beta" },
       },
       {
@@ -205,7 +297,10 @@ const DEFINITIONS: ProviderDefinition[] = [
         required: false,
         secret: false,
         advanced: true,
-        help: "Automatic uses Pi's short retention; Extended keeps direct API prompts cached for 1 hour.",
+        guidance: {
+          hint: "Automatic uses short retention. Extended keeps supported direct API prompts cached for 1 hour.",
+          guideAnchor: "prompt-cache-retention",
+        },
         options: [
           { value: "", label: "Automatic (short)" },
           { value: "long", label: "Extended (1 hour)" },
@@ -241,6 +336,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         secret: false,
         advanced: true,
         placeholder: "https://example.com",
+        guidance: {
+          hint: "Optional non-secret attribution URL. Leave blank unless OpenRouter asks for application attribution.",
+          example: "https://app.example.test",
+          guideAnchor: "openrouter-attribution",
+        },
         destination: { kind: "header-literal", key: "HTTP-Referer" },
       },
       {
@@ -250,6 +350,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         required: false,
         secret: false,
         advanced: true,
+        guidance: {
+          hint: "Optional non-secret attribution title sent as X-Title.",
+          example: "Internal support tool",
+          guideAnchor: "openrouter-attribution",
+        },
         destination: { kind: "header-literal", key: "X-Title" },
       },
     ],
@@ -355,6 +460,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         required: false,
         secret: false,
         placeholder: "https://resource.openai.azure.com",
+        guidance: {
+          hint: "Use the Azure resource root, not a /responses generation URL. Leave blank when using Resource name.",
+          example: "https://resource-name.openai.azure.com",
+          guideAnchor: "azure-openai-routing",
+        },
         destination: { kind: "profile", key: "AZURE_OPENAI_BASE_URL" },
       },
       {
@@ -363,6 +473,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         type: "text",
         required: false,
         secret: false,
+        guidance: {
+          hint: "Alternative to Azure endpoint. Enter the resource identifier, not its display label or API key.",
+          example: "resource-name",
+          guideAnchor: "azure-openai-routing",
+        },
         destination: { kind: "profile", key: "AZURE_OPENAI_RESOURCE_NAME" },
       },
       {
@@ -373,6 +488,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         secret: false,
         advanced: true,
         placeholder: "v1",
+        guidance: {
+          hint: "Leave blank for the adapter default unless the Azure resource owner requires an explicit API version.",
+          example: "v1",
+          guideAnchor: "azure-openai-routing",
+        },
         destination: { kind: "profile", key: "AZURE_OPENAI_API_VERSION" },
       },
       {
@@ -383,6 +503,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         secret: false,
         advanced: true,
         placeholder: "model=deployment",
+        guidance: {
+          hint: "Optional comma-separated model=deployment mappings. Leave blank when model and deployment names match.",
+          example: "model-id=deployment-name",
+          guideAnchor: "azure-openai-routing",
+        },
         destination: { kind: "profile", key: "AZURE_OPENAI_DEPLOYMENT_NAME_MAP" },
       },
     ],
@@ -408,6 +533,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         type: "text",
         required: true,
         secret: false,
+        guidance: {
+          hint: "Cloudflare routing identifier. It is not the API token.",
+          example: "account-id-from-dashboard",
+          guideAnchor: "cloudflare-routing",
+        },
         destination: { kind: "credential-env", key: "CLOUDFLARE_ACCOUNT_ID" },
       },
     ],
@@ -430,6 +560,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         type: "text",
         required: true,
         secret: false,
+        guidance: {
+          hint: "Cloudflare routing identifier. It is not the API token.",
+          example: "account-id-from-dashboard",
+          guideAnchor: "cloudflare-routing",
+        },
         destination: { kind: "credential-env", key: "CLOUDFLARE_ACCOUNT_ID" },
       },
       {
@@ -438,6 +573,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         type: "text",
         required: true,
         secret: false,
+        guidance: {
+          hint: "Gateway routing identifier from the selected Cloudflare account.",
+          example: "gateway-id-from-dashboard",
+          guideAnchor: "cloudflare-routing",
+        },
         destination: { kind: "credential-env", key: "CLOUDFLARE_GATEWAY_ID" },
       },
     ],
@@ -459,6 +599,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         type: "text",
         required: false,
         secret: false,
+        guidance: {
+          hint: "Leave blank for the default ambient AWS profile; the profile name is not a credential value.",
+          example: "development",
+          guideAnchor: "bedrock-identity",
+        },
         destination: { kind: "profile", key: "AWS_PROFILE" },
       },
       {
@@ -468,6 +613,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         required: false,
         secret: false,
         placeholder: "us-east-1",
+        guidance: {
+          hint: "Leave blank for the ambient default, or choose the region that hosts the intended Bedrock models.",
+          example: "us-east-1",
+          guideAnchor: "bedrock-identity",
+        },
         destination: { kind: "profile", key: "AWS_REGION" },
       },
     ],
@@ -494,6 +644,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         type: "text",
         required: true,
         secret: false,
+        guidance: {
+          hint: "Google Cloud project used for Vertex routing; do not enter a service-account secret here.",
+          example: "example-project",
+          guideAnchor: "vertex-routing",
+        },
         destination: { kind: "profile", key: "GOOGLE_CLOUD_PROJECT" },
       },
       {
@@ -503,6 +658,11 @@ const DEFINITIONS: ProviderDefinition[] = [
         required: true,
         secret: false,
         placeholder: "us-central1",
+        guidance: {
+          hint: "Vertex region for the selected models and project.",
+          example: "us-central1",
+          guideAnchor: "vertex-routing",
+        },
         destination: { kind: "profile", key: "GOOGLE_CLOUD_LOCATION" },
       },
     ],

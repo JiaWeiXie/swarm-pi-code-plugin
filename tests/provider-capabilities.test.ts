@@ -4,7 +4,9 @@ import test from "node:test";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 import {
+  CUSTOM_ENDPOINT_GUIDANCE,
   getProviderDefinition,
+  listProviderDefinitions,
   providerDefinitionIds,
   unknownProviderIds,
 } from "../src/providers/capabilities.js";
@@ -34,6 +36,47 @@ test("subscription providers use OAuth and keep ChatGPT separate from OpenAI API
   assert.deepEqual(chatGpt.runtimeApis, ["openai-codex-responses"]);
   assert.equal(chatGpt.oauthProvider, "openai-codex");
   assert.equal(chatGpt.fields.length, 0);
+});
+
+test("provider optional fields and custom endpoint controls carry safe structured guidance", () => {
+  const guidedFields = listProviderDefinitions()
+    .flatMap((provider) => provider.fields)
+    .filter((field) => !field.secret && (field.advanced || !field.required));
+  assert.ok(guidedFields.length > 0);
+  for (const field of guidedFields) {
+    assert.ok(field.guidance?.hint, `${field.id} should explain when to use the field`);
+    assert.match(field.guidance?.guideAnchor ?? "", /^[a-z0-9][a-z0-9-]*$/);
+    if (field.guidance?.example && field.type === "url") {
+      const url = new URL(field.guidance.example);
+      assert.equal(url.username, "");
+      assert.equal(url.password, "");
+      assert.equal(url.search, "");
+    }
+    assert.doesNotMatch(field.guidance?.example ?? "", /bearer|api[_-]?key|token|password/i);
+  }
+
+  const expectedCustomControls = [
+    "endpoint-protocol",
+    "endpoint-url",
+    "endpoint-auth-method",
+    "endpoint-header",
+    "endpoint-key",
+    "models-endpoint",
+    "custom-http-referer",
+    "custom-app-title",
+    "custom-anthropic-beta",
+    "manual-model-ids",
+    "endpoint-name",
+    "endpoint-canonical-url",
+    "endpoint-api",
+    "advanced-model-limits",
+  ];
+  assert.deepEqual(Object.keys(CUSTOM_ENDPOINT_GUIDANCE).sort(), expectedCustomControls.sort());
+  for (const [id, guidance] of Object.entries(CUSTOM_ENDPOINT_GUIDANCE)) {
+    assert.ok(guidance.hint, id);
+    assert.match(guidance.guideAnchor, /^[a-z0-9][a-z0-9-]*$/);
+    assert.doesNotMatch(guidance.example ?? "", /bearer|api[_-]?key|token|password/i);
+  }
 });
 
 test("protocol URL policy distinguishes OpenAI roots from Anthropic service roots", () => {

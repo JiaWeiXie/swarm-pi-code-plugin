@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { hostContextCharacterLimit } from "../host-assistance/context-allowance.js";
 import { loadState, resolveStateDir, updateState } from "./state.js";
 export const JOB_HEARTBEAT_INTERVAL_MS = 15_000;
 export const JOB_STALE_AFTER_MS = 60_000;
@@ -1065,7 +1066,7 @@ function normalizeHostAssistanceResponse(record, input) {
     const base = {
         kind: "context",
         requestId: record.id,
-        answer: `[UNTRUSTED_HOST_CONTEXT]\n${value.answer.slice(0, 64_000)}`,
+        answer: `[UNTRUSTED_HOST_CONTEXT]\n${value.answer.slice(0, hostContextCharacterLimit(record.request.budget))}`,
         claims,
         citations,
         conflicts: stringList(value.conflicts, 100),

@@ -81,7 +81,7 @@ test("the discovery choice expands to the discover task kind", async () => {
   assert.deepEqual(policy.allowedTaskKinds, ["discover"]);
 });
 
-test("unknown task choices fail closed, while mixed choices retain valid choices", async () => {
+test("unknown task choices fail closed even when mixed with valid choices", async () => {
   await assert.rejects(
     () => compileEffectiveProjectPolicy({ cwd: workspace(), profile: { tasks: ["unknown"] } }),
     (error: unknown) =>
@@ -89,11 +89,44 @@ test("unknown task choices fail closed, while mixed choices retain valid choices
       error.rejection.errorCode === "project-scope-invalid" &&
       error.rejection.stage === "admission",
   );
+  await assert.rejects(
+    () =>
+      compileEffectiveProjectPolicy({
+        cwd: workspace(),
+        profile: { tasks: ["unknown", "implementation", "another-unknown"] },
+      }),
+    (error: unknown) =>
+      error instanceof ProjectPolicyError &&
+      error.rejection.errorCode === "project-scope-invalid" &&
+      /another-unknown, unknown/.test(error.message),
+  );
+});
+
+test("canonical task kinds and documented aliases normalize deterministically", async () => {
   const policy = await compileEffectiveProjectPolicy({
     cwd: workspace(),
-    profile: { tasks: ["unknown", "implementation"] },
+    profile: {
+      tasks: [
+        " Implementation ",
+        "planning",
+        "code_review",
+        "analysis",
+        "scaffolding",
+        "development setup",
+        "discovery",
+      ],
+    },
   });
-  assert.deepEqual(policy.allowedTaskKinds, ["implement"]);
+  assert.deepEqual(policy.allowedTaskKinds, [
+    "ask",
+    "discover",
+    "implement",
+    "orchestrate",
+    "plan",
+    "review",
+    "scaffold",
+    "setup",
+  ]);
 });
 
 test("policy hashes are canonical and separate scope from deny rules", async () => {

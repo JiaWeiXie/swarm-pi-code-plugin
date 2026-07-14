@@ -1,9 +1,21 @@
 import { createHash } from "node:crypto";
+import { normalizePolicyRulesLegacy, normalizePolicyRulesForSnapshot, } from "../policy/adaptive-policy.js";
 import { assertEffectiveProjectPolicyValid, ProjectPolicyError } from "../policy/project-policy.js";
-export const MAX_HOST_ASSISTANCE_REQUESTS = 6;
-export const MAX_HOST_ASSISTANCE_FAN_OUT = 3;
-export const MAX_ADVISOR_REQUESTS = 3;
-export const MAX_ADVISOR_PERSPECTIVES = 4;
+export const WORKFLOW_BOUNDS = Object.freeze({
+    hostAssistance: Object.freeze({
+        requests: Object.freeze({ min: 0, max: 6, default: 4 }),
+        fanOut: Object.freeze({ min: 0, max: 3, default: 2 }),
+    }),
+    advisor: Object.freeze({
+        requests: Object.freeze({ min: 0, max: 3, default: 2 }),
+        perspectives: Object.freeze({ min: 0, max: 4, default: 3 }),
+    }),
+    contextBudget: Object.freeze({ min: 0, max: 64, default: 4 }),
+});
+export const MAX_HOST_ASSISTANCE_REQUESTS = WORKFLOW_BOUNDS.hostAssistance.requests.max;
+export const MAX_HOST_ASSISTANCE_FAN_OUT = WORKFLOW_BOUNDS.hostAssistance.fanOut.max;
+export const MAX_ADVISOR_REQUESTS = WORKFLOW_BOUNDS.advisor.requests.max;
+export const MAX_ADVISOR_PERSPECTIVES = WORKFLOW_BOUNDS.advisor.perspectives.max;
 const READONLY = [
     "filesystem.read-workspace",
     "filesystem.write-temp",
@@ -87,10 +99,21 @@ export function assertRoleCompatible(policy, kind, executionMode) {
     }
 }
 export function createPolicySnapshot(input) {
-    const adaptivePolicy = normalizeAdaptivePolicy(input.adaptivePolicy);
+    const adaptivePolicy = normalizeAdaptivePolicyStrict(input.adaptivePolicy, input.effectiveProjectPolicy?.repositoryDenyRules);
     const createdAt = new Date().toISOString();
     if (input.effectiveProjectPolicy) {
         if (input.decisionMode) {
+            const hostAssistance = input.hostAssistance ?? defaultHostAssistancePolicy();
+            const advisor = input.advisor ?? defaultAdvisorPolicy();
+            const contextBudget = input.contextBudget ?? WORKFLOW_BOUNDS.contextBudget.default;
+            if (!isHostAssistancePolicy(hostAssistance))
+                throw invalidSnapshot("New policy snapshot Host Assistance controls are malformed");
+            if (!isAdvisorPolicy(advisor))
+                throw invalidSnapshot("New policy snapshot Advisor controls are malformed");
+            if (!Number.isInteger(contextBudget) ||
+                contextBudget < WORKFLOW_BOUNDS.contextBudget.min ||
+                contextBudget > WORKFLOW_BOUNDS.contextBudget.max)
+                throw invalidSnapshot("New policy snapshot context budget is malformed");
             const canonical = {
                 version: 3,
                 sandboxMode: input.sandboxMode,
@@ -102,10 +125,10 @@ export function createPolicySnapshot(input) {
                 scopeHash: input.effectiveProjectPolicy.scopeHash,
                 ...(input.parentPolicyHash ? { parentPolicyHash: input.parentPolicyHash } : {}),
                 decisionMode: input.decisionMode,
-                hostAssistance: input.hostAssistance ?? defaultHostAssistancePolicy(),
-                advisor: input.advisor ?? defaultAdvisorPolicy(),
+                hostAssistance,
+                advisor,
                 ...(input.doctrine ? { doctrine: input.doctrine } : {}),
-                contextBudget: input.contextBudget ?? 4,
+                contextBudget,
             };
             return { ...canonical, hash: policySnapshotHash(canonical), createdAt };
         }
@@ -192,8 +215,8 @@ export function assertPolicySnapshotValid(snapshot) {
             (candidate.parentPolicyHash !== undefined &&
                 !/^[a-f0-9]{64}$/.test(candidate.parentPolicyHash)) ||
             !Number.isInteger(candidate.contextBudget) ||
-            candidate.contextBudget < 0 ||
-            candidate.contextBudget > 64 ||
+            candidate.contextBudget < WORKFLOW_BOUNDS.contextBudget.min ||
+            candidate.contextBudget > WORKFLOW_BOUNDS.contextBudget.max ||
             (candidate.doctrine !== undefined && candidate.doctrine !== "first-principles-qds-v1"))) {
         throw invalidSnapshot("Policy snapshot v3 controls are malformed");
     }
@@ -204,8 +227,8 @@ export function defaultHostAssistancePolicy() {
         mode: "on",
         contextClasses: ["workspace", "web", "docs", "paper", "connector", "skill"],
         privateConnector: "ask",
-        maxRequests: 4,
-        maxFanOut: 2,
+        maxRequests: WORKFLOW_BOUNDS.hostAssistance.requests.default,
+        maxFanOut: WORKFLOW_BOUNDS.hostAssistance.fanOut.default,
         reviewMode: "host-first",
         autoApprovalScope: "reversible",
         autoApproveDiscoveryGates: true,
@@ -215,8 +238,8 @@ export function defaultAdvisorPolicy() {
     return {
         enabled: false,
         targets: ["discover", "plan", "review", "orchestrate"],
-        maxRequests: 2,
-        maxPerspectives: 3,
+        maxRequests: WORKFLOW_BOUNDS.advisor.requests.default,
+        maxPerspectives: WORKFLOW_BOUNDS.advisor.perspectives.default,
     };
 }
 function isDecisionMode(value) {
@@ -231,11 +254,12 @@ function isHostAssistancePolicy(value) {
         value.contextClasses.every((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item)) &&
         (value.privateConnector === "ask" || value.privateConnector === "deny") &&
         Number.isInteger(value.maxRequests) &&
-        value.maxRequests >= 0 &&
-        value.maxRequests <= MAX_HOST_ASSISTANCE_REQUESTS &&
+        value.maxRequests >= WORKFLOW_BOUNDS.hostAssistance.requests.min &&
+        value.maxRequests <= WORKFLOW_BOUNDS.hostAssistance.requests.max &&
         Number.isInteger(value.maxFanOut) &&
-        value.maxFanOut >= 0 &&
-        value.maxFanOut <= MAX_HOST_ASSISTANCE_FAN_OUT &&
+        value.maxFanOut >= WORKFLOW_BOUNDS.hostAssistance.fanOut.min &&
+        value.maxFanOut <= WORKFLOW_BOUNDS.hostAssistance.fanOut.max &&
+        value.maxFanOut <= value.maxRequests &&
         (value.reviewMode === undefined ||
             value.reviewMode === "user-only" ||
             value.reviewMode === "host-first") &&
@@ -261,11 +285,15 @@ function isAdvisorPolicy(value) {
             "discover",
         ].includes(item)) &&
         Number.isInteger(value.maxRequests) &&
-        value.maxRequests >= 0 &&
-        value.maxRequests <= MAX_ADVISOR_REQUESTS &&
+        value.maxRequests >= WORKFLOW_BOUNDS.advisor.requests.min &&
+        value.maxRequests <= WORKFLOW_BOUNDS.advisor.requests.max &&
         Number.isInteger(value.maxPerspectives) &&
-        value.maxPerspectives >= 0 &&
-        value.maxPerspectives <= MAX_ADVISOR_PERSPECTIVES);
+        value.maxPerspectives >= WORKFLOW_BOUNDS.advisor.perspectives.min &&
+        value.maxPerspectives <= WORKFLOW_BOUNDS.advisor.perspectives.max &&
+        (!value.enabled ||
+            (value.maxRequests > 0 &&
+                value.maxPerspectives > 0 &&
+                value.targets.length > 0)));
 }
 function isEffectiveProjectPolicyShape(input) {
     if (!isRecord(input))
@@ -319,8 +347,16 @@ export function normalizeAdaptivePolicy(value) {
         classifierThinkingLevel: thinking(value?.classifierThinkingLevel, "medium"),
         approvalPolicy: value?.approvalPolicy === "wait" ? "wait" : "deny",
         trustedDomains: unique(strings(value?.trustedDomains).map(normalizeDomain).filter(Boolean)),
-        rules: Array.isArray(value?.rules) ? value.rules.map((rule) => structuredClone(rule)) : [],
+        rules: normalizePolicyRulesLegacy(value?.rules),
         diagnostics: value?.diagnostics === true,
+    };
+}
+/** Strict normalization for new configuration submissions and newly materialized snapshots. */
+export function normalizeAdaptivePolicyStrict(value, trustedRepositoryRules = []) {
+    const normalized = normalizeAdaptivePolicy(value);
+    return {
+        ...normalized,
+        rules: normalizePolicyRulesForSnapshot(value?.rules ?? [], trustedRepositoryRules),
     };
 }
 export function listDefaultRoles() {

@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { DEFAULT_ADAPTIVE_POLICY, DEFAULT_BACKGROUND_ROLE_POLICY, isWorkerRole, normalizeAdaptivePolicy, defaultAdvisorPolicy, defaultHostAssistancePolicy, MAX_HOST_ASSISTANCE_REQUESTS, MAX_HOST_ASSISTANCE_FAN_OUT, MAX_ADVISOR_REQUESTS, MAX_ADVISOR_PERSPECTIVES, } from "../orchestration/roles.js";
+import { DEFAULT_ADAPTIVE_POLICY, DEFAULT_BACKGROUND_ROLE_POLICY, isWorkerRole, normalizeAdaptivePolicy, defaultAdvisorPolicy, defaultHostAssistancePolicy, WORKFLOW_BOUNDS, } from "../orchestration/roles.js";
 const execFileAsync = promisify(execFile);
 export class StateMigrationConflictError extends Error {
     legacyDir;
@@ -212,7 +212,7 @@ function applyWorkflowSettings(config, settings) {
     if (settings.hostAssistance)
         config.hostAssistance = normalizeHostAssistancePolicy(settings.hostAssistance);
     if (settings.contextBudget !== undefined)
-        config.contextBudget = Math.min(64, Math.max(0, Math.trunc(settings.contextBudget)));
+        config.contextBudget = Math.min(WORKFLOW_BOUNDS.contextBudget.max, Math.max(WORKFLOW_BOUNDS.contextBudget.min, Math.trunc(settings.contextBudget)));
     if (settings.advisor)
         config.advisor = normalizeAdvisorPolicy(settings.advisor);
     if (settings.hostActions)
@@ -347,6 +347,12 @@ function normalizeHostAssistancePolicy(value) {
     }
     const candidate = value;
     const mode = candidate.mode === "off" || candidate.mode === "inherit" ? candidate.mode : "on";
+    const maxRequests = Number.isInteger(candidate.maxRequests)
+        ? Math.min(WORKFLOW_BOUNDS.hostAssistance.requests.max, Math.max(WORKFLOW_BOUNDS.hostAssistance.requests.min, candidate.maxRequests))
+        : defaults.maxRequests;
+    const maxFanOut = Number.isInteger(candidate.maxFanOut)
+        ? Math.min(maxRequests, WORKFLOW_BOUNDS.hostAssistance.fanOut.max, Math.max(WORKFLOW_BOUNDS.hostAssistance.fanOut.min, candidate.maxFanOut))
+        : Math.min(defaults.maxFanOut, maxRequests);
     return {
         enabled: mode === "off" ? false : candidate.enabled !== false,
         mode,
@@ -354,12 +360,8 @@ function normalizeHostAssistancePolicy(value) {
             ? candidate.contextClasses.filter((item) => ["workspace", "web", "docs", "paper", "connector", "skill"].includes(item))
             : defaults.contextClasses,
         privateConnector: candidate.privateConnector === "deny" ? "deny" : "ask",
-        maxRequests: Number.isInteger(candidate.maxRequests)
-            ? Math.min(MAX_HOST_ASSISTANCE_REQUESTS, Math.max(0, candidate.maxRequests))
-            : defaults.maxRequests,
-        maxFanOut: Number.isInteger(candidate.maxFanOut)
-            ? Math.min(MAX_HOST_ASSISTANCE_FAN_OUT, Math.max(0, candidate.maxFanOut))
-            : defaults.maxFanOut,
+        maxRequests,
+        maxFanOut,
         reviewMode: candidate.reviewMode === "host-first" ? "host-first" : "user-only",
         autoApprovalScope: candidate.autoApprovalScope === "read-only" || candidate.autoApprovalScope === "reversible"
             ? candidate.autoApprovalScope
@@ -387,10 +389,10 @@ function normalizeAdvisorPolicy(value) {
             ].includes(item))
             : defaults.targets,
         maxRequests: Number.isInteger(candidate.maxRequests)
-            ? Math.min(MAX_ADVISOR_REQUESTS, Math.max(0, candidate.maxRequests))
+            ? Math.min(WORKFLOW_BOUNDS.advisor.requests.max, Math.max(WORKFLOW_BOUNDS.advisor.requests.min, candidate.maxRequests))
             : defaults.maxRequests,
         maxPerspectives: Number.isInteger(candidate.maxPerspectives)
-            ? Math.min(MAX_ADVISOR_PERSPECTIVES, Math.max(0, candidate.maxPerspectives))
+            ? Math.min(WORKFLOW_BOUNDS.advisor.perspectives.max, Math.max(WORKFLOW_BOUNDS.advisor.perspectives.min, candidate.maxPerspectives))
             : defaults.maxPerspectives,
     };
 }

@@ -96,7 +96,7 @@ test("Host Assistance persists safe events, correlates responses, and consumes o
   );
   await resolveJobHostRequest(workspace, job.id, request.id, {
     requestId: request.id,
-    answer: "Use the official v1 API.",
+    answer: "x".repeat(10_000),
     claims: [{ claim: "v1 is current", evidenceIds: ["docs-1"], confidence: "high" }],
     citations: [
       {
@@ -119,7 +119,9 @@ test("Host Assistance persists safe events, correlates responses, and consumes o
     request.id,
   );
   assert.equal(response.kind, "context");
-  if (response.kind === "context") assert.match(response.answer, /^\[UNTRUSTED_HOST_CONTEXT\]/);
+  if (response.kind === "context") {
+    assert.equal(response.answer, `[UNTRUSTED_HOST_CONTEXT]\n${"x".repeat(8_192)}`);
+  }
   await assert.rejects(
     waitForHostAssistanceResolution(workspace, job.id, job.workerToken, request.id),
     /already consumed/,

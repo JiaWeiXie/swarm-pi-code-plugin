@@ -8,6 +8,7 @@ import { once } from "node:events";
 
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
+import { WORKFLOW_BOUNDS } from "../src/orchestration/roles.js";
 import { getProviderDefinition } from "../src/providers/capabilities.js";
 import { CredentialDraftVault } from "../src/providers/credentials.js";
 import { compileEffectiveProjectPolicy } from "../src/policy/project-policy.js";
@@ -100,6 +101,7 @@ test("configuration page starts from connections and uses the original Swarm Pi 
         maxCost: 1,
         ttlMs: 1_800_000,
       },
+      workflowBounds: WORKFLOW_BOUNDS,
       sandboxAvailability: {
         available: true,
         backend: "macos-seatbelt",
@@ -124,8 +126,23 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   assert.match(html, /\["off","minimal","low","medium","high","xhigh","max"\]/);
   assert.match(html, /id="host-max-requests" type="number" min="0" max="6"/);
   assert.match(html, /id="host-max-fanout" type="number" min="0" max="3"/);
+  assert.match(html, /<label for="context-budget">Context allowance<\/label><select/);
+  assert.match(html, /Standard — up to 32,768 characters \(recommended\)/);
+  assert.match(html, /Extended — up to 64,000 characters/);
   assert.match(html, /id="advisor-max-requests" type="number" min="0" max="3"/);
   assert.match(html, /id="advisor-max-perspectives" type="number" min="0" max="4"/);
+  assert.match(html, /<summary>Tips<\/summary>/);
+  assert.match(html, /data-guide-anchor="custom-server-url"/);
+  assert.match(html, /guideAnchor/);
+  assert.match(html, /field\.guidance/);
+  assert.match(html, /id="private-connector"/);
+  assert.match(html, /Recommendation cost value \(metadata\)/);
+  assert.match(html, /Supported task type and alias reference/);
+  assert.match(html, /blank does not mean zero or default/);
+  assert.match(html, /"workflowBounds"/);
+  assert.doesNotMatch(html, /<option value="inherit">/);
+  assert.doesNotMatch(html, /id="custom-tasks"/);
+  assert.doesNotMatch(html, /Number\(\$\("context-budget"\)\.value\) \|\| 0/);
   assert.match(html, /draft\.baseRevision === bootRevision/);
   assert.match(html, /baseRevision:bootRevision/);
   assert.match(html, /Saved model unavailable/);
@@ -223,6 +240,7 @@ test("project-only page starts from the guided project setup", () => {
         maxCost: 1,
         ttlMs: 1_800_000,
       },
+      workflowBounds: WORKFLOW_BOUNDS,
       sandboxAvailability: {
         available: true,
         backend: "macos-seatbelt",
@@ -342,6 +360,132 @@ test("whole-repository project setup omits dirs while explicit empty dirs remain
     (await compileEffectiveProjectPolicy({ cwd: workspace, profile: denyAll })).roots.read,
     [],
   );
+});
+
+test("project saves enforce workflow bounds, cross-field rules, and supported tasks", async () => {
+  const { workspace } = fixture();
+  const base = {
+    profile: { goal: "Keep project settings safe", tasks: ["analysis"] },
+    sandboxMode: "strict" as const,
+    hostAssistance: {
+      enabled: true,
+      mode: "on" as const,
+      contextClasses: ["workspace" as const],
+      privateConnector: "ask" as const,
+      maxRequests: 4,
+      maxFanOut: 2,
+      reviewMode: "host-first" as const,
+      autoApprovalScope: "reversible" as const,
+      autoApproveDiscoveryGates: true,
+    },
+    contextBudget: 4,
+    advisor: {
+      enabled: false,
+      targets: ["review" as const],
+      maxRequests: 2,
+      maxPerspectives: 3,
+    },
+    hostActions: {
+      enabled: true,
+      allowedActionClasses: ["local-mutation" as const],
+      remoteActionsEnabled: false,
+      maxUses: 1,
+      maxCost: 1,
+      ttlMs: 1_800_000,
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      saveProjectProfileSubmission(workspace, {
+        ...base,
+        hostAssistance: { ...base.hostAssistance, mode: "inherit" },
+      }),
+    /cannot inherit Host Assistance/,
+  );
+  await assert.rejects(
+    () =>
+      saveProjectProfileSubmission(workspace, {
+        ...base,
+        hostAssistance: { ...base.hostAssistance, maxRequests: 1, maxFanOut: 2 },
+      }),
+    /fan-out cannot exceed/,
+  );
+  await assert.rejects(
+    () =>
+      saveProjectProfileSubmission(workspace, {
+        ...base,
+        advisor: { enabled: true, targets: [], maxRequests: 0, maxPerspectives: 0 },
+      }),
+    /Enabled Advisor requires/,
+  );
+  await assert.rejects(
+    () =>
+      saveProjectProfileSubmission(workspace, {
+        ...base,
+        hostActions: { ...base.hostActions, remoteActionsEnabled: true },
+      }),
+    /remote action class/,
+  );
+  await assert.rejects(
+    () =>
+      saveProjectProfileSubmission(workspace, {
+        ...base,
+        hostAssistance: { ...base.hostAssistance, maxRequests: null as never },
+      }),
+    /integer from 0 to 6/,
+  );
+  await assert.rejects(
+    () =>
+      saveProjectProfileSubmission(workspace, {
+        goal: "Reject unknown task labels",
+        tasks: ["analysis", "testing", "documentation"],
+      }),
+    /Unsupported delegated task types: documentation, testing/,
+  );
+  await assert.rejects(
+    () =>
+      saveProjectProfileSubmission(workspace, {
+        ...base,
+        adaptivePolicy: {
+          classifierModels: [],
+          classifierThinkingLevel: "medium",
+          approvalPolicy: "deny",
+          trustedDomains: [],
+          rules: [
+            {
+              id: "bad-rule",
+              effect: "allow",
+              capability: "shell.execute",
+              domain: "example.test",
+            },
+          ],
+          diagnostics: false,
+        },
+      }),
+    /Adaptive policy rule 1/,
+  );
+});
+
+test("legacy Host Assistance inherit is projected explicitly without mutating durable state", async () => {
+  const { workspace, env } = fixture();
+  await updateState(workspace, (state) => {
+    state.config.hostAssistance = {
+      enabled: true,
+      mode: "inherit",
+      contextClasses: ["workspace"],
+      privateConnector: "ask",
+      maxRequests: 4,
+      maxFanOut: 2,
+      reviewMode: "user-only",
+      autoApprovalScope: "context-only",
+      autoApproveDiscoveryGates: false,
+    };
+  });
+  const view = await loadConfigurationView(workspace, env);
+  assert.equal(view.hostAssistance.mode, "on");
+  assert.equal((await loadState(workspace)).config.hostAssistance?.mode, "inherit");
+  assert.deepEqual(view.workflowBounds, WORKFLOW_BOUNDS);
 });
 
 test("built-in provider forms stage credentials and return protocol-specific profiles", async () => {

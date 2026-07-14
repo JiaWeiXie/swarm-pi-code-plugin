@@ -35,7 +35,10 @@ numeric budget, and a complete `WorkerAssessment`:
 - rollback, post-action verification, and proposed risk.
 
 The Worker assessment is untrusted advice. The runner checks the snapshotted
-class allowlist and context budget before exposing the request to the Host.
+class allowlist and context allowance before exposing the request to the Host.
+The setup UI offers Off, Compact, Standard, and Extended; these persist as
+compatible numeric budgets and limit returned text to 0, 8,192, 32,768, or
+64,000 characters.
 Persisted legacy requests may omit the assessment, but they cannot receive an
 automatic allow.
 
@@ -253,6 +256,12 @@ An action recommendation is inert until all of these are true:
 3. workspace Host Actions and the action class are enabled;
 4. the recommendation was recorded with exact correlation;
 5. the user explicitly confirms `jobs action-start`.
+
+Enabling the workspace policy does not prompt a Worker to create a
+recommendation and never starts one automatically. Only a structured
+`action-recommendation` request creates the durable record; an ordinary prose
+suggestion in Worker output cannot trigger `action-start`. The current path is
+therefore intentionally narrow and uncommon.
 
 ```bash
 mise exec -- node scripts/pi-runner.mjs jobs action-start --job <parent-job-id> --request <recommendation-id> --json

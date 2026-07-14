@@ -7,6 +7,10 @@ Codex. For installation and common workflows, start with the
 [threat-model.md](threat-model.md). The Host Assistance and Discovery contract
 is in [host-assistance-discovery.md](host-assistance-discovery.md).
 
+For detailed field-by-field behavior, see the
+[configuration field guide](configuration-field-guide.md) and
+[繁體中文指南](configuration-field-guide.zh-TW.md).
+
 ## Product Model
 
 The setup flow creates executable Pi connections, not generic provider cards.
@@ -45,6 +49,61 @@ toggle is persisted in PolicySnapshot v3, but the runtime does not yet run an
 automatic Question/Delete/Simplify convergence pass. It must not be treated as
 an active review or safety control.
 
+## Field Validation and Compatibility
+
+The browser renders concise inline guidance and native **Tips** disclosures from
+the same provider metadata used by validation. The detailed field guide is the
+canonical user-facing explanation of defaults, examples, safety boundaries, and
+tradeoffs. Examples are non-secret display text; they are never submitted as
+configuration values.
+
+Adaptive structured policy rules use one strict schema for browser saves and
+new Job snapshots. Rule IDs are unique lowercase identifiers; capabilities,
+roles, and task kinds are closed sets; path prefixes are canonical relative
+POSIX paths; network domains are exact lowercase hosts or `*.` wildcards. The
+form rejects unknown properties, path traversal, URLs, ports, localhost/IP
+targets, selector/capability mismatches, mixed path/domain selectors, and more
+than 128 rules. Legacy invalid rules are dropped during tolerant load so they
+cannot grant access.
+
+Repository deny rules use an internal `repo:` ID namespace for compatibility.
+New and child snapshots preserve such an ID only when the complete rule exactly
+matches a deny rule in the immutable effective project policy. Browser and
+ordinary configuration submissions cannot claim the reserved namespace.
+
+Workflow numeric fields are required when their section is submitted. Blank is
+not silently converted to zero or a default. Context allowance is presented as
+named choices while retaining the numeric snapshot field for compatibility:
+
+| Setting | User-facing choices / range | New-project default |
+| --- | --- | --- |
+| Host context allowance | Off (`0`), Compact (`1`), Standard (`4`), Extended (`8`) | Standard |
+| Host Assistance requests per Job | `0–6` | 4 |
+| Host Assistance concurrent fan-out | `0–3` and no greater than requests | 2 |
+| Advisor consultations per Job | `0–3` | 2 |
+| Maximum Advisor perspectives | `0–4` | 3 |
+
+One stored context-budget unit permits up to 8,192 returned text characters,
+with a hard 64,000-character cap. The Worker requests the smallest sufficient
+amount up to the Job snapshot's allowance. Existing `0–64` numeric values stay
+readable; a value outside the named choices appears as a preserved legacy
+custom allowance until the user chooses a preset.
+
+Project setup requires an explicit Host Assistance On or Off choice. CLI Job
+overrides retain `inherit` compatibility; a stored legacy `inherit` value is
+displayed as its effective explicit state without mutating durable storage on
+load. If a partial legacy record omits fan-out, its default is clamped to the
+normalized request limit. Advisor may use zero quotas only while disabled. An
+enabled Advisor needs at least one supported target and positive quotas. Remote Host Actions require
+both the remote toggle and at least one remote action class; recommendation
+cost is non-negative opaque lease metadata, not currency or an enforced budget.
+
+Delegated-work selections accept canonical Job kinds or the documented UI
+aliases. Input is normalized by trimming, lowercasing, and replacing spaces or
+underscores with hyphens. Every unsupported token causes a deterministic save
+error, including a mixed valid/invalid list. Unsupported legacy labels remain
+visible but confer no capability until a successful resave removes them.
+
 ## Current setup screens
 
 The screenshots below are generated from the pinned local fixture with a fixed
@@ -66,7 +125,7 @@ provider or credential tutorial.
 | Host review | `host-first` | Active Host model independently reviews complete requests; hooks/watchers only notify |
 | Automatic scope | `reversible` | Allows public/read-only context and exact reversible actions already within original intent |
 | Discovery gate review | on | Allows complete, in-scope gates to be auto-reviewed with an exact receipt |
-| Context budget | 4 | Maximum numeric budget accepted from one Host context request |
+| Context allowance | Standard | Up to 32,768 returned characters from one Host context request |
 | Advisor | off | Adds bounded read-only consultations for selected tasks when enabled |
 | Doctrine | off | Snapshotted metadata only; no automatic convergence pass yet |
 | Host Actions | local mutation and draft | Allows an explicitly confirmed isolated child; remote classes remain off |

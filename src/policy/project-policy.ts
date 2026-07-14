@@ -23,7 +23,7 @@ const CAPABILITIES = new Set<Capability>([
   "network.connect",
 ]);
 
-const TASK_KINDS: TaskKind[] = [
+export const TASK_KINDS: readonly TaskKind[] = Object.freeze([
   "ask",
   "review",
   "plan",
@@ -32,9 +32,8 @@ const TASK_KINDS: TaskKind[] = [
   "scaffold",
   "setup",
   "discover",
-];
-const OPERATIONS: ProjectOperation[] = ["read", "search", "write", "shell"];
-const TASK_ALIASES: Record<string, TaskKind[]> = {
+]);
+export const TASK_ALIASES: Readonly<Record<string, TaskKind[]>> = Object.freeze({
   implementation: ["implement"],
   planning: ["plan"],
   "code-review": ["review"],
@@ -42,7 +41,8 @@ const TASK_ALIASES: Record<string, TaskKind[]> = {
   scaffolding: ["scaffold"],
   "development-setup": ["setup"],
   discovery: ["discover"],
-};
+});
+const OPERATIONS: ProjectOperation[] = ["read", "search", "write", "shell"];
 
 /** An error suitable for serialization by later policy enforcement phases. */
 export class ProjectPolicyError extends Error {
@@ -226,15 +226,30 @@ function stringArray(value: unknown): string[] | undefined {
     : undefined;
 }
 
+export function normalizeDelegatedTaskSelections(tasks: string[]): string[] {
+  const supported = new Set<string>([...TASK_KINDS, ...Object.keys(TASK_ALIASES)]);
+  const normalized = tasks.map((task) => task.trim().toLowerCase().replace(/[ _]+/g, "-"));
+  const unsupported = [...new Set(normalized.filter((task) => !supported.has(task)))].sort(
+    compareCodePoints,
+  );
+  if (unsupported.length > 0) {
+    throw rejection(
+      "project-scope-invalid",
+      "admission",
+      `Unsupported delegated task types: ${unsupported.join(", ")}`,
+    );
+  }
+  return [...new Set(normalized)];
+}
+
 function normalizeTaskKinds(tasks: string[] | undefined): TaskKind[] {
   if (!tasks) return [...TASK_KINDS].sort();
+  const selections = normalizeDelegatedTaskSelections(tasks);
   const kinds = new Set<TaskKind>();
-  for (const task of tasks) {
+  for (const task of selections) {
     if (TASK_ALIASES[task]) TASK_ALIASES[task].forEach((kind) => kinds.add(kind));
-    else if ((TASK_KINDS as string[]).includes(task)) kinds.add(task as TaskKind);
+    else kinds.add(task as TaskKind);
   }
-  if (tasks.length && !kinds.size)
-    throw rejection("project-scope-invalid", "admission", "No configured task kinds are valid");
   return [...kinds].sort();
 }
 

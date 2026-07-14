@@ -1,5 +1,14 @@
+import { WORKFLOW_BOUNDS } from "../orchestration/roles.js";
+import { HOST_CONTEXT_ALLOWANCE_PRESETS } from "../host-assistance/context-allowance.js";
+import { CUSTOM_ENDPOINT_GUIDANCE } from "../providers/capabilities.js";
 export function renderConfigurationPage(view, nonce, mode = "full") {
-    const bootstrap = JSON.stringify({ ...view, setupMode: mode })
+    const workflowBounds = view.workflowBounds ?? WORKFLOW_BOUNDS;
+    const bootstrap = JSON.stringify({
+        ...view,
+        workflowBounds,
+        contextAllowancePresets: HOST_CONTEXT_ALLOWANCE_PRESETS,
+        setupMode: mode,
+    })
         .replaceAll("&", "\\u0026")
         .replaceAll("<", "\\u003c")
         .replaceAll(">", "\\u003e")
@@ -139,6 +148,8 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
               <summary>Structured policy rules</summary>
               <label for="policy-rules">Deny, ask, and bounded allow rules</label>
               <textarea id="policy-rules" rows="7" spellcheck="false"></textarea>
+              <span class="field-hint">Rules refine Adaptive decisions; they never override immutable denials, project roots, role ceilings, or user gates.</span>
+              <details class="field-tips"><summary>Tips</summary><div class="field-tips-body"><p>Each rule needs a lowercase ID, effect, and one of the six current capabilities. Optional roles and taskKinds must use canonical IDs.</p><p><code>pathPrefix</code> is only for workspace read/write rules; <code>domain</code> is only for network rules. Deny wins over ask and allow. New malformed rules are rejected; legacy state remains readable without authorizing invalid entries.</p></div></details>
             </details>
           </div>
         </div>
@@ -160,16 +171,18 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
           <div class="form-copy"><h2>Host Assistance</h2><p>Let workers request bounded workspace, Web, docs, paper, connector, or installed-skill context from the Host.</p></div>
           <div class="form-control">
             <label for="host-assistance-mode">Default</label>
-            <select id="host-assistance-mode"><option value="on">On</option><option value="inherit">Inherit</option><option value="off">Off</option></select>
+            <select id="host-assistance-mode"><option value="on">On</option><option value="off">Off</option></select>
             <label for="host-review-mode">Review path</label><select id="host-review-mode"><option value="host-first">Host model first</option><option value="user-only">Always ask the user</option></select>
             <label for="host-auto-scope">Host auto-approval ceiling</label><select id="host-auto-scope"><option value="context-only">Context only</option><option value="read-only">Read-only capabilities</option><option value="reversible">Bounded reversible changes</option></select>
             <label class="inline-check"><input id="host-auto-discovery-gates" type="checkbox"> Allow the active Host model to approve bounded Discovery gates</label>
             <span class="field-hint">Recovery hooks and replay never approve. Private connectors, delivery, deployment, messages, and irreversible actions still require the user.</span>
             <label>Allowed context classes</label><div id="host-context-classes" class="check-list"></div>
-            <label for="context-budget">Context budget</label><input id="context-budget" type="number" min="0" max="64">
-            <label for="host-max-requests">Requests per Job</label><input id="host-max-requests" type="number" min="0" max="6">
-            <label for="host-max-fanout">Concurrent fan-out</label><input id="host-max-fanout" type="number" min="0" max="3">
+            <label for="context-budget">Context allowance</label><select id="context-budget"></select>
+            <span id="context-budget-description" class="field-hint"></span>
+            <label for="host-max-requests">Requests per Job</label><input id="host-max-requests" type="number" min="${workflowBounds.hostAssistance.requests.min}" max="${workflowBounds.hostAssistance.requests.max}">
+            <label for="host-max-fanout">Concurrent fan-out</label><input id="host-max-fanout" type="number" min="${workflowBounds.hostAssistance.fanOut.min}" max="${workflowBounds.hostAssistance.fanOut.max}">
             <label for="private-connector">Private connectors</label><select id="private-connector"><option value="deny">Deny</option><option value="ask">Ask each time</option></select>
+            <details class="field-tips"><summary>Tips</summary><div class="field-tips-body"><p>Host Assistance lets a Worker ask the active Host for bounded context or a decision. Worker risk claims are untrusted; the Host independently checks user intent, policy, roots, and the exact action fingerprint.</p><p>Host-first may auto-resolve only within the configured ceiling. Strict mode, private connectors, secrets, delivery, deployment, messages, transactions, irreversible work, replay, and recovery hooks keep their existing gates. Fan-out cannot exceed requests, and blank numeric fields are invalid.</p></div></details>
           </div>
         </div>
         <div class="form-band">
@@ -177,19 +190,24 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
           <div class="form-control">
             <label class="inline-check"><input id="advisor-enabled" type="checkbox"> Enable Advisor</label>
             <label>Advisor targets</label><div id="advisor-targets" class="check-list"></div>
-            <label for="advisor-max-requests">Consultations per Job</label><input id="advisor-max-requests" type="number" min="0" max="3">
-            <label for="advisor-max-perspectives">Maximum Advisor perspectives</label><input id="advisor-max-perspectives" type="number" min="0" max="4">
+            <label for="advisor-max-requests">Consultations per Job</label><input id="advisor-max-requests" type="number" min="${workflowBounds.advisor.requests.min}" max="${workflowBounds.advisor.requests.max}">
+            <label for="advisor-max-perspectives">Maximum Advisor perspectives</label><input id="advisor-max-perspectives" type="number" min="${workflowBounds.advisor.perspectives.min}" max="${workflowBounds.advisor.perspectives.max}">
+            <span class="field-hint">Advisor is read-only, non-recursive, and off by default. Enabled Advisor requires a target and positive limits.</span>
+            <details class="field-tips"><summary>Tips</summary><div class="field-tips-body"><p>Consultations per Job limits how often Advisor can be invoked. Maximum perspectives limits how many independent viewpoints a consultation can request.</p><p>More perspectives can improve coverage but increase latency and model usage. Use 0 only while Advisor is off; job settings are snapshotted at start.</p></div></details>
           </div>
         </div>
         <div class="form-band">
           <div class="form-copy"><h2>Host Actions 0.5</h2><p>Run explicitly recorded recommendations in isolated child Jobs. Remote effects remain disabled by default.</p></div>
           <div class="form-control">
             <label class="inline-check"><input id="host-actions-enabled" type="checkbox"> Enable isolated Host Action children</label>
+            <span class="field-hint">This does not make Workers recommend or start actions. It only permits an eligible structured recommendation to be started after explicit confirmation.</span>
             <label>Allowed action classes</label><div id="host-action-classes" class="check-list"></div>
             <label class="inline-check"><input id="host-actions-remote" type="checkbox"> Enable remote write, message, deploy, and transaction actions</label>
             <label for="host-action-max-uses">Maximum uses</label><input id="host-action-max-uses" type="number" min="1" max="100">
-            <label for="host-action-max-cost">Maximum cost</label><input id="host-action-max-cost" type="number" min="0" step="0.01">
+            <label for="host-action-max-cost">Recommendation cost value (metadata)</label><input id="host-action-max-cost" type="number" min="0" step="0.01">
+            <span class="field-hint">Stored with the isolated action-family lease. It is not currency, billing, a spend limit, or an enforced cost budget.</span>
             <label for="host-action-ttl">Lease TTL (minutes)</label><input id="host-action-ttl" type="number" min="1" max="1440">
+            <details class="field-tips"><summary>Tips</summary><div class="field-tips-body"><p>Host Actions execute explicitly recorded recommendations in isolated child Jobs; recommendations remain inert until the Host starts an eligible child. A suggestion written only in normal Worker output cannot trigger this path.</p><p>Choose the smallest action classes, use count, and TTL. Remote classes also require the remote toggle and do not remove user confirmation for protected delivery, messaging, deployment, or transactions.</p></div></details>
           </div>
         </div>
       </section>
@@ -203,7 +221,8 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
           <div class="form-control">
             <label for="project-goal">What should this project accomplish?</label>
             <textarea id="project-goal" rows="5" maxlength="4000" placeholder="For example: Build a reliable internal tool for managing customer support requests."></textarea>
-            <span class="field-hint">Describe the product or outcome, not an individual coding task.</span>
+            <span class="field-hint">Describe a durable product outcome, not today's ticket or a single command.</span>
+            <details class="field-tips"><summary>Tips</summary><div class="field-tips-body"><p>A useful goal names the intended outcome, audience, and important constraints. Keep it under 4,000 characters and exclude credentials or secrets.</p><p>The goal becomes context for future planning and review; it is not a promise of automatic completion and does not rewrite existing job snapshots.</p></div></details>
           </div>
         </div>
         <div class="form-band">
@@ -222,9 +241,10 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
           <div class="form-control">
             <div id="task-options" class="check-list task-list"></div>
             <details class="project-advanced">
-              <summary>Additional task types</summary>
-              <label for="custom-tasks">Other task types <span class="optional">optional</span></label>
-              <input id="custom-tasks" placeholder="Comma-separated, for example: documentation, testing">
+              <summary>Supported task type and alias reference</summary>
+              <p class="field-hint">Selected categories are admission gates, not prompt labels. There is no free-form task plugin field.</p>
+              <p id="unsupported-tasks" class="notice warning" hidden></p>
+              <details class="field-tips"><summary>Tips</summary><div class="field-tips-body"><p>Supported aliases are <code>implementation</code>, <code>planning</code>, <code>code-review</code>, <code>analysis</code>, <code>scaffolding</code>, <code>development-setup</code>, and <code>discovery</code>. They map to the eight built-in task kinds.</p><p>Unknown new values are rejected. Legacy unknown labels are displayed as unsupported and are omitted only after a successful resave.</p></div></details>
             </details>
           </div>
         </div>
@@ -302,14 +322,17 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
           <option value="openai-responses">OpenAI Responses</option>
           <option value="anthropic-messages">Anthropic Messages</option>
         </select>
+        ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["endpoint-protocol"])}
         <label for="endpoint-url">Server URL</label>
         <input id="endpoint-url" type="url" spellcheck="false" placeholder="http://127.0.0.1:11434">
+        ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["endpoint-url"])}
         <label for="endpoint-auth-method">Authentication</label>
         <select id="endpoint-auth-method">
           <option value="api-key">API key</option>
           <option value="none">No authentication</option>
           <option value="custom-header">API key + secret header</option>
         </select>
+        ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["endpoint-auth-method"])}
         <div id="endpoint-header-wrap" hidden>
           <label for="endpoint-header">Secret header</label>
           <select id="endpoint-header">
@@ -317,22 +340,29 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
             <option value="x-api-key">X-API-Key</option>
             <option value="api-key">Api-Key</option>
           </select>
+          ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["endpoint-header"])}
         </div>
         <div id="endpoint-key-wrap">
           <label for="endpoint-key">Credential</label>
           <input id="endpoint-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="Enter a credential">
+          ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["endpoint-key"])}
         </div>
+        <details class="field-tips"><summary>Tips</summary><div class="field-tips-body"><p>Choose one protocol and a service root. Authentication secrets stay in the credential boundary; controlled headers are only for non-secret routing or attribution.</p><p>Loading models is inventory discovery, not proof that generation succeeds. Manual IDs also remain unverified until a real request passes.</p></div></details>
         <details class="advanced">
           <summary>Advanced endpoint settings</summary>
           <div class="advanced-body">
             <label for="models-endpoint">Models endpoint <span class="optional">optional</span></label>
             <input id="models-endpoint" type="url" spellcheck="false" placeholder="Uses the protocol default">
+            ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["models-endpoint"])}
             <label for="custom-http-referer">HTTP-Referer <span class="optional">optional</span></label>
             <input id="custom-http-referer" type="url" spellcheck="false">
+            ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["custom-http-referer"])}
             <label for="custom-app-title">X-Title <span class="optional">optional</span></label>
             <input id="custom-app-title">
+            ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["custom-app-title"])}
             <label for="custom-anthropic-beta">Anthropic-Beta <span class="optional">optional</span></label>
             <input id="custom-anthropic-beta">
+            ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["custom-anthropic-beta"])}
           </div>
         </details>
         <button id="test-endpoint" class="primary-button wide-button" type="button">Load models</button>
@@ -342,6 +372,7 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
           <div class="advanced-body">
             <label for="manual-model-ids">Model IDs</label>
             <textarea id="manual-model-ids" rows="4" placeholder="One model ID per line"></textarea>
+            ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["manual-model-ids"])}
             <button id="use-manual-models" class="secondary-button wide-button" type="button">Use manual models</button>
           </div>
         </details>
@@ -350,10 +381,12 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
           <div class="advanced-body">
             <label for="endpoint-name">Connection name</label>
             <input id="endpoint-name">
+            ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["endpoint-name"])}
             <div class="advanced-grid">
-              <div><label for="endpoint-canonical-url">API base URL</label><input id="endpoint-canonical-url" type="url" spellcheck="false"></div>
-              <div><label for="endpoint-api">Runtime adapter</label><input id="endpoint-api" readonly></div>
+              <div><label for="endpoint-canonical-url">API base URL</label><input id="endpoint-canonical-url" type="url" spellcheck="false">${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["endpoint-canonical-url"])}</div>
+              <div><label for="endpoint-api">Runtime adapter</label><input id="endpoint-api" readonly>${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["endpoint-api"])}</div>
             </div>
+            ${guidanceMarkup(CUSTOM_ENDPOINT_GUIDANCE["advanced-model-limits"])}
             <div id="advanced-models" class="advanced-models"></div>
           </div>
         </details>
@@ -367,6 +400,24 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
   <script nonce="${nonce}">${clientScript}</script>
 </body>
 </html>`;
+}
+function guidanceMarkup(guidance) {
+    if (!guidance)
+        return "";
+    const anchor = escapeHtml(guidance.guideAnchor);
+    const hint = escapeHtml(guidance.hint);
+    const example = guidance.example
+        ? ` <span class="guidance-example">Example: <code>${escapeHtml(guidance.example)}</code></span>`
+        : "";
+    return `<span class="field-hint" data-guide-anchor="${anchor}">${hint}${example}</span>`;
+}
+function escapeHtml(value) {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
 }
 const styles = String.raw `
 :root {
@@ -504,7 +555,12 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 .mode-tabs button { min-height: 38px; border: 0; border-radius: 5px; color: #59635f; background: transparent; font-weight: 670; }
 .mode-tabs button.active { color: #183b36; background: #fff; box-shadow: 0 1px 2px rgba(21,35,32,.08); }
 .dialog-panel label:not(:first-child) { margin-top: 16px; }
-.field-hint { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.field-hint { display: block; margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.guidance-example { display: block; margin-top: 3px; }
+.field-tips { margin-top: 12px; padding: 10px 12px; border: 1px solid #cfe4df; border-radius: 6px; color: var(--muted); background: #f7fbfa; font-size: 12px; }
+.field-tips summary { color: var(--teal-dark); cursor: pointer; font-weight: 700; }
+.field-tips-body { padding-top: 2px; }
+.field-tips p { margin: 8px 0 0; line-height: 1.5; }
 .sandbox-warning { margin-top: 12px; }
 .scope-toggle.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .role-policy-list { display: grid; gap: 12px; }
@@ -572,6 +628,8 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 const clientScript = String.raw `
 (() => {
   const boot = window.__SWARM_CONFIG__;
+  const workflowBounds = boot.workflowBounds;
+  const contextAllowancePresets = boot.contextAllowancePresets;
   const token = new URLSearchParams(location.search).get("token") || "";
   const taskTypes = [
     {value:"implementation",label:"Implementation",description:"Edit code and complete approved changes."},
@@ -589,9 +647,16 @@ const clientScript = String.raw `
   const savedTasks = savedProfile?.tasks || [];
   function canonicalTask(value) {
     const normalized = String(value).trim().toLowerCase().replace(/[ _]+/g, "-");
-    return ({implement:"implementation",implementation:"implementation",coding:"implementation",plan:"planning",planning:"planning",review:"code-review","code-review":"code-review",analysis:"analysis",analyze:"analysis",discover:"discovery",discovery:"discovery",scaffold:"scaffolding",scaffolding:"scaffolding",setup:"development-setup","development-setup":"development-setup"})[normalized] || null;
+    return ({implement:"implementation",implementation:"implementation",plan:"planning",planning:"planning",review:"code-review","code-review":"code-review",ask:"analysis",orchestrate:"analysis",analysis:"analysis",discover:"discovery",discovery:"discovery",scaffold:"scaffolding",scaffolding:"scaffolding",setup:"development-setup","development-setup":"development-setup"})[normalized] || null;
+  }
+  function contextAllowance(value) {
+    return contextAllowancePresets.find(item => item.value === value);
+  }
+  function contextAllowanceLabel(value) {
+    return contextAllowance(value)?.label || "Legacy custom allowance (" + value + ")";
   }
   const savedKnownTasks = savedTasks.map(canonicalTask).filter(Boolean);
+  const savedUnsupportedTasks = savedTasks.filter(task => !canonicalTask(task));
   const state = {
     phase: initialPhase,
     setupMode,
@@ -616,9 +681,9 @@ const clientScript = String.raw `
     adaptivePolicy: structuredClone(boot.adaptivePolicy || {classifierModels:[],classifierThinkingLevel:"medium",approvalPolicy:"deny",trustedDomains:[],rules:[],diagnostics:false}),
     backgroundRolePolicy: structuredClone(boot.backgroundRolePolicy || {mechanicalExecutor:false}),
     decisionMode: ["cost","balance","power"].includes(boot.decisionMode) ? boot.decisionMode : "balance",
-    hostAssistance: structuredClone(boot.hostAssistance || {enabled:true,mode:"on",contextClasses:["workspace","web","docs","paper","connector","skill"],privateConnector:"ask",maxRequests:4,maxFanOut:2,reviewMode:"host-first",autoApprovalScope:"reversible",autoApproveDiscoveryGates:true}),
-    contextBudget: Number.isInteger(boot.contextBudget) ? boot.contextBudget : 4,
-    advisor: structuredClone(boot.advisor || {enabled:false,targets:["review","plan","orchestrate","discover"],maxRequests:2,maxPerspectives:2}),
+    hostAssistance: structuredClone(boot.hostAssistance || {enabled:true,mode:"on",contextClasses:["workspace","web","docs","paper","connector","skill"],privateConnector:"ask",maxRequests:workflowBounds.hostAssistance.requests.default,maxFanOut:workflowBounds.hostAssistance.fanOut.default,reviewMode:"host-first",autoApprovalScope:"reversible",autoApproveDiscoveryGates:true}),
+    contextBudget: Number.isInteger(boot.contextBudget) ? boot.contextBudget : workflowBounds.contextBudget.default,
+    advisor: structuredClone(boot.advisor || {enabled:false,targets:["review","plan","orchestrate","discover"],maxRequests:workflowBounds.advisor.requests.default,maxPerspectives:workflowBounds.advisor.perspectives.default}),
     doctrine: boot.doctrine || null,
     hostActions: structuredClone(boot.hostActions || {enabled:true,allowedActionClasses:["local-mutation","draft"],remoteActionsEnabled:false,maxUses:1,maxCost:1,ttlMs:1800000}),
     profile: {
@@ -626,7 +691,7 @@ const clientScript = String.raw `
       scope: savedProfile?.dirs === undefined ? "all" : "selected",
       dirs: [...(savedProfile?.dirs || [])],
       tasks: savedProfile ? [...new Set(savedKnownTasks.filter(task => knownTasks.has(task)))] : taskTypes.map(item => item.value),
-      customTasks: savedTasks.filter(task => !canonicalTask(task)),
+      unsupportedTasks: [...new Set(savedUnsupportedTasks)],
     },
   };
   state.providerProfiles.forEach(profile => {
@@ -936,7 +1001,11 @@ const clientScript = String.raw `
         clearProfileError();
       },
     })));
-    $("custom-tasks").value = state.profile.customTasks.join(", ");
+    const unsupported = $("unsupported-tasks"), unsupportedTasks = state.profile.unsupportedTasks || [];
+    unsupported.hidden = unsupportedTasks.length === 0;
+    unsupported.textContent = unsupportedTasks.length
+      ? "Legacy unsupported task labels: " + unsupportedTasks.join(", ") + ". They grant no capability and will be omitted only after a successful save."
+      : "";
   }
   function renderRoles() {
     const target = $("role-policy-list"); target.replaceChildren();
@@ -1003,7 +1072,11 @@ const clientScript = String.raw `
       value,label,checked:state.hostAssistance.contextClasses.includes(value),
       onChange:checked => { state.hostAssistance.contextClasses = checked ? [...new Set([...state.hostAssistance.contextClasses,value])] : state.hostAssistance.contextClasses.filter(item => item !== value); },
     })));
-    $("context-budget").value = String(state.contextBudget);
+    const contextBudget = $("context-budget"); contextBudget.replaceChildren();
+    contextAllowancePresets.forEach(preset => contextBudget.add(new Option(preset.label, String(preset.value))));
+    if (!contextAllowance(state.contextBudget)) contextBudget.add(new Option(contextAllowanceLabel(state.contextBudget), String(state.contextBudget)));
+    contextBudget.value = String(state.contextBudget);
+    $("context-budget-description").textContent = contextAllowance(state.contextBudget)?.description || "This legacy numeric value is preserved until you choose a named allowance.";
     $("host-max-requests").value = String(state.hostAssistance.maxRequests);
     $("host-max-fanout").value = String(state.hostAssistance.maxFanOut);
     $("private-connector").value = state.hostAssistance.privateConnector;
@@ -1028,19 +1101,79 @@ const clientScript = String.raw `
   }
   function validateSafety() {
     let message = "";
-    if (state.sandboxMode !== "strict" && !boot.sandboxAvailability.available) message = boot.sandboxAvailability.reason || "Sandbox backend is unavailable.";
-    else if (state.sandboxMode === "adaptive" && state.adaptivePolicy.classifierModels.length === 0) message = "Choose at least one classifier model for Adaptive mode.";
-    else if (state.hostAssistance.mode !== "off" && state.hostAssistance.maxFanOut > state.hostAssistance.maxRequests) message = "Host Assistance fan-out cannot exceed its request limit.";
-    else if (state.advisor.enabled && (state.advisor.maxRequests < 1 || state.advisor.maxPerspectives < 1)) message = "Enabled Advisor requires at least one consultation and perspective.";
-    else if (state.hostActions.remoteActionsEnabled && !state.hostActions.allowedActionClasses.some(value => ["remote-write","message","deploy","transaction"].includes(value))) message = "Remote Host Actions require at least one remote action class.";
-    if (!message) {
-      try {
-        const rules = JSON.parse($("policy-rules").value || "[]");
-        if (!Array.isArray(rules)) throw new Error();
-        state.adaptivePolicy.rules = rules;
-      } catch { message = "Structured policy rules must be a JSON array."; }
-    }
+    try {
+      const contextBudget = requiredInteger("context-budget", "Context allowance", workflowBounds.contextBudget);
+      const maxRequests = requiredInteger("host-max-requests", "Host Assistance requests", workflowBounds.hostAssistance.requests);
+      const maxFanOut = requiredInteger("host-max-fanout", "Host Assistance fan-out", workflowBounds.hostAssistance.fanOut);
+      const advisorRequests = requiredInteger("advisor-max-requests", "Advisor consultations", workflowBounds.advisor.requests);
+      const advisorPerspectives = requiredInteger("advisor-max-perspectives", "Advisor perspectives", workflowBounds.advisor.perspectives);
+      const hostActionUses = requiredInteger("host-action-max-uses", "Host Action maximum uses", {min:1,max:100});
+      const hostActionCost = requiredNumber("host-action-max-cost", "Host Action recommendation cost metadata", 0);
+      const hostActionTtl = requiredInteger("host-action-ttl", "Host Action lease TTL", {min:1,max:1440});
+      const rules = validatePolicyRules(JSON.parse($("policy-rules").value || "[]"));
+      if (state.sandboxMode !== "strict" && !boot.sandboxAvailability.available) throw new Error(boot.sandboxAvailability.reason || "Sandbox backend is unavailable.");
+      if (state.sandboxMode === "adaptive" && state.adaptivePolicy.classifierModels.length === 0) throw new Error("Choose at least one classifier model for Adaptive mode.");
+      if (maxFanOut > maxRequests) throw new Error("Host Assistance fan-out cannot exceed its request limit.");
+      if (state.advisor.enabled && (state.advisor.targets.length === 0 || advisorRequests < 1 || advisorPerspectives < 1)) throw new Error("Enabled Advisor requires a target, at least one consultation, and one perspective.");
+      if (state.hostActions.remoteActionsEnabled && !state.hostActions.allowedActionClasses.some(value => ["remote-write","message","deploy","transaction"].includes(value))) throw new Error("Remote Host Actions require at least one remote action class.");
+      state.contextBudget = contextBudget;
+      state.hostAssistance.maxRequests = maxRequests; state.hostAssistance.maxFanOut = maxFanOut;
+      state.advisor.maxRequests = advisorRequests; state.advisor.maxPerspectives = advisorPerspectives;
+      state.hostActions.maxUses = hostActionUses; state.hostActions.maxCost = hostActionCost; state.hostActions.ttlMs = hostActionTtl * 60000;
+      state.adaptivePolicy.rules = rules;
+    } catch (error) { message = error instanceof Error ? error.message : String(error); }
     $("safety-error").hidden = !message; $("safety-error").textContent = message; return !message;
+  }
+  function clearSafetyError() { $("safety-error").hidden = true; $("safety-error").textContent = ""; }
+  function requiredInteger(id, label, bounds) {
+    const raw = $(id).value.trim();
+    if (!raw) throw new Error(label + " is required; blank does not mean zero or default.");
+    if (!/^-?[0-9]+$/.test(raw)) throw new Error(label + " must be a whole number.");
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < bounds.min || value > bounds.max) throw new Error(label + " must be from " + bounds.min + " to " + bounds.max + ".");
+    return value;
+  }
+  function requiredNumber(id, label, min) {
+    const raw = $(id).value.trim();
+    if (!raw) throw new Error(label + " is required; blank does not mean zero or default.");
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < min) throw new Error(label + " must be a finite number of at least " + min + ".");
+    return value;
+  }
+  function validatePolicyRules(value) {
+    if (!Array.isArray(value)) throw new Error("Structured policy rules must be a JSON array.");
+    if (value.length > 128) throw new Error("Structured policy rules support at most 128 entries.");
+    const ids = new Set(), capabilities = ["filesystem.read-workspace","filesystem.write-workspace","filesystem.write-temp","git.read","shell.execute","network.connect"];
+    const roles = ["scout","planner","reviewer","analyst","mechanical-executor","executor","security-executor","project-architect","scaffolder","environment-engineer","experimenter","verifier","classifier","review-coordinator","advisor"];
+    const taskKinds = ["ask","review","plan","implement","orchestrate","scaffold","setup","discover"];
+    const keys = ["id","effect","capability","roles","taskKinds","pathPrefix","domain"];
+    return value.map((rule, index) => {
+      const label = "Structured policy rule " + (index + 1);
+      if (!rule || typeof rule !== "object" || Array.isArray(rule)) throw new Error(label + " must be an object.");
+      const unknown = Object.keys(rule).filter(key => !keys.includes(key)); if (unknown.length) throw new Error(label + " contains unknown fields: " + unknown.sort().join(", ") + ".");
+      if (typeof rule.id !== "string" || rule.id.length < 1 || rule.id.length > 64 || !/^[a-z0-9][a-z0-9._-]*$/.test(rule.id)) throw new Error(label + " needs a 1–64 character lowercase ID.");
+      if (ids.has(rule.id)) throw new Error(label + " duplicates ID " + rule.id + "."); ids.add(rule.id);
+      if (!["deny","ask","allow"].includes(rule.effect)) throw new Error(label + " effect must be deny, ask, or allow.");
+      if (!capabilities.includes(rule.capability)) throw new Error(label + " capability is not supported.");
+      ["roles","taskKinds"].forEach(field => {
+        if (!(field in rule)) return; const allowed = field === "roles" ? roles : taskKinds, values = rule[field];
+        if (!Array.isArray(values) || values.length === 0 || values.some(item => typeof item !== "string" || !allowed.includes(item))) throw new Error(label + " " + field + " must be a non-empty canonical list.");
+        if (new Set(values).size !== values.length) throw new Error(label + " " + field + " must not contain duplicates.");
+      });
+      if (rule.pathPrefix !== undefined) {
+        if (!["filesystem.read-workspace","filesystem.write-workspace"].includes(rule.capability)) throw new Error(label + " pathPrefix is only valid for workspace read/write.");
+        if (typeof rule.pathPrefix !== "string" || !rule.pathPrefix || rule.pathPrefix !== rule.pathPrefix.trim() || rule.pathPrefix === "." || rule.pathPrefix.startsWith("/") || /^[A-Za-z]:/.test(rule.pathPrefix) || rule.pathPrefix.endsWith("/") || rule.pathPrefix.includes("\\") || rule.pathPrefix.includes("\0") || rule.pathPrefix.split("/").some(part => !part || part === "." || part === "..")) throw new Error(label + " pathPrefix must be a canonical POSIX workspace-relative path.");
+      }
+      if (rule.domain !== undefined) {
+        if (rule.capability !== "network.connect") throw new Error(label + " domain is only valid for network.connect.");
+        if (typeof rule.domain !== "string") throw new Error(label + " domain must be a hostname.");
+        let domain = rule.domain.trim().toLowerCase(); if (domain.endsWith(".")) domain = domain.slice(0,-1); const host = domain.startsWith("*.") ? domain.slice(2) : domain;
+        if (!host || host === "localhost" || host.endsWith(".localhost") || /^[0-9]+(?:[.][0-9]+){3}$/.test(host) || host.includes(":") || host.split(".").some(part => !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(part))) throw new Error(label + " domain must be a hostname or *.hostname without URL, port, IP, localhost, or credentials.");
+        rule = {...rule,domain:(domain.startsWith("*.") ? "*." : "") + host};
+      }
+      if (rule.pathPrefix !== undefined && rule.domain !== undefined) throw new Error(label + " cannot combine pathPrefix and domain.");
+      return rule;
+    });
   }
   function checkRow({value,label,description,checked,onChange}) {
     const row = document.createElement("label"), input = document.createElement("input"), copy = document.createElement("span");
@@ -1053,7 +1186,7 @@ const clientScript = String.raw `
     return {
       goal: state.profile.goal,
       ...(state.profile.scope === "selected" ? {dirs:[...state.profile.dirs]} : {}),
-      tasks: [...new Set([...state.profile.tasks, ...state.profile.customTasks])],
+      tasks: [...new Set(state.profile.tasks)],
     };
   }
   function validateProject() {
@@ -1091,7 +1224,7 @@ const clientScript = String.raw `
     const workflow = $("review-workflow"); workflow.replaceChildren();
     [
       "Decision mode: " + state.decisionMode,
-      "Host Assistance: " + state.hostAssistance.mode + " · " + (state.hostAssistance.reviewMode || "user-only") + " · ceiling " + (state.hostAssistance.autoApprovalScope || "context-only") + " · Discovery gates " + (state.hostAssistance.autoApproveDiscoveryGates ? "Host-review" : "user") + " · budget " + state.contextBudget + " · requests " + state.hostAssistance.maxRequests + " · fan-out " + state.hostAssistance.maxFanOut,
+      "Host Assistance: " + state.hostAssistance.mode + " · " + (state.hostAssistance.reviewMode || "user-only") + " · ceiling " + (state.hostAssistance.autoApprovalScope || "context-only") + " · Discovery gates " + (state.hostAssistance.autoApproveDiscoveryGates ? "Host-review" : "user") + " · context " + contextAllowanceLabel(state.contextBudget) + " · requests " + state.hostAssistance.maxRequests + " · fan-out " + state.hostAssistance.maxFanOut,
       "Advisor: " + (state.advisor.enabled ? "on for " + state.advisor.targets.join(", ") : "off"),
       "Doctrine: " + (state.doctrine || "off"),
       "Host Actions: " + (state.hostActions.enabled ? "isolated · " + state.hostActions.allowedActionClasses.join(", ") + (state.hostActions.remoteActionsEnabled ? " · remote enabled" : " · remote disabled") : "off"),
@@ -1203,9 +1336,26 @@ const clientScript = String.raw `
       if (field.type === "select") (field.options || []).forEach(option => input.add(new Option(option.label, option.value)));
       else { input.type = field.type === "secret" ? "password" : field.type === "url" ? "url" : "text"; input.placeholder = field.secret && (definition.auth?.configured || saved) ? "Leave blank to keep the saved credential" : field.placeholder || ""; if (field.secret) { input.autocomplete = "new-password"; input.spellcheck = false; } }
       if (!field.secret) input.value = values[field.id] || "";
-      wrap.append(label, input); if (field.help) { const help = document.createElement("span"); help.className = "field-hint"; help.textContent = field.help; wrap.append(help); } (field.advanced ? advancedBody : target).append(wrap);
+      wrap.append(label, input);
+      if (field.guidance) {
+        const guidance = document.createElement("span"); guidance.className = "field-hint";
+        guidance.dataset.guideAnchor = field.guidance.guideAnchor;
+        guidance.textContent = field.guidance.hint;
+        if (field.guidance.example) {
+          const example = document.createElement("span"); example.className = "guidance-example";
+          example.textContent = "Example: " + field.guidance.example; guidance.append(example);
+        }
+        wrap.append(guidance);
+      }
+      (field.advanced ? advancedBody : target).append(wrap);
     });
-    if (advancedBody.children.length) target.append(advanced);
+    if (advancedBody.children.length) {
+      const tips = document.createElement("details"), summary = document.createElement("summary"), body = document.createElement("div"), first = document.createElement("p"), second = document.createElement("p");
+      tips.className = "field-tips"; body.className = "field-tips-body"; summary.textContent = "Tips";
+      first.textContent = "Leave optional routing fields blank unless the provider account or resource owner requires them. IDs, regions, and attribution values are not credential fields.";
+      second.textContent = "Advanced values affect future jobs and may change routing, retention, latency, or privacy. Examples are display-only and never include secrets.";
+      body.append(first, second); tips.append(summary, body); advanced.append(tips); target.append(advanced);
+    }
     const oauth = auth.value === "oauth"; $("oauth-panel").hidden = !oauth; $("start-oauth").textContent = definition.id === "openai-codex" ? "Sign in with ChatGPT" : "Sign in";
     renderOAuthSession();
   }
@@ -1385,10 +1535,6 @@ const clientScript = String.raw `
   $("project-goal").addEventListener("input", () => { state.profile.goal = $("project-goal").value; clearProfileError(); });
   $("scope-all").addEventListener("click", () => { state.profile.scope = "all"; clearProfileError(); renderProject(); });
   $("scope-selected").addEventListener("click", () => { state.profile.scope = "selected"; clearProfileError(); renderProject(); });
-  $("custom-tasks").addEventListener("input", () => {
-    state.profile.customTasks = $("custom-tasks").value.split(",").map(value => value.trim()).filter(Boolean);
-    clearProfileError();
-  });
   $("sandbox-strict").addEventListener("click", () => { state.sandboxMode = "strict"; renderSafety(); });
   $("sandbox-adaptive").addEventListener("click", () => {
     if (!boot.sandboxAvailability.available) return;
@@ -1412,18 +1558,12 @@ const clientScript = String.raw `
   $("host-review-mode").addEventListener("change", () => { state.hostAssistance.reviewMode = $("host-review-mode").value; });
   $("host-auto-scope").addEventListener("change", () => { state.hostAssistance.autoApprovalScope = $("host-auto-scope").value; });
   $("host-auto-discovery-gates").addEventListener("change", () => { state.hostAssistance.autoApproveDiscoveryGates = $("host-auto-discovery-gates").checked; });
-  $("context-budget").addEventListener("input", () => { state.contextBudget = Math.max(0, Math.min(64, Number($("context-budget").value) || 0)); });
-  $("host-max-requests").addEventListener("input", () => { state.hostAssistance.maxRequests = Math.max(0, Math.min(6, Number($("host-max-requests").value) || 0)); });
-  $("host-max-fanout").addEventListener("input", () => { state.hostAssistance.maxFanOut = Math.max(0, Math.min(3, Number($("host-max-fanout").value) || 0)); });
+  $("context-budget").addEventListener("change", () => { state.contextBudget = Number($("context-budget").value); renderSafety(); clearSafetyError(); });
   $("private-connector").addEventListener("change", () => { state.hostAssistance.privateConnector = $("private-connector").value; });
   $("advisor-enabled").addEventListener("change", () => { state.advisor.enabled = $("advisor-enabled").checked; });
-  $("advisor-max-requests").addEventListener("input", () => { state.advisor.maxRequests = Math.max(0, Math.min(3, Number($("advisor-max-requests").value) || 0)); });
-  $("advisor-max-perspectives").addEventListener("input", () => { state.advisor.maxPerspectives = Math.max(0, Math.min(4, Number($("advisor-max-perspectives").value) || 0)); });
   $("host-actions-enabled").addEventListener("change", () => { state.hostActions.enabled = $("host-actions-enabled").checked; });
   $("host-actions-remote").addEventListener("change", () => { state.hostActions.remoteActionsEnabled = $("host-actions-remote").checked; });
-  $("host-action-max-uses").addEventListener("input", () => { state.hostActions.maxUses = Math.max(1, Math.min(100, Number($("host-action-max-uses").value) || 1)); });
-  $("host-action-max-cost").addEventListener("input", () => { state.hostActions.maxCost = Math.max(0, Number($("host-action-max-cost").value) || 0); });
-  $("host-action-ttl").addEventListener("input", () => { state.hostActions.ttlMs = Math.max(1, Math.min(1440, Number($("host-action-ttl").value) || 1)) * 60000; });
+  ["context-budget","host-max-requests","host-max-fanout","advisor-max-requests","advisor-max-perspectives","host-action-max-uses","host-action-max-cost","host-action-ttl"].forEach(id => $(id).addEventListener("input", clearSafetyError));
   $("next-button").addEventListener("click", () => {
     if (state.phase === 4 && !validateSafety()) return;
     if (state.phase === 5 && !validateProject()) return;

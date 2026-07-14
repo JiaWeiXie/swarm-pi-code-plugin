@@ -39,6 +39,9 @@ Git delivery 永遠由 Host 管理。執行期設定與工作資料不放在 che
 isolated Experiment 可以唯讀 linked worktree 的 Git 管理路徑，用來建立與驗證乾淨 baseline。這些路徑仍然禁止寫入、不能取得修改 lease，也不會讓 Worker 擁有 commit 或交付能力。在 macOS 上，Sandbox 會在可用時直接使用 Command Line Tools 的 Git binary，避免 `xcrun` shim 嘗試寫入 Host cache。
 
 詳細內容請參考[架構文件](docs/architecture.md)、[設定文件](docs/configuration.md)，以及
+[設定欄位指南](docs/configuration-field-guide.zh-TW.md)；指南從 Host、Worker、Job、
+capability、fan-out 與 lease 等關鍵詞開始，再提供欄位預設、完整例子、安全取捨
+與頁面 Tips 的實際選擇方法；
 [Host Assistance 與 Discovery](docs/host-assistance-discovery.md)，包含即時
 Worker↔Host 協作、schema-gated experiment micro-SDLC、Advisor、
 discover-to-plan handoff，以及隔離的 Host Actions。
@@ -154,11 +157,13 @@ $swarm-pi-project
 
 新專案預設使用 **Adaptive**，透過政策分類器與受限 capability lease 加入受控的 Bash 與網路操作，寫入仍受設定 roots 限制。**Strict** 保留為選配，只提供受限 Pi 工具且不暴露 Bash。**Lenient** 則透過 macOS Seatbelt 或 Linux Bubblewrap 提供較寬鬆的對外網路。既有專案保留明確儲存的模式；缺少模式的 legacy 設定仍以 Strict 載入。Job 啟動後使用 immutable policy snapshot，之後修改設定只影響新 Job。
 
+Repository deny rule 只有在與 immutable effective project policy 完全相同時，才會讓新 snapshot 與 child snapshot 保留內部 `repo:` identity；一般設定無法冒用此保留 namespace。部分 legacy Host Assistance record 若缺少 fan-out，也會把預設 fan-out 限制在正規化後的 request limit 內，因此舊的 0／1 request policy 仍可安全載入並保持 fail-closed。
+
 Discovery 的 Experiment child 會從這份凍結的 parent snapshot 派生 `experimenter` 階段能力。不同內容不能冒用同一個 hash，因此 child 保留自己的 stage hash，並把 parent hash 以 `parentPolicyHash` 納入 canonical snapshot。Receipt 綁定 child stage hash，audit 則可驗證不可變的 parent lineage。
 
 所有 shell 模式都使用隔離的執行環境，不會傳遞模型 token、SSH socket 或其他 Host secret。Adaptive classifier 只會取得提議中的 action 與有限的政策內容。Lenient 模式下，worker 可見的來源內容可能會傳送給外部服務。平台不支援或缺少必要依賴時會 fail closed，絕不退回未沙盒化的 shell。
 
-Decision Mode 控制有限的 orchestration 深度：Cost 使用 1 個基本視角、Balance 使用 2 個、Power 使用 3 個。Host Assistance context budget 與 Advisor quota 是獨立設定，不會隨模式自動改寫。Advisor 預設關閉；啟用後只加入有限、唯讀、不可遞迴的諮詢。`first-principles-qds-v1` 目前只會保存並進入 snapshot；runtime 尚未自動執行 Question/Delete/Simplify 收斂。
+Decision Mode 控制有限的 orchestration 深度：Cost 使用 1 個基本視角、Balance 使用 2 個、Power 使用 3 個。Host Assistance context allowance 以 Off、Compact、Standard、Extended 顯示，Standard 將單次回傳限制在 32,768 個字元；它與 Advisor quota 都是獨立設定，不會隨模式自動改寫。Advisor 預設關閉；啟用後只加入有限、唯讀、不可遞迴的諮詢。`first-principles-qds-v1` 目前只會保存並進入 snapshot；runtime 尚未自動執行 Question/Delete/Simplify 收斂。
 
 Host Assistance 預設開啟；新專案預設為 Host-first、Reversible ceiling 與 Discovery gate review。Worker 必須提供目的、最小權限、精確目標、失敗模式、可逆性、rollback、驗證、風險與替代方案。活躍的 Codex／Claude model 會獨立比對原始意圖與 immutable policy，只能透過 audit receipt 自動放行 public/read-only context 或一個精確、範圍內、完全可逆的動作；資料或信心不足時回問使用者。缺少新欄位的既有 policy 仍為 User-only，直到使用者重新儲存。Strict 不會因 Host receipt 增加能力；secret、private connector、Git metadata、刪除、交付、部署、訊息與交易永遠不會自動核准。
 
@@ -386,9 +391,10 @@ mise run build
 
 ### Plugin 版號
 
-0.7.0 以向下相容的 minor release 加入 stage-scoped Discover Sandbox 與
-Host-first adjudication。缺少新 Host Assistance 欄位的既有專案仍維持
-`user-only`，直到使用者明確重新儲存，因此升級不會靜默擴張權限。
+0.8.0 加入設定頁術語指南、嚴格的 structured-policy validation、具名 Host
+context allowance，以及更明確的 Host Action 觸發邊界。既有專案仍可讀取 legacy
+值，而且在使用者明確重新儲存前不會取得新權限。0.7.0 則加入 stage-scoped
+Discover Sandbox 與 Host-first adjudication。
 
 根目錄 `package.json` 是 Plugin 版號的唯一來源。使用以下指令檢查 runtime
 package、lockfile、Claude manifest／marketplace 與 Codex manifest 是否一致：

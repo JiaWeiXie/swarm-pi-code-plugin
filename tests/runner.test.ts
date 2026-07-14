@@ -2123,6 +2123,47 @@ test("admission maps profile task categories to the allowed task kinds", async (
   assert.equal("errorCode" in askRej && askRej.errorCode, "task-kind-not-allowed");
 });
 
+test("repository deny rules remain valid in newly snapshotted jobs", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-repository-rule-job-"));
+  fs.writeFileSync(
+    path.join(workspace, ".swarm-pi-policy.json"),
+    JSON.stringify({
+      rules: [
+        { id: "no-network", effect: "deny", capability: "network.connect", domain: "example.test" },
+      ],
+    }),
+  );
+  await updateState(workspace, (state) => {
+    state.config.profile = { tasks: ["analysis"] };
+  });
+
+  const result = await runCommand(
+    {
+      command: "ask",
+      host: "codex",
+      promptFile: "p.md",
+      executionMode: "background",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    {
+      catalog: { available: () => [fakeModel] },
+      readFile: async () => "q",
+      createSession: async () => {
+        throw new Error("no session on submit");
+      },
+    },
+    { spawnWorker: async () => 1 },
+  );
+
+  assert.equal("event" in result && result.event, "accepted");
+  const request = await readJobRequest(workspace, "jobId" in result ? result.jobId : "");
+  assert.ok(request.policySnapshot);
+  assert.equal(request.policySnapshot.adaptivePolicy.rules[0]?.id, "repo:no-network");
+});
+
 test("admission never blocks non-task commands even when tasks is empty", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-admit-nontask-"));
   await updateState(workspace, (state) => {

@@ -9,7 +9,7 @@ const CAPABILITIES = new Set([
     "shell.execute",
     "network.connect",
 ]);
-const TASK_KINDS = [
+export const TASK_KINDS = Object.freeze([
     "ask",
     "review",
     "plan",
@@ -18,9 +18,8 @@ const TASK_KINDS = [
     "scaffold",
     "setup",
     "discover",
-];
-const OPERATIONS = ["read", "search", "write", "shell"];
-const TASK_ALIASES = {
+]);
+export const TASK_ALIASES = Object.freeze({
     implementation: ["implement"],
     planning: ["plan"],
     "code-review": ["review"],
@@ -28,7 +27,8 @@ const TASK_ALIASES = {
     scaffolding: ["scaffold"],
     "development-setup": ["setup"],
     discovery: ["discover"],
-};
+});
+const OPERATIONS = ["read", "search", "write", "shell"];
 /** An error suitable for serialization by later policy enforcement phases. */
 export class ProjectPolicyError extends Error {
     rejection;
@@ -158,18 +158,26 @@ function stringArray(value) {
         ? value
         : undefined;
 }
+export function normalizeDelegatedTaskSelections(tasks) {
+    const supported = new Set([...TASK_KINDS, ...Object.keys(TASK_ALIASES)]);
+    const normalized = tasks.map((task) => task.trim().toLowerCase().replace(/[ _]+/g, "-"));
+    const unsupported = [...new Set(normalized.filter((task) => !supported.has(task)))].sort(compareCodePoints);
+    if (unsupported.length > 0) {
+        throw rejection("project-scope-invalid", "admission", `Unsupported delegated task types: ${unsupported.join(", ")}`);
+    }
+    return [...new Set(normalized)];
+}
 function normalizeTaskKinds(tasks) {
     if (!tasks)
         return [...TASK_KINDS].sort();
+    const selections = normalizeDelegatedTaskSelections(tasks);
     const kinds = new Set();
-    for (const task of tasks) {
+    for (const task of selections) {
         if (TASK_ALIASES[task])
             TASK_ALIASES[task].forEach((kind) => kinds.add(kind));
-        else if (TASK_KINDS.includes(task))
+        else
             kinds.add(task);
     }
-    if (tasks.length && !kinds.size)
-        throw rejection("project-scope-invalid", "admission", "No configured task kinds are valid");
     return [...kinds].sort();
 }
 function normalizeRoots(dirs) {
