@@ -258,6 +258,7 @@ async function applyResultToState(cwd, jobId, finalResult, finishedAt = new Date
     });
 }
 export async function readJobRequest(cwd, jobId) {
+    await assertJobArtifactsAvailable(cwd, jobId);
     return readRequiredJson(path.join(await jobDirectory(cwd, jobId), "request.json"));
 }
 export async function updateJobExecutionWorkspace(cwd, jobId, workerToken, workspace) {
@@ -276,6 +277,7 @@ export async function updateJobExecutionWorkspace(cwd, jobId, workerToken, works
     await writeJson(path.join(await jobDirectory(cwd, jobId), "request.json"), request);
 }
 export async function readJobPrompt(cwd, jobId) {
+    await assertJobArtifactsAvailable(cwd, jobId);
     return fs.readFile(path.join(await jobDirectory(cwd, jobId), "prompt.md"), "utf8");
 }
 export async function readJobResult(cwd, jobId) {
@@ -1405,6 +1407,15 @@ function processAlive(pid) {
     }
     catch (error) {
         return error.code === "EPERM";
+    }
+}
+async function assertJobArtifactsAvailable(cwd, jobId) {
+    const job = (await loadState(cwd, { migrateLegacy: false })).jobs.find((candidate) => candidate.id === jobId);
+    if (typeof job?.prunedAt === "string") {
+        throw new Error(`Job artifacts were pruned at ${job.prunedAt}: ${jobId}`);
+    }
+    if (job?.pruneOperation) {
+        throw new Error(`Job artifacts are being pruned: ${jobId}`);
     }
 }
 async function readJson(file) {

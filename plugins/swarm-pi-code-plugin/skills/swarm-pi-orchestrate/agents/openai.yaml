@@ -1,4 +1,4 @@
 interface:
-  display_name: "Swarm Pi Code Plugin Orchestrate"
-  short_description: "Compare bounded Pi analysis perspectives"
-  default_prompt: "Use $swarm-pi-orchestrate to assess this complex decision."
+  display_name: "Swarm Pi Orchestrate"
+  short_description: "Compare bounded Pi perspectives on a decision"
+  default_prompt: "Use $swarm-pi-orchestrate to compare bounded read-only perspectives on this decision."

@@ -41,6 +41,7 @@ export type JobsAction =
   | "decide"
   | "action-start"
   | "cleanup"
+  | "prune"
   | "materialize"
   | "export";
 
@@ -82,6 +83,8 @@ export interface RunnerArguments {
   declineReason?: string;
   notificationId?: string;
   discard?: boolean;
+  apply?: boolean;
+  olderThanMs?: number;
   audit?: boolean;
   emit?: "ndjson";
   once?: boolean;
@@ -255,6 +258,12 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--discard":
         parsed.discard = true;
         break;
+      case "--apply":
+        parsed.apply = true;
+        break;
+      case "--older-than":
+        parsed.olderThanMs = parseRetentionDuration(readValue(argv, ++index, argument), argument);
+        break;
       case "--audit":
         parsed.audit = true;
         break;
@@ -395,6 +404,7 @@ function parseJobsAction(value: string | undefined): JobsAction {
     value === "decide" ||
     value === "action-start" ||
     value === "cleanup" ||
+    value === "prune" ||
     value === "export"
   )
     return value;
@@ -419,7 +429,12 @@ function validateJobsArguments(args: RunnerArguments): void {
   if (args.jobsAction === "export" && !args.audit) {
     throw new Error("jobs export requires --audit");
   }
-  if (args.jobsAction !== "list" && args.jobsAction !== "watch" && !args.jobId) {
+  if (
+    args.jobsAction !== "list" &&
+    args.jobsAction !== "watch" &&
+    args.jobsAction !== "prune" &&
+    !args.jobId
+  ) {
     throw new Error(`jobs ${args.jobsAction} requires --job`);
   }
   if (args.pendingNotifications && args.jobsAction !== "list") {
@@ -477,6 +492,15 @@ function validateJobsArguments(args: RunnerArguments): void {
   if (args.discard && args.jobsAction !== "cleanup") {
     throw new Error("--discard is only supported by jobs cleanup");
   }
+  if (args.apply && args.jobsAction !== "prune") {
+    throw new Error("--apply is only supported by jobs prune");
+  }
+  if (args.olderThanMs !== undefined && args.jobsAction !== "prune") {
+    throw new Error("--older-than is only supported by jobs prune");
+  }
+  if (args.jobsAction === "prune" && args.olderThanMs === undefined) {
+    throw new Error("jobs prune requires --older-than");
+  }
 }
 
 function parseExecutionMode(value: string): ExecutionMode {
@@ -508,6 +532,20 @@ function parseDuration(value: string, flag: string): number {
   const duration = Number(value);
   if (!Number.isInteger(duration) || duration < 1_000 || duration > 86_400_000) {
     throw new Error(`${flag} must be an integer from 1000 to 86400000`);
+  }
+  return duration;
+}
+
+function parseRetentionDuration(value: string, flag: string): number {
+  const match = /^(\d+)([mhdw])$/.exec(value);
+  if (!match) throw new Error(`${flag} must be a positive integer followed by m, h, d, or w`);
+  const amount = Number(match[1]);
+  const multiplier = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }[
+    match[2] as "m" | "h" | "d" | "w"
+  ];
+  const duration = amount * multiplier;
+  if (amount < 1 || !Number.isSafeInteger(duration)) {
+    throw new Error(`${flag} exceeds the supported duration range`);
   }
   return duration;
 }

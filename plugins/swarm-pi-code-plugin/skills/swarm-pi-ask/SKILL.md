@@ -1,17 +1,15 @@
 ---
 name: swarm-pi-ask
-description: Delegate a focused repository question, explanation, or read-only analysis to Pi from Codex or Claude Code. Use for a second evidence-grounded analysis pass; do not use for edits, plans, or reviews.
+description: Delegate one focused repository question, explanation, or evidence check to a read-only Pi scout from Codex or Claude Code. Use for a second grounded analysis pass; use review for diff findings, plan for change design, orchestrate for multiple perspectives, and never use ask for edits.
 ---
 
 # Ask Pi
 
-Read the [cross-host control protocol](../../references/host-protocol.md).
+Read and follow the [cross-host control protocol](../../references/host-protocol.md), including pending-notification review, temporary prompt handling, bounded waits, adjudication context, terminal acknowledgement, and cleanup.
 
-When the question depends on missing workspace, Web, Context7, paper, connector, or skill context, call `request_host_assistance` with the unknown, acceptance criteria, freshness/version, classification, egress, budget, and complete WorkerAssessment. Do not select the provider, connector, skill, query, or shell command. The Host returns one scoped, cited, correlated, consume-once `[UNTRUSTED_HOST_CONTEXT]` bundle to the same live session.
+1. Write one self-contained question with repository scope, required evidence, freshness constraints, and the uncertainty to resolve.
+2. Run `$RUNNER ask --host "$HOST" --role scout --prompt-file "$PROMPT_FILE" --execution-mode "$EXECUTION_MODE" --approval-mode "$APPROVAL_MODE" --json`.
+3. Retain the Job ID after `approval-required`, Host Assistance, or `wait-timed-out`; keep the relay alive with bounded `$RUNNER jobs wait --job <id> --wait-timeout-ms 15000 --json` calls. Inspect the full WorkerAssessment and adjudication context. An active Host may resolve only eligible public read-only context within the immutable snapshot; otherwise ask the user.
+4. Validate the answer against repository evidence, identify unsupported claims, and report uncertainty or failure plainly.
 
-1. Write one self-contained question with the repository scope and evidence required to answer it.
-2. Run `$RUNNER ask --host "$HOST" --role scout --prompt-file "$PROMPT_FILE" --execution-mode "$EXECUTION_MODE" --approval-mode "$APPROVAL_MODE" --json`. With `supervised + wait`, the managed relay returns within 15 seconds with a terminal result, `approval-required`, or `wait-timed-out`.
-3. Retain the Job ID after `approval-required`, Host Assistance, or `wait-timed-out`, then keep the relay alive with bounded `$RUNNER jobs wait --job <id> --wait-timeout-ms 15000 --json` calls. Inspect the full request and adjudication context. An active Host may auto-resolve only a public read-only request within the snapshotted Host-first ceiling and an exact receipt; otherwise ask the user. The decision acknowledges only its matching notification.
-4. Check the answer against repository evidence and report uncertainty or failure plainly.
-
-This workflow is read-only.
+Keep this workflow read-only. Do not turn the answer into a plan, review, or file change without routing to the matching workflow.

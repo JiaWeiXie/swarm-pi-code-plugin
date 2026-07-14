@@ -28,6 +28,10 @@ export interface MaterializedJobWorktree {
   changedFiles: string[];
 }
 
+export function jobWorktreeBranch(jobId: string): string {
+  return `swarm-pi/${jobId.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-48)}`;
+}
+
 export async function prepareJobWorktree(
   cwd: string,
   jobId: string,
@@ -40,7 +44,7 @@ export async function prepareJobWorktree(
   const base = (await git(workspace, ["rev-parse", "HEAD"])).trim();
   const key = createHash("sha256").update(workspace).digest("hex").slice(0, 12);
   const worktree = path.join(os.tmpdir(), "swarm-pi-job-worktrees", key, jobId);
-  const branch = `swarm-pi/${jobId.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-48)}`;
+  const branch = jobWorktreeBranch(jobId);
   await fs.mkdir(path.dirname(worktree), { recursive: true });
   let created = false;
   try {

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Swarm Pi Code Plugin Setup"
-  short_description: "Configure local development with Pi"
-  default_prompt: "Use $swarm-pi-setup to configure project tooling."
+  display_name: "Swarm Pi Setup"
+  short_description: "Configure reproducible project-local tooling with Pi"
+  default_prompt: "Use $swarm-pi-setup to configure project-local development tooling."

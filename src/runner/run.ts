@@ -150,6 +150,7 @@ import {
   prepareConfigurationStorage,
 } from "../state/state.js";
 import type { JobRecord } from "../state/state.js";
+import { pruneJobs, type PruneReport } from "../state/prune.js";
 import {
   createContinuation,
   consumeContinuation,
@@ -254,6 +255,7 @@ export type RunnerOutput =
       adjudicationContext: JobAdjudicationContext;
     }
   | { cleaned: true; jobId: string }
+  | PruneReport
   | {
       materialized: true;
       jobId: string;
@@ -902,6 +904,11 @@ async function handleJobs(
     }
     case "export":
       return exportJobAudit(cwd, args.jobId!);
+    case "prune":
+      return pruneJobs(cwd, {
+        olderThanMs: args.olderThanMs!,
+        apply: args.apply ?? false,
+      });
     case "wait":
       return waitForJob(cwd, args.jobId!, args.waitTimeoutMs);
     case "cancel":
@@ -983,6 +990,7 @@ async function handleJobs(
       });
     case "materialize": {
       const snapshot = await getJob(cwd, args.jobId!);
+      assertJobArtifactsPresent(snapshot.job);
       if (
         snapshot.job.materializedAt &&
         typeof snapshot.job.materializedTarget === "string" &&
@@ -1063,6 +1071,7 @@ async function handleJobs(
     }
     case "cleanup": {
       const snapshot = await getJob(cwd, args.jobId!);
+      assertJobArtifactsPresent(snapshot.job);
       if (!isTerminalJobStatus(snapshot.job.status))
         throw new Error(`Job is not terminal: ${args.jobId}`);
       const workspace = snapshot.job.executionWorkspace as
@@ -1107,6 +1116,13 @@ async function jobAdjudicationContext(cwd: string, jobId: string) {
 function publicJob(job: JobRecord): PublicJobRecord {
   const { workerToken: _workerToken, ...publicRecord } = job;
   return publicRecord;
+}
+
+function assertJobArtifactsPresent(job: JobRecord): void {
+  if (typeof job.prunedAt === "string") {
+    throw new Error(`Job artifacts were pruned at ${job.prunedAt}: ${job.id}`);
+  }
+  if (job.pruneOperation) throw new Error(`Job artifacts are being pruned: ${job.id}`);
 }
 
 async function runBackgroundJob(

@@ -84,7 +84,7 @@ mise exec -- node scripts/pi-runner.mjs discover --host <host> --prompt-file <fi
 mise exec -- node scripts/pi-runner.mjs roles list --json
 mise exec -- node scripts/pi-runner.mjs status|doctor|resume [options] --json
 mise exec -- node scripts/pi-runner.mjs scaffold|setup --host <claude|codex> [options] --json
-mise exec -- node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|approvals|approve|deny|host-requests|host-respond|host-decline|decisions|decide|action-start|cleanup|materialize|export> [options] --json
+mise exec -- node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|approvals|approve|deny|host-requests|host-respond|host-decline|decisions|decide|action-start|cleanup|prune|materialize|export> [options] --json
 ```
 
 `jobs approve`, `jobs host-respond`, and `jobs decide` accept an optional
@@ -207,6 +207,17 @@ only non-secret adapter, endpoint, readiness, and controlled-header metadata.
 project goal, directory scope, delegated task types, sandbox mode, migration
 metadata, and job index. State updates use an inter-process lock, a
 same-directory temporary file, and an atomic rename.
+
+Retention cleanup uses `jobs prune --older-than <duration>`. Preview loads the
+canonical state with migration disabled and performs only filesystem and Git
+inspection. Apply takes a global `prune.lock`, records a per-Job operation ID
+and durable phase, removes only a clean uniquely owned disposable workspace,
+atomically renames the Job directory to a deterministic quarantine path, then
+deletes it and replaces the Job record with a compact tombstone. A later apply
+resumes `claimed`, `workspace-cleaned`, `quarantined`, or `artifacts-removed`
+operations after interruption. Pending Host work, recent worker leases, dirty
+or unintegrated worktrees, and recoverable artifacts fail closed. Unreferenced
+Job directories are visible in the report but are not deleted.
 
 Non-Git workspaces use an OS user-state namespace keyed by canonical path.
 `SWARM_PI_CODE_PLUGIN_DATA_DIR` can override either location. The current

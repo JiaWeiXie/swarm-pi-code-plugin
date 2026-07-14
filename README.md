@@ -393,12 +393,29 @@ mise exec -- node scripts/pi-runner.mjs jobs decisions --job <job-id> --json
 mise exec -- node scripts/pi-runner.mjs jobs decide --job <job-id> --request <request-id> --response-file <decision.json> --json
 mise exec -- node scripts/pi-runner.mjs jobs action-start --job <parent-job-id> --request <recommendation-id> --json
 mise exec -- node scripts/pi-runner.mjs jobs cleanup --job <job-id> [--discard] --json
+mise exec -- node scripts/pi-runner.mjs jobs prune --older-than 30d --json
+mise exec -- node scripts/pi-runner.mjs jobs prune --older-than 30d --apply --json
 mise exec -- node scripts/pi-runner.mjs jobs materialize --job <job-id> --target /path/to/new-project --json
 ```
 
 For a verified isolated implementation artifact, omit `--target` to apply its
 patch to the original workspace. Materialization validates the original HEAD
 and preserved paths, does not create a commit, and rolls back a failed apply.
+
+`jobs prune` is retention cleanup for durable runtime data, not a replacement
+for the single-Job `jobs cleanup` worktree command. `--older-than` is required
+and accepts positive `m`, `h`, `d`, or `w` durations. Without `--apply`, prune
+is strictly read-only: it reports eligible terminal Jobs, retention reasons,
+estimated logical bytes, safe worktree/branch actions, and orphan directories.
+Apply excludes Jobs with pending notifications, approvals, Host Assistance,
+Human Decisions, live heartbeats, or recoverable artifacts. It removes only a
+clean, uniquely owned, already materialized or integrated worktree/branch,
+quarantines artifacts before deletion, and leaves a compact tombstone in
+`state.json`. A durable operation phase makes an interrupted apply resumable;
+one Job failure does not stop later candidates, but returns `success: false`.
+Orphan directories remain report-only in this release. Preview and destructive
+acceptance tests should use an isolated Git/state copy; never add `--apply`
+automatically after normal Job completion.
 
 Job status and `jobs wait` exit codes describe different things. Status is the
 durable job lifecycle; an exit code may instead tell the Host that user action
@@ -639,7 +656,10 @@ mise run build
 
 ### Plugin versions
 
-Version 0.8.0 adds guided configuration terminology, strict structured-policy
+Version 0.9.0 adds safe retention-based Job pruning with read-only preview,
+resumable quarantine/tombstone cleanup, conservative worktree ownership checks,
+and sharper trigger boundaries across the ten Swarm Pi skills. Version 0.8.0
+adds guided configuration terminology, strict structured-policy
 validation, named Host context allowances, and clearer Host Action trigger
 boundaries. Existing projects keep readable legacy values and do not gain new
 authority until explicitly resaved. Version 0.7.0 introduced stage-scoped

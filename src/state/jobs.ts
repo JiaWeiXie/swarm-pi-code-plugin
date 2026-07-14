@@ -430,6 +430,7 @@ async function applyResultToState(
 }
 
 export async function readJobRequest(cwd: string, jobId: string): Promise<JobRequest> {
+  await assertJobArtifactsAvailable(cwd, jobId);
   return readRequiredJson<JobRequest>(path.join(await jobDirectory(cwd, jobId), "request.json"));
 }
 
@@ -454,6 +455,7 @@ export async function updateJobExecutionWorkspace(
 }
 
 export async function readJobPrompt(cwd: string, jobId: string): Promise<string> {
+  await assertJobArtifactsAvailable(cwd, jobId);
   return fs.readFile(path.join(await jobDirectory(cwd, jobId), "prompt.md"), "utf8");
 }
 
@@ -1828,6 +1830,18 @@ function processAlive(pid: number): boolean {
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+async function assertJobArtifactsAvailable(cwd: string, jobId: string): Promise<void> {
+  const job = (await loadState(cwd, { migrateLegacy: false })).jobs.find(
+    (candidate) => candidate.id === jobId,
+  );
+  if (typeof job?.prunedAt === "string") {
+    throw new Error(`Job artifacts were pruned at ${job.prunedAt}: ${jobId}`);
+  }
+  if (job?.pruneOperation) {
+    throw new Error(`Job artifacts are being pruned: ${jobId}`);
   }
 }
 

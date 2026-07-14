@@ -104,6 +104,8 @@ New jobs durably snapshot the submitted non-secret provider/model configuration.
 
 Validate Pi claims against the repository. For mutation workflows, inspect the actual diff and run host-owned verification. Delete temporary prompt/spec files after the runner has durably copied them. Report the model/fallback, verification evidence, changed files or artifact, and unresolved risk.
 
+Present the terminal result before acknowledging its terminal notification. After acknowledgement, a Host may suggest `$RUNNER jobs prune --older-than <duration> --json` to preview retention cleanup. Never add `--apply` automatically, never prune a Job with pending Host work, and never treat retention cleanup as part of ordinary workflow completion.
+
 Keep the loop durable. Reference the research or plan job ID in the next implementation brief, copy accepted evidence and constraints into that brief, and preserve the returned continuation ID whenever workspace repair is required. After repair, use `resume --continuation <id>` instead of asking the user to restate the task.
 
 Do not present a large inline code sample as working code unless it has passed the relevant parser, typecheck, or test. Prefer a concise explanation plus a verified artifact. For an isolated implementation artifact, present its diff and verifier result, obtain explicit delivery approval, then run `jobs materialize --job <id>`; this applies the patch without committing it.

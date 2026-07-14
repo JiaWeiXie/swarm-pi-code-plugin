@@ -23,6 +23,7 @@ import { exportJobAudit } from "../audit/export.js";
 import { acknowledgeJob, attachJobProcess, cancelJob, finishJob, getJob, heartbeatJob, JOB_HEARTBEAT_INTERVAL_MS, listJobs, markJobRunning, modelConfigurationSnapshotHash, readJobPrompt, readJobRequest, updateJobExecutionWorkspace, updateJobProgress, requestJobApproval, startJob, waitForApprovalResolution, createJobLeaseProvider, appendPolicyEvent, waitForJob, approveJob, denyJobApproval, listJobApprovals, recordJobApprovalAdjudication, isTerminalJobStatus, requestJobHostAssistance, waitForHostAssistanceResolution, listJobHostRequests, resolveJobHostRequest, declineJobHostRequest, } from "../state/jobs.js";
 import { clearModelConfiguration, loadModelConfiguration, modelPriority, parseModelConfiguration, saveModelPriority, } from "../state/model-config.js";
 import { clearConfiguration, resolveStateDir, loadState, saveProfile, setAvailableModels, setModelPriority, updateState, prepareConfigurationStorage, } from "../state/state.js";
+import { pruneJobs } from "../state/prune.js";
 import { createContinuation, consumeContinuation, readContinuation, } from "../onboarding/continuations.js";
 import { inspectReadiness } from "../onboarding/readiness.js";
 import { spawnBackgroundWorker } from "./background.js";
@@ -526,6 +527,11 @@ async function handleJobs(args, cwd, dependencies, signal) {
         }
         case "export":
             return exportJobAudit(cwd, args.jobId);
+        case "prune":
+            return pruneJobs(cwd, {
+                olderThanMs: args.olderThanMs,
+                apply: args.apply ?? false,
+            });
         case "wait":
             return waitForJob(cwd, args.jobId, args.waitTimeoutMs);
         case "cancel":
@@ -588,6 +594,7 @@ async function handleJobs(args, cwd, dependencies, signal) {
             });
         case "materialize": {
             const snapshot = await getJob(cwd, args.jobId);
+            assertJobArtifactsPresent(snapshot.job);
             if (snapshot.job.materializedAt &&
                 typeof snapshot.job.materializedTarget === "string" &&
                 snapshot.result?.artifact?.commit) {
@@ -662,6 +669,7 @@ async function handleJobs(args, cwd, dependencies, signal) {
         }
         case "cleanup": {
             const snapshot = await getJob(cwd, args.jobId);
+            assertJobArtifactsPresent(snapshot.job);
             if (!isTerminalJobStatus(snapshot.job.status))
                 throw new Error(`Job is not terminal: ${args.jobId}`);
             const workspace = snapshot.job.executionWorkspace;
@@ -700,6 +708,13 @@ async function jobAdjudicationContext(cwd, jobId) {
 function publicJob(job) {
     const { workerToken: _workerToken, ...publicRecord } = job;
     return publicRecord;
+}
+function assertJobArtifactsPresent(job) {
+    if (typeof job.prunedAt === "string") {
+        throw new Error(`Job artifacts were pruned at ${job.prunedAt}: ${job.id}`);
+    }
+    if (job.pruneOperation)
+        throw new Error(`Job artifacts are being pruned: ${job.id}`);
 }
 async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDiscoveryGates = dependencies === undefined) {
     const request = await readJobRequest(cwd, args.jobId);

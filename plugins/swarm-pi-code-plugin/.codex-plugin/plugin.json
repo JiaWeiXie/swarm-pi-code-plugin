@@ -1,6 +1,6 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.8.1+codex.20260714134123",
+  "version": "0.9.0+codex.20260714151252",
   "description": "Dual-host Pi workflows with durable Host Assistance, discovery, review, and isolated implementation.",
   "author": {
     "name": "JiaWei Xie"

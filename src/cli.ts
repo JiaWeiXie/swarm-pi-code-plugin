@@ -9,6 +9,7 @@ import {
 } from "./state/job-events.js";
 import { isTerminalJobStatus, reconcileJobs } from "./state/jobs.js";
 import { loadState } from "./state/state.js";
+import { formatPruneReport, type PruneReport } from "./state/prune.js";
 import { startConfigurationServer } from "./web/configuration-server.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -56,8 +57,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       process.removeListener("SIGINT", abort);
       process.removeListener("SIGTERM", abort);
     });
-    const serialized = JSON.stringify(result, null, args.json ? 2 : 0);
-    process.stdout.write(`${serialized}\n`);
+    if (args.command === "jobs" && args.jobsAction === "prune" && !args.json) {
+      process.stdout.write(formatPruneReport(result as PruneReport));
+    } else {
+      const serialized = JSON.stringify(result, null, args.json ? 2 : 0);
+      process.stdout.write(`${serialized}\n`);
+    }
 
     if ("event" in result && result.event === "wait-timed-out") return 3;
     if ("event" in result && result.event === "approval-required") return 4;

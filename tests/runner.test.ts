@@ -249,6 +249,24 @@ test("argument parsing requires host and prompt file for ask", () => {
   });
   assert.equal(parseArguments(["jobs", "watch", "--emit", "ndjson", "--once"]).once, true);
   assert.throws(() => parseArguments(["jobs", "watch"]), /--emit ndjson/);
+  assert.deepEqual(parseArguments(["jobs", "prune", "--older-than", "7d", "--apply", "--json"]), {
+    command: "jobs",
+    jobsAction: "prune",
+    olderThanMs: 604_800_000,
+    apply: true,
+    reconfigure: false,
+    reset: false,
+    json: true,
+  });
+  assert.throws(() => parseArguments(["jobs", "prune"]), /requires --older-than/);
+  for (const duration of ["0d", "1.5d", "7", "-1d", "1y"]) {
+    assert.throws(() => parseArguments(["jobs", "prune", "--older-than", duration]));
+  }
+  assert.throws(
+    () => parseArguments(["jobs", "list", "--older-than", "7d"]),
+    /only supported by jobs prune/,
+  );
+  assert.throws(() => parseArguments(["jobs", "list", "--apply"]), /only supported by jobs prune/);
 });
 
 test("model helpers expose stable provider/model identifiers", () => {

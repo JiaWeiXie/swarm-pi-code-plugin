@@ -1,4 +1,4 @@
 interface:
-  display_name: "Swarm Pi Code Plugin Project"
-  short_description: "Adjust Pi project routing and safety"
-  default_prompt: "Use $swarm-pi-project to update the Pi settings for this project."
+  display_name: "Swarm Pi Project"
+  short_description: "Adjust Pi project policy without provider changes"
+  default_prompt: "Use $swarm-pi-project to adjust Pi routing and safety settings for this project."

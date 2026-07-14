@@ -253,10 +253,24 @@ mise exec -- node scripts/pi-runner.mjs jobs decisions --job <job-id> --json
 mise exec -- node scripts/pi-runner.mjs jobs decide --job <job-id> --request <request-id> --response-file <decision.json> --json
 mise exec -- node scripts/pi-runner.mjs jobs action-start --job <parent-job-id> --request <recommendation-id> --json
 mise exec -- node scripts/pi-runner.mjs jobs cleanup --job <job-id> [--discard] --json
+mise exec -- node scripts/pi-runner.mjs jobs prune --older-than 30d --json
+mise exec -- node scripts/pi-runner.mjs jobs prune --older-than 30d --apply --json
 mise exec -- node scripts/pi-runner.mjs jobs materialize --job <job-id> --target /path/to/new-project --json
 ```
 
 已驗證的隔離 implementation artifact 可以省略 `--target`，將 patch 套用回原 workspace。Materialization 會驗證原始 HEAD 與 preserved paths、不建立 commit，套用失敗時會回復 patch。
+
+`jobs prune` 用來整理 durable runtime 資料，不會取代單一 Job 的 `jobs cleanup`
+worktree 操作。`--older-than` 必填，接受正整數加 `m`、`h`、`d` 或 `w`。
+未加入 `--apply` 時完全唯讀，只會列出符合條件的 terminal Job、保留原因、
+預估 logical bytes、安全的 worktree／branch 動作與孤兒目錄。Apply 會排除仍有
+待確認通知、approval、Host Assistance、Human Decision、存活 heartbeat 或可復原
+artifact 的 Job；只有乾淨、唯一歸屬，而且已 materialize 或已整合的
+worktree／branch 才會自動移除。Artifact 會先移入 quarantine 再刪除，`state.json`
+保留精簡 tombstone；持久化 phase 可讓中斷的 apply 繼續執行。單一 Job 失敗不會
+阻止後續候選，但整體回傳 `success: false`。本版只回報孤兒目錄，不自動刪除。
+Preview 與破壞性驗收應使用隔離 Git／state 副本；一般 Job 完成後不得自動加入
+`--apply`。
 
 Job status 與 `jobs wait` exit code 表達的是不同層次：status 是持久化的 Job 生命週期；exit code 也可能只是通知 Host 需要使用者介入，此時 Job 仍然存活。
 
@@ -393,6 +407,8 @@ mise run build
 
 ### Plugin 版號
 
+0.9.0 加入具唯讀預覽的 retention Job pruning、可恢復的 quarantine／tombstone
+清理、保守的 worktree 歸屬檢查，以及 10 個 Swarm Pi Skill 更精確的觸發邊界。
 0.8.0 加入設定頁術語指南、嚴格的 structured-policy validation、具名 Host
 context allowance，以及更明確的 Host Action 觸發邊界。既有專案仍可讀取 legacy
 值，而且在使用者明確重新儲存前不會取得新權限。0.7.0 則加入 stage-scoped

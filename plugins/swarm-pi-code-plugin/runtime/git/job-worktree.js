@@ -7,6 +7,9 @@ import { promisify } from "node:util";
 import { acquireWorktreeLease, assertWorktreeBaseline, assessWorkspace, requireCleanWorktree, validateChangedPaths, } from "./worktree.js";
 import { resolveWorkspaceRoot } from "../state/state.js";
 const execFileAsync = promisify(execFile);
+export function jobWorktreeBranch(jobId) {
+    return `swarm-pi/${jobId.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-48)}`;
+}
 export async function prepareJobWorktree(cwd, jobId, strategy = "auto") {
     const workspace = await fs.realpath(await resolveWorkspaceRoot(cwd));
     if (strategy === "auto")
@@ -17,7 +20,7 @@ export async function prepareJobWorktree(cwd, jobId, strategy = "auto") {
     const base = (await git(workspace, ["rev-parse", "HEAD"])).trim();
     const key = createHash("sha256").update(workspace).digest("hex").slice(0, 12);
     const worktree = path.join(os.tmpdir(), "swarm-pi-job-worktrees", key, jobId);
-    const branch = `swarm-pi/${jobId.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-48)}`;
+    const branch = jobWorktreeBranch(jobId);
     await fs.mkdir(path.dirname(worktree), { recursive: true });
     let created = false;
     try {
