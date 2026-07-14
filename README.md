@@ -682,7 +682,9 @@ When the SemVer must remain unchanged and only the Codex skill cache needs a
 refresh, use the plugin-creator `update_plugin_cachebuster.py` workflow instead
 of `version:bump`, reinstall the local Codex plugin, run
 `mise run version-check-installed`, then start a new Codex task. The UTC suffix
-is a development cache identity only; it does not change the base SemVer.
+is a development cache identity only; it does not change the base SemVer. A
+same-version reinstall may commit a refreshed suffix so the installed local
+Codex source can be identified without treating it as a new release.
 
 Claude Code compares the marketplace SemVer during `plugin update`. For
 same-version local development, validate the source first with `--plugin-dir`.

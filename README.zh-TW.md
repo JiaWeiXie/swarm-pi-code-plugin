@@ -437,7 +437,8 @@ claude plugin update swarm-pi-code-plugin@swarm-pi-code-plugin
 若 SemVer 不變、只需要刷新 Codex skill cache，請改用 plugin-creator 的
 `update_plugin_cachebuster.py` 流程，不要執行 `version:bump`；完成後重裝本機
 Codex Plugin、執行 `mise run version-check-installed`，再開啟新的 Codex task。
-這個 UTC suffix 只代表開發期 cache identity，不會改變基礎 SemVer。
+這個 UTC suffix 只代表開發期 cache identity，不會改變基礎 SemVer。同版本重裝時可以
+提交更新後的 suffix，讓本機 Codex 安裝來源可被辨識，但不會因此視為新的 release。
 
 Claude Code 的 `plugin update` 會比較 marketplace SemVer。相同版本的本機開發應先以
 `--plugin-dir` 驗證來源；若還要驗證實際安裝 cache，請使用 `--keep-data` 解除安裝後，
