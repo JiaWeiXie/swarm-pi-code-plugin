@@ -117,6 +117,10 @@ provider or credential tutorial.
 ![Execution and safety settings](assets/setup/05-execution-safety.png)
 ![Configuration review](assets/setup/06-review.png)
 
+Screenshot-Impact: reviewed-current — this change adds Host preflight, CLI
+storage reporting, and runtime migration only; `src/web/ui.ts` and the six
+current setup screens are unchanged.
+
 | Setting | New-project default | Runtime effect |
 | --- | --- | --- |
 | Sandbox | `adaptive` | OS Sandbox plus policy-classified shell/network; Strict remains selectable |
@@ -197,6 +201,25 @@ swarm-pi-code-plugin/
 ├── state.json
 └── jobs/<job-id>/request.json
 ```
+
+Configuration prepares this storage before the loopback server reads
+`model.json` or `state.json`. Its completion result and `status --json` expose
+the additive `configurationStorage` object: `directory`,
+`modelConfigurationFile`, `stateFile`, and `migrationStatus` (`none`, `pending`,
+`migrated`, `conflict`, or `blocked`). A completed migration also reports
+`migratedFrom`; the existing top-level `modelConfigurationFile` remains for
+compatibility.
+
+When a non-Git folder later becomes a Git repository, the next interactive
+Configuration resolves both the canonical invocation directory and Git root,
+then moves the complete durable state directory into the Git common directory.
+This includes model/project state, Jobs, artifacts, notifications,
+continuations, and recovery data; Pi `AuthStorage` credentials remain separate.
+Status only reports a pending migration and does not move data. A non-terminal
+Job, multiple source candidates, or data at both source and destination blocks
+the operation without merging, overwriting, or deleting either side. An
+explicit `SWARM_PI_CODE_PLUGIN_DATA_DIR` is an ownership override and disables
+this migration.
 
 `model.json.version` remains `1`. Additive optional fields preserve old files:
 

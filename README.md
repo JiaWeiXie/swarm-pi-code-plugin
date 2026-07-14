@@ -166,6 +166,16 @@ mutation or delivery is blocked. In particular, a Git repository without an
 initial commit reports `git-unborn`; implementation fails before model startup
 and returns scaffold or adoption actions plus a resumable continuation.
 
+Git initialization is a Host preflight, not a Web UI setting. When Configuration
+opens in a non-Git folder, the Host asks whether to run `git init` at the
+reported workspace root. Accepting runs only that command; declining leaves the
+configuration in the OS user-state namespace. If the folder is later initialized
+as Git, the next interactive Configuration migrates the complete durable state
+directory to the Git common directory before loading the form. `status` and
+`doctor` only report a pending migration. The result includes the actual
+`configurationStorage.directory`, `modelConfigurationFile`, `stateFile`, and
+`migrationStatus`; `--reset` and exact `--json` flows remain non-interactive.
+
 The connection list is intentionally empty when no usable service is detected.
 Custom endpoints select their API protocol before model discovery. Provider
 IDs remain internal, and model limits stay automatic when the endpoint and Pi

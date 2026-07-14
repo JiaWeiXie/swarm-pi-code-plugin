@@ -23,12 +23,15 @@ import {
   clearConfiguration,
   defaultState,
   loadState,
+  prepareConfigurationStorage,
   resolveStateDir,
   resolveStateFile,
   saveProfile,
   setSandboxMode,
   setModelPriority,
   updateState,
+  writeState,
+  StateMigrationActiveJobsError,
 } from "../src/state/state.js";
 
 test("new configuration defaults to adaptive without changing legacy normalization", () => {
@@ -171,6 +174,107 @@ async function withDataDir<T>(value: string | undefined, run: () => Promise<T>):
     else process.env.SWARM_PI_CODE_PLUGIN_DATA_DIR = previous;
   }
 }
+
+function migrationEnvironment(root: string, dataDir?: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    SWARM_PI_CODE_PLUGIN_USER_STATE_DIR: root,
+    ...(dataDir ? { SWARM_PI_CODE_PLUGIN_DATA_DIR: dataDir } : {}),
+  };
+}
+
+function initUnbornRepository(directory: string): void {
+  execFileSync("git", ["init", directory], { stdio: "ignore" });
+}
+
+test("configuration preparation reports and migrates non-Git user state after git init", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-user-state-migration-"));
+  const userState = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-user-state-root-"));
+  const env = migrationEnvironment(userState);
+  const state = defaultState();
+  state.config.modelPriority = ["test/primary"];
+  await writeState(workspace, state, env);
+  const source = await resolveStateDir(workspace, env);
+  fs.mkdirSync(path.join(source, "jobs", "job-1"), { recursive: true });
+  fs.writeFileSync(path.join(source, "model.json"), '{"primary":"test/primary"}\n');
+  fs.writeFileSync(path.join(source, "jobs", "job-1", "artifact.txt"), "durable\n");
+
+  initUnbornRepository(workspace);
+  const destination = await resolveStateDir(workspace, env);
+  const pending = await prepareConfigurationStorage(workspace, env, { migrate: false });
+  assert.equal(pending.migrationStatus, "pending");
+  assert.equal(pending.migratedFrom, source);
+  assert.equal(fs.existsSync(source), true);
+  assert.equal(fs.existsSync(destination), false);
+
+  const migrated = await prepareConfigurationStorage(workspace, env, { migrate: true });
+  assert.equal(migrated.migrationStatus, "migrated");
+  assert.equal(migrated.migratedFrom, source);
+  assert.equal(fs.existsSync(source), false);
+  assert.equal(
+    fs.readFileSync(path.join(destination, "jobs", "job-1", "artifact.txt"), "utf8"),
+    "durable\n",
+  );
+  const migratedState = JSON.parse(
+    fs.readFileSync(path.join(destination, "state.json"), "utf8"),
+  ) as {
+    migration?: { source?: string; migratedAt?: string };
+  };
+  assert.equal(migratedState.migration?.source, "user-state-workspace");
+  assert.equal(typeof migratedState.migration?.migratedAt, "string");
+});
+
+test("configuration preparation blocks active Jobs and leaves the source untouched", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-active-migration-"));
+  const userState = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-active-state-root-"));
+  const env = migrationEnvironment(userState);
+  const state = defaultState();
+  state.jobs = [{ id: "active", status: "running" }];
+  await writeState(workspace, state, env);
+  const source = await resolveStateDir(workspace, env);
+  initUnbornRepository(workspace);
+
+  const inspected = await prepareConfigurationStorage(workspace, env, { migrate: false });
+  assert.equal(inspected.migrationStatus, "blocked");
+  await assert.rejects(
+    () => prepareConfigurationStorage(workspace, env, { migrate: true }),
+    StateMigrationActiveJobsError,
+  );
+  assert.equal(fs.existsSync(source), true);
+  assert.equal(fs.existsSync(path.join(source, "state.json")), true);
+});
+
+test("subdirectory and root non-Git state candidates fail closed as a conflict", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-ambiguous-migration-"));
+  const subdirectory = path.join(workspace, "packages", "app");
+  fs.mkdirSync(subdirectory, { recursive: true });
+  const userState = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-ambiguous-state-root-"));
+  const env = migrationEnvironment(userState);
+  await writeState(workspace, defaultState(), env);
+  await writeState(subdirectory, defaultState(), env);
+  const rootSource = await resolveStateDir(workspace, env);
+  const subdirectorySource = await resolveStateDir(subdirectory, env);
+  initUnbornRepository(workspace);
+
+  const inspected = await prepareConfigurationStorage(subdirectory, env, { migrate: false });
+  assert.equal(inspected.migrationStatus, "conflict");
+  assert.equal(fs.existsSync(rootSource), true);
+  assert.equal(fs.existsSync(subdirectorySource), true);
+});
+
+test("an explicit data directory disables Git-state migration", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-explicit-state-"));
+  const userState = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-explicit-state-root-"));
+  const dataDirectory = path.join(userState, "owned");
+  const env = migrationEnvironment(userState, dataDirectory);
+  await writeState(workspace, defaultState(), env);
+  initUnbornRepository(workspace);
+
+  const storage = await prepareConfigurationStorage(workspace, env, { migrate: true });
+  assert.equal(storage.directory, dataDirectory);
+  assert.equal(storage.migrationStatus, "none");
+  assert.equal(fs.existsSync(path.join(dataDirectory, "state.json")), true);
+});
 
 test("linked worktrees resolve one shared state directory", async () => {
   const { repository, worktree } = repositoryFixture();

@@ -213,6 +213,23 @@ Non-Git workspaces use an OS user-state namespace keyed by canonical path.
 worktree remains the Pi session working directory while control state remains
 outside the checked-out tree.
 
+Configuration-specific storage preparation runs before the loopback server
+loads model or runtime state. `status` and `doctor` call the same resolver in
+inspection mode, so they report pending migration without moving data. Their
+JSON output and Configuration completion include `configurationStorage` with
+the effective directory, `model.json`, `state.json`, and migration status.
+
+After a non-Git workspace is initialized as Git, interactive Configuration
+resolves the canonical invocation path and Git root as possible user-state
+sources. If exactly one source exists and no destination exists, the entire
+durable state directory is moved into the Git common directory. Jobs, artifacts,
+notifications, continuations, and recovery data move together; credentials in
+Pi `AuthStorage` do not. Source/destination locks, same-filesystem rename, and
+validated staging for cross-filesystem copy preserve the source until success.
+Active Jobs, ambiguous sources, and destination conflicts fail closed without
+merge, overwrite, or deletion. Migration provenance in `state.json` contains
+only a source kind and timestamp, not an absolute path.
+
 Terminal results are written before the state index is updated. Reconciliation
 repairs a crash between those writes. Every terminal job starts with a pending
 notification; a host presents it and then acknowledges it. `jobs watch
@@ -275,4 +292,7 @@ inherit the parent's writer lease.
 The first read migrates current `.swarm-pi-code/` state and jobs. It can also
 copy the older project profile and recognized model preferences from
 `.swarm-code/`. Older provider-specific settings, caches, sessions, logs, and
-jobs are not copied from that predecessor format.
+jobs are not copied from that predecessor format. This legacy materialization
+behavior remains compatible with the newer Git-init migration: the latter is
+only attempted while opening Configuration, while ordinary status inspection
+never moves a non-Git user-state directory.

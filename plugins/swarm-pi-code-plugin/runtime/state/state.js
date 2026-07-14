@@ -16,6 +16,32 @@ export class StateMigrationConflictError extends Error {
         this.name = "StateMigrationConflictError";
     }
 }
+export class StateMigrationActiveJobsError extends Error {
+    sourceDir;
+    constructor(sourceDir) {
+        super(`Runtime state migration is blocked by active jobs in ${sourceDir}`);
+        this.sourceDir = sourceDir;
+        this.name = "StateMigrationActiveJobsError";
+    }
+}
+export class StateMigrationAmbiguousError extends Error {
+    sources;
+    constructor(sources) {
+        super(`Runtime state migration has multiple possible sources: ${sources.join(", ")}`);
+        this.sources = sources;
+        this.name = "StateMigrationAmbiguousError";
+    }
+}
+export class StateMigrationError extends Error {
+    sourceDir;
+    destinationDir;
+    constructor(sourceDir, destinationDir, cause) {
+        super(`Runtime state migration failed from ${sourceDir} to ${destinationDir}`, { cause });
+        this.sourceDir = sourceDir;
+        this.destinationDir = destinationDir;
+        this.name = "StateMigrationError";
+    }
+}
 export function defaultState() {
     return {
         version: 1,
@@ -70,27 +96,179 @@ export async function resolveStateDir(cwd, env = process.env) {
     const key = createHash("sha256").update(workspace).digest("hex");
     return path.join(userStateRoot(env), "workspaces", key);
 }
-export async function resolveStateFile(cwd) {
-    return path.join(await resolveStateDir(cwd), "state.json");
+export async function resolveStateFile(cwd, env = process.env) {
+    return path.join(await resolveStateDir(cwd, env), "state.json");
 }
-export async function loadState(cwd) {
-    await migrateCurrentStateDirectory(cwd);
-    const current = await readJson(await resolveStateFile(cwd));
+export async function prepareConfigurationStorage(cwd, env = process.env, options = {}) {
+    const destinationDir = await resolveStateDir(cwd, env);
+    const result = {
+        directory: destinationDir,
+        modelConfigurationFile: path.join(destinationDir, "model.json"),
+        stateFile: path.join(destinationDir, "state.json"),
+        migrationStatus: "none",
+    };
+    if (options.migrate !== true) {
+        const pending = await findMigrationSources(cwd, env, destinationDir);
+        if (pending.length > 1)
+            return { ...result, migrationStatus: "conflict" };
+        if (pending.length === 1 && !(await fs.stat(destinationDir).catch(() => undefined))) {
+            const source = pending[0];
+            if (await migrationSourceHasActiveJobs(source)) {
+                return { ...result, migrationStatus: "blocked", migratedFrom: source };
+            }
+            return { ...result, migrationStatus: "pending", migratedFrom: source };
+        }
+        if (pending.length === 1) {
+            return { ...result, migrationStatus: "conflict", migratedFrom: pending[0] };
+        }
+        return result;
+    }
+    if (env.SWARM_PI_CODE_PLUGIN_DATA_DIR || !(await resolveGitCommonDir(cwd)))
+        return result;
+    const currentLegacyMigrated = await migrateCurrentStateDirectory(cwd, env);
+    if (currentLegacyMigrated)
+        return {
+            ...result,
+            migrationStatus: "migrated",
+            migratedFrom: path.join(await resolveWorkspaceRoot(cwd), ".swarm-pi-code-plugin"),
+        };
+    const existing = await findMigrationSources(cwd, env, destinationDir);
+    if (existing.length > 1)
+        throw new StateMigrationAmbiguousError(existing);
+    if (!existing.length)
+        return result;
+    result.migrationStatus = "pending";
+    if (await fs.stat(destinationDir).catch(() => undefined))
+        throw new StateMigrationConflictError(existing[0], destinationDir);
+    const sourceDir = existing[0];
+    const parent = path.dirname(destinationDir);
+    await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+    const lockFiles = [
+        path.join(parent, `${path.basename(destinationDir)}.migration.lock`),
+        path.join(path.dirname(sourceDir), `${path.basename(sourceDir)}.migration.lock`),
+    ];
+    const locks = [];
+    try {
+        for (const lockFile of [...new Set(lockFiles)].sort()) {
+            locks.push({ file: lockFile, handle: await acquireFileLock(lockFile) });
+        }
+        if (await fs.stat(destinationDir).catch(() => undefined))
+            throw new StateMigrationConflictError(sourceDir, destinationDir);
+        let sourceState;
+        try {
+            sourceState = await readJson(path.join(sourceDir, "state.json"));
+        }
+        catch (error) {
+            throw new StateMigrationError(sourceDir, destinationDir, error);
+        }
+        if (sourceState) {
+            const jobs = Array.isArray(sourceState.jobs) ? sourceState.jobs : [];
+            if (jobs.some((job) => !isTerminalMigrationJob(job)))
+                throw new StateMigrationActiveJobsError(sourceDir);
+        }
+        await writeMigrationProvenance(sourceDir, "user-state-workspace");
+        try {
+            await fs.rename(sourceDir, destinationDir);
+        }
+        catch (error) {
+            if (error.code !== "EXDEV")
+                throw new StateMigrationError(sourceDir, destinationDir, error);
+            const staging = path.join(parent, `.${path.basename(destinationDir)}.migration-${randomUUID()}`);
+            try {
+                await fs.cp(sourceDir, staging, {
+                    recursive: true,
+                    errorOnExist: true,
+                    preserveTimestamps: true,
+                });
+                await validateStateTree(sourceDir, staging);
+                await fs.rename(staging, destinationDir);
+                await fs.rm(sourceDir, { recursive: true, force: true });
+            }
+            catch (copyError) {
+                await fs.rm(staging, { recursive: true, force: true });
+                throw new StateMigrationError(sourceDir, destinationDir, copyError);
+            }
+        }
+        return {
+            ...result,
+            migrationStatus: "migrated",
+            migratedFrom: sourceDir,
+        };
+    }
+    finally {
+        for (const lock of locks.reverse()) {
+            await lock.handle.close();
+            await fs.rm(lock.file, { force: true });
+        }
+    }
+}
+async function findMigrationSources(cwd, env, destinationDir) {
+    if (env.SWARM_PI_CODE_PLUGIN_DATA_DIR || !(await resolveGitCommonDir(cwd)))
+        return [];
+    const workspace = await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd));
+    const root = await resolveWorkspaceRoot(cwd);
+    const candidates = [...new Set([workspace, root])].map((directory) => {
+        const key = createHash("sha256").update(directory).digest("hex");
+        return path.join(userStateRoot(env), "workspaces", key);
+    });
+    const existing = [];
+    for (const candidate of candidates) {
+        if (path.resolve(candidate) === path.resolve(destinationDir))
+            continue;
+        if ((await fs.stat(candidate).catch(() => undefined))?.isDirectory())
+            existing.push(candidate);
+    }
+    return existing;
+}
+async function migrationSourceHasActiveJobs(sourceDir) {
+    try {
+        const state = await readJson(path.join(sourceDir, "state.json"));
+        const jobs = Array.isArray(state?.jobs) ? state.jobs : [];
+        return jobs.some((job) => !isTerminalMigrationJob(job));
+    }
+    catch {
+        // A source that cannot be read is unsafe to move; status must fail closed without mutating it.
+        return true;
+    }
+}
+function isTerminalMigrationJob(job) {
+    if (!job || typeof job !== "object")
+        return true;
+    const status = job.status;
+    return (typeof status === "string" &&
+        [
+            "succeeded",
+            "failed",
+            "cancelled",
+            "timed-out",
+            "orphaned",
+            "not-implemented",
+            "completed",
+            "rejected",
+        ].includes(status));
+}
+export async function loadState(cwd, options = {}) {
+    const env = options.env ?? process.env;
+    if (options.migrateLegacy !== false)
+        await migrateCurrentStateDirectory(cwd, env);
+    const current = await readJson(await resolveStateFile(cwd, env));
     if (current)
         return normalizeState(current);
-    const migrated = await readLegacyState(cwd);
-    if (migrated) {
-        await writeState(cwd, migrated);
-        return migrated;
+    if (options.migrateLegacy !== false) {
+        const migrated = await readLegacyState(cwd);
+        if (migrated) {
+            await writeState(cwd, migrated, env);
+            return migrated;
+        }
     }
     return defaultState();
 }
-export async function migrateCurrentStateDirectory(cwd) {
-    if (process.env.SWARM_PI_CODE_PLUGIN_DATA_DIR)
+export async function migrateCurrentStateDirectory(cwd, env = process.env) {
+    if (env.SWARM_PI_CODE_PLUGIN_DATA_DIR)
         return false;
     const workspace = await resolveWorkspaceRoot(cwd);
     const legacyDir = path.join(workspace, ".swarm-pi-code-plugin");
-    const destinationDir = await resolveStateDir(cwd);
+    const destinationDir = await resolveStateDir(cwd, env);
     if (path.resolve(legacyDir) === path.resolve(destinationDir))
         return false;
     const legacy = await fs.stat(legacyDir).catch(() => undefined);
@@ -107,21 +285,30 @@ export async function migrateCurrentStateDirectory(cwd) {
         const destination = await fs.stat(destinationDir).catch(() => undefined);
         if (destination)
             throw new StateMigrationConflictError(legacyDir, destinationDir);
+        if (await migrationSourceHasActiveJobs(legacyDir))
+            throw new StateMigrationActiveJobsError(legacyDir);
+        await writeMigrationProvenance(legacyDir, ".swarm-pi-code-plugin");
         try {
             await fs.rename(legacyDir, destinationDir);
         }
         catch (error) {
             if (error.code !== "EXDEV")
                 throw error;
-            await fs.cp(legacyDir, destinationDir, { recursive: true, errorOnExist: true });
-            await fs.rm(legacyDir, { recursive: true, force: true });
-        }
-        const stateFile = path.join(destinationDir, "state.json");
-        const current = await readJson(stateFile);
-        if (current) {
-            const state = normalizeState(current);
-            state.migration = { source: ".swarm-pi-code-plugin", migratedAt: new Date().toISOString() };
-            await writeJsonAtomic(stateFile, state);
+            const staging = path.join(parent, `.${path.basename(destinationDir)}.migration-${randomUUID()}`);
+            try {
+                await fs.cp(legacyDir, staging, {
+                    recursive: true,
+                    errorOnExist: true,
+                    preserveTimestamps: true,
+                });
+                await validateStateTree(legacyDir, staging);
+                await fs.rename(staging, destinationDir);
+                await fs.rm(legacyDir, { recursive: true, force: true });
+            }
+            catch (copyError) {
+                await fs.rm(staging, { recursive: true, force: true });
+                throw copyError;
+            }
         }
         return true;
     }
@@ -130,8 +317,8 @@ export async function migrateCurrentStateDirectory(cwd) {
         await fs.rm(lock, { force: true });
     }
 }
-export async function writeState(cwd, state) {
-    const stateFile = await resolveStateFile(cwd);
+export async function writeState(cwd, state, env = process.env) {
+    const stateFile = await resolveStateFile(cwd, env);
     await fs.mkdir(path.dirname(stateFile), { recursive: true, mode: 0o700 });
     const tempFile = `${stateFile}.${process.pid}.${randomUUID()}.tmp`;
     try {
@@ -142,18 +329,18 @@ export async function writeState(cwd, state) {
         await fs.rm(tempFile, { force: true });
     }
 }
-export async function updateState(cwd, update) {
+export async function updateState(cwd, update, env = process.env) {
     return withStateLock(cwd, async () => {
-        const state = structuredClone(await loadState(cwd));
+        const state = structuredClone(await loadState(cwd, { env }));
         const updated = update(state) ?? state;
-        await writeState(cwd, updated);
+        await writeState(cwd, updated, env);
         return updated;
-    });
+    }, env);
 }
-export async function setModelPriority(cwd, models) {
+export async function setModelPriority(cwd, models, env = process.env) {
     return updateState(cwd, (state) => {
         state.config.modelPriority = [...models];
-    });
+    }, env);
 }
 export async function setAvailableModels(cwd, models) {
     return updateState(cwd, (state) => {
@@ -169,7 +356,7 @@ export async function saveProfile(cwd, profile) {
         };
     });
 }
-export async function saveProjectSettings(cwd, profile, sandboxMode, execution) {
+export async function saveProjectSettings(cwd, profile, sandboxMode, execution, env = process.env) {
     return updateState(cwd, (state) => {
         state.config.profile = {
             ...profile,
@@ -186,14 +373,14 @@ export async function saveProjectSettings(cwd, profile, sandboxMode, execution) 
             };
         }
         applyWorkflowSettings(state.config, execution);
-    });
+    }, env);
 }
 export async function setSandboxMode(cwd, sandboxMode) {
     return updateState(cwd, (state) => {
         state.config.sandboxMode = sandboxMode;
     });
 }
-export async function saveExecutionSettings(cwd, sandboxMode, execution) {
+export async function saveExecutionSettings(cwd, sandboxMode, execution, env = process.env) {
     return updateState(cwd, (state) => {
         state.config.sandboxMode = sandboxMode;
         state.config.rolePolicies = structuredClone(execution.rolePolicies ?? {});
@@ -202,7 +389,7 @@ export async function saveExecutionSettings(cwd, sandboxMode, execution) {
             mechanicalExecutor: execution.backgroundRolePolicy?.mechanicalExecutor === true,
         };
         applyWorkflowSettings(state.config, execution);
-    });
+    }, env);
 }
 function applyWorkflowSettings(config, settings) {
     if (!settings)
@@ -222,7 +409,7 @@ function applyWorkflowSettings(config, settings) {
     else if (settings.doctrine === null)
         delete config.doctrine;
 }
-export async function clearConfiguration(cwd) {
+export async function clearConfiguration(cwd, env = process.env) {
     return updateState(cwd, (state) => {
         state.config = {
             modelPriority: [],
@@ -238,7 +425,7 @@ export async function clearConfiguration(cwd) {
             advisor: defaultAdvisorPolicy(),
             hostActions: defaultHostActionPolicy(),
         };
-    });
+    }, env);
 }
 async function readLegacyState(cwd) {
     const sharedRoot = await resolveSharedWorkspaceRoot(cwd);
@@ -290,6 +477,48 @@ async function readJson(file) {
         throw error;
     }
 }
+async function writeMigrationProvenance(directory, source) {
+    const stateFile = path.join(directory, "state.json");
+    const current = await readJson(stateFile);
+    if (!current)
+        return;
+    current.migration = { source, migratedAt: new Date().toISOString() };
+    await writeJsonAtomic(stateFile, current);
+}
+async function validateStateTree(source, destination) {
+    const sourceEntries = await fs.readdir(source, { withFileTypes: true });
+    const destinationEntries = await fs.readdir(destination, { withFileTypes: true });
+    const sourceNames = sourceEntries.map((entry) => entry.name).sort();
+    const destinationNames = destinationEntries.map((entry) => entry.name).sort();
+    if (JSON.stringify(sourceNames) !== JSON.stringify(destinationNames)) {
+        throw new Error("Migrated state tree failed entry validation");
+    }
+    for (const entry of sourceEntries) {
+        const sourcePath = path.join(source, entry.name);
+        const destinationPath = path.join(destination, entry.name);
+        if (entry.isDirectory()) {
+            if (!(await fs.lstat(destinationPath)).isDirectory())
+                throw new Error(`Migrated state entry is not a directory: ${entry.name}`);
+            await validateStateTree(sourcePath, destinationPath);
+            continue;
+        }
+        if (entry.isSymbolicLink()) {
+            const [sourceTarget, destinationTarget] = await Promise.all([
+                fs.readlink(sourcePath),
+                fs.readlink(destinationPath),
+            ]);
+            if (sourceTarget !== destinationTarget)
+                throw new Error(`Migrated state symlink failed validation: ${entry.name}`);
+            continue;
+        }
+        const [sourceStat, destinationStat] = await Promise.all([
+            fs.stat(sourcePath),
+            fs.stat(destinationPath),
+        ]);
+        if (!destinationStat.isFile() || sourceStat.size !== destinationStat.size)
+            throw new Error(`Migrated state file failed validation: ${entry.name}`);
+    }
+}
 function normalizeState(value) {
     const config = asRecord(value.config);
     const profile = asRecord(config.profile);
@@ -329,7 +558,8 @@ function normalizeState(value) {
     const migration = asRecord(value.migration);
     if ((migration.source === ".swarm-pi-code-plugin" ||
         migration.source === ".swarm-pi-code" ||
-        migration.source === ".swarm-code") &&
+        migration.source === ".swarm-code" ||
+        migration.source === "user-state-workspace") &&
         typeof migration.migratedAt === "string") {
         state.migration = { source: migration.source, migratedAt: migration.migratedAt };
     }
@@ -510,8 +740,8 @@ function rolePolicyOverrides(value) {
     }
     return result;
 }
-async function withStateLock(cwd, run) {
-    const directory = await resolveStateDir(cwd);
+async function withStateLock(cwd, run, env = process.env) {
+    const directory = await resolveStateDir(cwd, env);
     await fs.mkdir(directory, { recursive: true });
     const lockFile = path.join(directory, "state.lock");
     const deadline = Date.now() + 5_000;

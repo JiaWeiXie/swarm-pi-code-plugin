@@ -7,12 +7,12 @@ import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 import type { Host } from "../core/contracts.js";
 import { CredentialDraftVault, OAuthSessionManager } from "../providers/credentials.js";
+import { type CustomProviderConfiguration, type ProviderProfile } from "../state/model-config.js";
 import {
-  resolveModelConfigurationFile,
-  type CustomProviderConfiguration,
-  type ProviderProfile,
-} from "../state/model-config.js";
-import { loadState } from "../state/state.js";
+  loadState,
+  prepareConfigurationStorage,
+  type ConfigurationStorage,
+} from "../state/state.js";
 import {
   configureBuiltInProvider,
   createManualCustomProvider,
@@ -39,6 +39,7 @@ export type ConfigurationCompletion = {
   status: "saved" | "cancelled" | "timed-out";
   saved: boolean;
   modelConfigurationFile: string;
+  configurationStorage: ConfigurationStorage;
   continuationId?: string;
 };
 
@@ -63,8 +64,9 @@ export async function startConfigurationServer(
   cwd: string,
   options: ConfigurationServerOptions = {},
 ): Promise<ConfigurationServerSession> {
-  const token = randomBytes(32).toString("base64url");
   const env = options.env ?? process.env;
+  const storage = await prepareConfigurationStorage(cwd, env, { migrate: true });
+  const token = randomBytes(32).toString("base64url");
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const credentialVault = new CredentialDraftVault();
   const oauthSessions = new OAuthSessionManager(
@@ -115,8 +117,8 @@ export async function startConfigurationServer(
         assertJsonRequest(request, origin);
         const body = await readJsonBody(request);
         const settings = normalizeProjectSubmission(body);
-        const profile = await saveProjectProfileSubmission(cwd, settings);
-        const sandboxMode = (await loadState(cwd)).config.sandboxMode ?? "strict";
+        const profile = await saveProjectProfileSubmission(cwd, settings, env);
+        const sandboxMode = (await loadState(cwd, { env })).config.sandboxMode ?? "strict";
         response.setHeader("Connection", "close");
         response.once("finish", () => void finish("saved"));
         json(response, 200, { saved: true, profile, sandboxMode });
@@ -131,7 +133,11 @@ export async function startConfigurationServer(
       if (request.method === "POST" && url.pathname === "/api/providers/custom/credential") {
         assertJsonRequest(request, origin);
         const credential = normalizeCustomCredentialRequest(await readJsonBody(request));
-        json(response, 200, await stageCustomProviderCredential(cwd, credentialVault, credential));
+        json(
+          response,
+          200,
+          await stageCustomProviderCredential(cwd, credentialVault, credential, env),
+        );
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/providers/discover") {
@@ -160,6 +166,7 @@ export async function startConfigurationServer(
           await createManualCustomProvider(
             cwd,
             normalizeManualProviderRequest(await readJsonBody(request)),
+            env,
           ),
         );
         return;
@@ -265,7 +272,8 @@ export async function startConfigurationServer(
     resolveCompletion({
       status,
       saved: status === "saved",
-      modelConfigurationFile: await resolveModelConfigurationFile(cwd),
+      modelConfigurationFile: storage.modelConfigurationFile,
+      configurationStorage: storage,
       ...(options.continuationId ? { continuationId: options.continuationId } : {}),
     });
   }

@@ -227,8 +227,8 @@ export async function configureBuiltInProvider(
     throw new Error(`${definition.name} requires a credential`);
   }
   const profile = providerProfile(definition, request.authMethod, settings, "configured");
-  const state = await loadState(cwd);
-  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const state = await loadState(cwd, { env });
+  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
   const candidate = parseModelConfiguration({
     ...configuration,
     providerProfiles: upsertProviderProfile(configuration.providerProfiles, profile),
@@ -278,8 +278,8 @@ export async function discoverConfigurationEndpoint(
   credentialVault: CredentialDraftVault,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<EndpointDiscoveryResult & { profile: ProviderProfile }> {
-  const state = await loadState(cwd);
-  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const state = await loadState(cwd, { env });
+  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
   const catalog = createModelCatalog(configuration, env);
   const all = catalog.all?.() ?? catalog.available();
   const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
@@ -351,12 +351,13 @@ export async function stageCustomProviderCredential(
     headerName?: "authorization" | "x-api-key" | "api-key" | undefined;
     existingProvider?: string | undefined;
   },
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ provider: string; credentialDraft?: CredentialDraftSummary | undefined }> {
   const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
   let provider = stableCustomProviderId(root, request.protocol);
   if (request.existingProvider) {
-    const state = await loadState(cwd);
-    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const state = await loadState(cwd, { env });
+    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
     const existing = configuration.customProviders.find(
       (candidate) =>
         candidate.id === request.existingProvider &&
@@ -385,9 +386,10 @@ async function assertExistingCustomProvider(
   providerId: string,
   root: string,
   protocol: WireProtocol,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<CustomProviderConfiguration> {
-  const state = await loadState(cwd);
-  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const state = await loadState(cwd, { env });
+  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
   const existing = configuration.customProviders.find(
     (candidate) =>
       candidate.id === providerId &&
@@ -411,10 +413,19 @@ export async function createManualCustomProvider(
     modelIds: string[];
     existingProvider?: string | undefined;
   },
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<EndpointDiscoveryResult & { profile: ProviderProfile }> {
   const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
   const provider = request.existingProvider
-    ? (await assertExistingCustomProvider(cwd, request.existingProvider, root, request.protocol)).id
+    ? (
+        await assertExistingCustomProvider(
+          cwd,
+          request.existingProvider,
+          root,
+          request.protocol,
+          env,
+        )
+      ).id
     : stableCustomProviderId(root, request.protocol);
   const modelsEndpoint = request.modelsEndpoint
     ? normalizeModelsEndpoint(request.modelsEndpoint, root)
@@ -485,8 +496,8 @@ export async function verifyProviderConnection(
   credentialVault: CredentialDraftVault,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ profile: ProviderProfile; verifiedAt: string; model: string }> {
-  const state = await loadState(cwd);
-  const current = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const state = await loadState(cwd, { env });
+  const current = await loadModelConfiguration(cwd, state.config.modelPriority, env);
   const candidate = parseModelConfiguration({
     ...current,
     customProviders: request.customProviders,
@@ -545,8 +556,8 @@ export async function signOutProvider(
   provider: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  const state = await loadState(cwd);
-  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const state = await loadState(cwd, { env });
+  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
   if (
     !getProviderDefinition(provider) &&
     !configuration.customProviders.some((candidate) => candidate.id === provider)
@@ -560,8 +571,8 @@ export async function discoverLocalConfigurationEndpoints(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<EndpointDiscoveryResult[]> {
-  const state = await loadState(cwd);
-  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const state = await loadState(cwd, { env });
+  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
   const catalog = createModelCatalog(configuration, env);
   const all = catalog.all?.() ?? catalog.available();
   return discoverLocalEndpoints(all, {
@@ -573,8 +584,8 @@ export async function loadConfigurationView(
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ConfigurationView> {
-  const state = await loadState(cwd);
-  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const state = await loadState(cwd, { env });
+  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
   const catalog = createModelCatalog(configuration, env);
   const all = catalog.all?.() ?? catalog.available();
   const availableModels = catalog.available();
@@ -810,8 +821,8 @@ export async function saveConfigurationSubmission(
     if (refreshed) credential.credential = refreshed;
   }
 
-  const modelFile = await resolveModelConfigurationFile(cwd);
-  const stateFile = await resolveStateFile(cwd);
+  const modelFile = await resolveModelConfigurationFile(cwd, env);
+  const stateFile = await resolveStateFile(cwd, env);
   const fileSnapshots = await Promise.all([snapshotFile(modelFile), snapshotFile(stateFile)]);
   const credentialSnapshots = credentials.map((credential) => ({
     provider: credential.provider,
@@ -821,10 +832,10 @@ export async function saveConfigurationSubmission(
     for (const credential of credentials) {
       persistentAuth.set(credential.provider, credential.credential);
     }
-    const saved = await saveModelConfiguration(cwd, candidate);
-    await setModelPriority(cwd, modelPriority(saved));
-    if (profile) await saveProjectSettings(cwd, profile, sandboxMode, execution);
-    else await saveExecutionSettings(cwd, sandboxMode, execution);
+    const saved = await saveModelConfiguration(cwd, candidate, env);
+    await setModelPriority(cwd, modelPriority(saved), env);
+    if (profile) await saveProjectSettings(cwd, profile, sandboxMode, execution, env);
+    else await saveExecutionSettings(cwd, sandboxMode, execution, env);
   } catch (error) {
     const rollbackErrors: string[] = [];
     for (const snapshot of credentialSnapshots) {
@@ -847,7 +858,7 @@ export async function saveConfigurationSubmission(
       }
     }
     if (rollbackErrors.length > 0) {
-      await writeRecoveryJournal(cwd, rollbackErrors);
+      await writeRecoveryJournal(cwd, rollbackErrors, env);
       throw new Error(
         "Configuration failed and could not be fully rolled back; run doctor (configuration-recovery-required)",
       );
@@ -882,8 +893,12 @@ async function restoreFile(snapshot: FileSnapshot): Promise<void> {
   await fs.rename(temporary, snapshot.file);
 }
 
-async function writeRecoveryJournal(cwd: string, errors: string[]): Promise<void> {
-  const directory = path.join(await resolveStateDir(cwd), "recovery");
+async function writeRecoveryJournal(
+  cwd: string,
+  errors: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const directory = path.join(await resolveStateDir(cwd, env), "recovery");
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   await fs.writeFile(
     path.join(directory, "configuration.json"),
@@ -903,8 +918,9 @@ async function writeRecoveryJournal(cwd: string, errors: string[]): Promise<void
 export async function saveProjectProfileSubmission(
   cwd: string,
   submission: ProjectSettingsSubmission | ProjectProfileSubmission,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<SwarmProfile> {
-  const current = await loadState(cwd);
+  const current = await loadState(cwd, { env });
   const settings = "profile" in submission ? submission : { profile: submission };
   const profile = await normalizeProjectProfile(cwd, settings.profile);
   const sandboxMode = normalizeSandboxMode(
@@ -923,8 +939,8 @@ export async function saveProjectProfileSubmission(
     hostActions: current.config.hostActions ?? defaultHostActionPolicy(),
   });
   assertSandboxModeAvailable(sandboxMode);
-  const modelConfiguration = await loadModelConfiguration(cwd, current.config.modelPriority);
-  const catalog = createModelCatalog(modelConfiguration);
+  const modelConfiguration = await loadModelConfiguration(cwd, current.config.modelPriority, env);
+  const catalog = createModelCatalog(modelConfiguration, env);
   const all = new Map(
     (catalog.all?.() ?? catalog.available()).map((model) => [modelId(model), model]),
   );
@@ -937,7 +953,7 @@ export async function saveProjectProfileSubmission(
     sandboxMode,
     Boolean(modelConfiguration.primary),
   );
-  const state = await saveProjectSettings(cwd, profile, sandboxMode, execution);
+  const state = await saveProjectSettings(cwd, profile, sandboxMode, execution, env);
   return state.config.profile!;
 }
 

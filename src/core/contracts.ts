@@ -316,6 +316,7 @@ export interface ReadinessReport {
   configured: boolean;
   activeModel: string | null;
   sandboxMode: SandboxMode;
+  configurationStorage?: import("../state/state.js").ConfigurationStorage;
   workspace: WorkspaceAssessment;
   capabilities: {
     readonly: ReadinessStatus;

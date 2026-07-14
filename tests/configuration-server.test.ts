@@ -13,7 +13,7 @@ import { getProviderDefinition } from "../src/providers/capabilities.js";
 import { CredentialDraftVault } from "../src/providers/credentials.js";
 import { compileEffectiveProjectPolicy } from "../src/policy/project-policy.js";
 import { createModelCatalog, modelId } from "../src/pi/models.js";
-import { loadState, resolveStateFile, updateState } from "../src/state/state.js";
+import { loadState, resolveStateDir, resolveStateFile, updateState } from "../src/state/state.js";
 import {
   defaultModelConfiguration,
   resolveModelConfigurationFile,
@@ -883,6 +883,12 @@ test("local configuration server requires its token and closes after save", asyn
   assert.equal(response.status, 200);
   assert.equal(completion.status, "saved");
   assert.equal(completion.saved, true);
+  assert.equal(completion.configurationStorage.directory, await resolveStateDir(workspace, env));
+  assert.equal(
+    completion.configurationStorage.modelConfigurationFile,
+    completion.modelConfigurationFile,
+  );
+  assert.equal(completion.configurationStorage.migrationStatus, "none");
   assert.doesNotMatch(body, new RegExp(secret));
   assert.match(fs.readFileSync(path.join(privateDir, "auth.json"), "utf8"), new RegExp(secret));
   await assert.rejects(() => fetch(server.url));
@@ -911,6 +917,10 @@ test("cancel closes the setup session without creating model.json", async () => 
   });
   assert.equal(response.status, 200);
   assert.equal((await server.completion).status, "cancelled");
+  assert.equal(
+    (await server.completion).configurationStorage.stateFile,
+    await resolveStateFile(workspace, env),
+  );
   assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
 });
 
@@ -939,7 +949,9 @@ test("project-only server saves profile without changing model configuration", a
     }),
   });
   assert.equal(response.status, 200);
-  assert.equal((await server.completion).status, "saved");
+  const completion = await server.completion;
+  assert.equal(completion.status, "saved");
+  assert.equal(completion.configurationStorage.migrationStatus, "none");
   assert.deepEqual((await loadState(workspace)).config.profile?.tasks, ["planning", "analysis"]);
   assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
 });

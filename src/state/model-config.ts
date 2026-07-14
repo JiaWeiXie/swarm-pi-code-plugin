@@ -131,15 +131,19 @@ export function defaultModelConfiguration(priority: string[] = []): ModelConfigu
   };
 }
 
-export async function resolveModelConfigurationFile(cwd: string): Promise<string> {
-  return path.join(await resolveStateDir(cwd), "model.json");
+export async function resolveModelConfigurationFile(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  return path.join(await resolveStateDir(cwd, env), "model.json");
 }
 
 export async function loadModelConfiguration(
   cwd: string,
   legacyPriority: string[] = [],
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<ModelConfiguration> {
-  const file = await resolveModelConfigurationFile(cwd);
+  const file = await resolveModelConfigurationFile(cwd, env);
   try {
     return parseModelConfiguration(JSON.parse(await fs.readFile(file, "utf8")) as unknown);
   } catch (error) {
@@ -154,13 +158,14 @@ export async function saveModelConfiguration(
   cwd: string,
   value: Omit<ModelConfiguration, "version" | "updatedAt" | "providerProfiles"> &
     Partial<Pick<ModelConfiguration, "version" | "updatedAt" | "providerProfiles">>,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<ModelConfiguration> {
   const normalized = parseModelConfiguration({
     ...value,
     version: 1,
     updatedAt: new Date().toISOString(),
   });
-  const file = await resolveModelConfigurationFile(cwd);
+  const file = await resolveModelConfigurationFile(cwd, env);
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
@@ -176,18 +181,26 @@ export async function saveModelPriority(
   cwd: string,
   current: ModelConfiguration,
   priority: string[],
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<ModelConfiguration> {
   const normalizedPriority = unique(priority.map((entry) => modelReference(entry)));
-  return saveModelConfiguration(cwd, {
-    primary: normalizedPriority[0] ?? null,
-    fallbacks: normalizedPriority.slice(1),
-    customProviders: current.customProviders,
-    providerProfiles: current.providerProfiles,
-  });
+  return saveModelConfiguration(
+    cwd,
+    {
+      primary: normalizedPriority[0] ?? null,
+      fallbacks: normalizedPriority.slice(1),
+      customProviders: current.customProviders,
+      providerProfiles: current.providerProfiles,
+    },
+    env,
+  );
 }
 
-export async function clearModelConfiguration(cwd: string): Promise<void> {
-  await fs.rm(await resolveModelConfigurationFile(cwd), { force: true });
+export async function clearModelConfiguration(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  await fs.rm(await resolveModelConfigurationFile(cwd, env), { force: true });
 }
 
 export function modelPriority(configuration: ModelConfiguration): string[] {

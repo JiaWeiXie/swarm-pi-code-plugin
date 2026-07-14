@@ -42,8 +42,8 @@ export async function configureBuiltInProvider(cwd, request, credentialVault, en
         throw new Error(`${definition.name} requires a credential`);
     }
     const profile = providerProfile(definition, request.authMethod, settings, "configured");
-    const state = await loadState(cwd);
-    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const state = await loadState(cwd, { env });
+    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
     const candidate = parseModelConfiguration({
         ...configuration,
         providerProfiles: upsertProviderProfile(configuration.providerProfiles, profile),
@@ -83,8 +83,8 @@ export async function configureBuiltInProvider(cwd, request, credentialVault, en
     };
 }
 export async function discoverConfigurationEndpoint(cwd, request, credentialVault, env = process.env) {
-    const state = await loadState(cwd);
-    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const state = await loadState(cwd, { env });
+    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
     const catalog = createModelCatalog(configuration, env);
     const all = catalog.all?.() ?? catalog.available();
     const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
@@ -138,12 +138,12 @@ export async function discoverConfigurationEndpoint(cwd, request, credentialVaul
     };
     return { ...result, profile };
 }
-export async function stageCustomProviderCredential(cwd, credentialVault, request) {
+export async function stageCustomProviderCredential(cwd, credentialVault, request, env = process.env) {
     const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
     let provider = stableCustomProviderId(root, request.protocol);
     if (request.existingProvider) {
-        const state = await loadState(cwd);
-        const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+        const state = await loadState(cwd, { env });
+        const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
         const existing = configuration.customProviders.find((candidate) => candidate.id === request.existingProvider &&
             candidate.wireProtocol === request.protocol &&
             normalizeProtocolRoot(candidate.baseUrl, request.protocol) === root);
@@ -160,9 +160,9 @@ export async function stageCustomProviderCredential(cwd, credentialVault, reques
         : credentialVault.stageApiKey(provider, request.secret);
     return { provider, credentialDraft };
 }
-async function assertExistingCustomProvider(cwd, providerId, root, protocol) {
-    const state = await loadState(cwd);
-    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+async function assertExistingCustomProvider(cwd, providerId, root, protocol, env = process.env) {
+    const state = await loadState(cwd, { env });
+    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
     const existing = configuration.customProviders.find((candidate) => candidate.id === providerId &&
         candidate.wireProtocol === protocol &&
         normalizeProtocolRoot(candidate.baseUrl, protocol) === root);
@@ -170,10 +170,10 @@ async function assertExistingCustomProvider(cwd, providerId, root, protocol) {
         throw new Error("Existing custom provider does not match this endpoint and protocol");
     return existing;
 }
-export async function createManualCustomProvider(cwd, request) {
+export async function createManualCustomProvider(cwd, request, env = process.env) {
     const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
     const provider = request.existingProvider
-        ? (await assertExistingCustomProvider(cwd, request.existingProvider, root, request.protocol)).id
+        ? (await assertExistingCustomProvider(cwd, request.existingProvider, root, request.protocol, env)).id
         : stableCustomProviderId(root, request.protocol);
     const modelsEndpoint = request.modelsEndpoint
         ? normalizeModelsEndpoint(request.modelsEndpoint, root)
@@ -231,8 +231,8 @@ export async function createManualCustomProvider(cwd, request) {
     return { adapter: request.protocol, provider: customProvider, profile };
 }
 export async function verifyProviderConnection(cwd, request, credentialVault, env = process.env) {
-    const state = await loadState(cwd);
-    const current = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const state = await loadState(cwd, { env });
+    const current = await loadModelConfiguration(cwd, state.config.modelPriority, env);
     const candidate = parseModelConfiguration({
         ...current,
         customProviders: request.customProviders,
@@ -289,8 +289,8 @@ export async function verifyProviderConnection(cwd, request, credentialVault, en
     };
 }
 export async function signOutProvider(cwd, provider, env = process.env) {
-    const state = await loadState(cwd);
-    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const state = await loadState(cwd, { env });
+    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
     if (!getProviderDefinition(provider) &&
         !configuration.customProviders.some((candidate) => candidate.id === provider)) {
         throw new Error(`Unknown provider: ${provider}`);
@@ -298,8 +298,8 @@ export async function signOutProvider(cwd, provider, env = process.env) {
     AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).logout(provider);
 }
 export async function discoverLocalConfigurationEndpoints(cwd, env = process.env) {
-    const state = await loadState(cwd);
-    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const state = await loadState(cwd, { env });
+    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
     const catalog = createModelCatalog(configuration, env);
     const all = catalog.all?.() ?? catalog.available();
     return discoverLocalEndpoints(all, {
@@ -307,8 +307,8 @@ export async function discoverLocalConfigurationEndpoints(cwd, env = process.env
     });
 }
 export async function loadConfigurationView(cwd, env = process.env) {
-    const state = await loadState(cwd);
-    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+    const state = await loadState(cwd, { env });
+    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
     const catalog = createModelCatalog(configuration, env);
     const all = catalog.all?.() ?? catalog.available();
     const availableModels = catalog.available();
@@ -515,8 +515,8 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
         if (refreshed)
             credential.credential = refreshed;
     }
-    const modelFile = await resolveModelConfigurationFile(cwd);
-    const stateFile = await resolveStateFile(cwd);
+    const modelFile = await resolveModelConfigurationFile(cwd, env);
+    const stateFile = await resolveStateFile(cwd, env);
     const fileSnapshots = await Promise.all([snapshotFile(modelFile), snapshotFile(stateFile)]);
     const credentialSnapshots = credentials.map((credential) => ({
         provider: credential.provider,
@@ -526,12 +526,12 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
         for (const credential of credentials) {
             persistentAuth.set(credential.provider, credential.credential);
         }
-        const saved = await saveModelConfiguration(cwd, candidate);
-        await setModelPriority(cwd, modelPriority(saved));
+        const saved = await saveModelConfiguration(cwd, candidate, env);
+        await setModelPriority(cwd, modelPriority(saved), env);
         if (profile)
-            await saveProjectSettings(cwd, profile, sandboxMode, execution);
+            await saveProjectSettings(cwd, profile, sandboxMode, execution, env);
         else
-            await saveExecutionSettings(cwd, sandboxMode, execution);
+            await saveExecutionSettings(cwd, sandboxMode, execution, env);
     }
     catch (error) {
         const rollbackErrors = [];
@@ -555,7 +555,7 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
             }
         }
         if (rollbackErrors.length > 0) {
-            await writeRecoveryJournal(cwd, rollbackErrors);
+            await writeRecoveryJournal(cwd, rollbackErrors, env);
             throw new Error("Configuration failed and could not be fully rolled back; run doctor (configuration-recovery-required)");
         }
         throw error;
@@ -582,8 +582,8 @@ async function restoreFile(snapshot) {
     await fs.writeFile(temporary, snapshot.contents, { mode: 0o600 });
     await fs.rename(temporary, snapshot.file);
 }
-async function writeRecoveryJournal(cwd, errors) {
-    const directory = path.join(await resolveStateDir(cwd), "recovery");
+async function writeRecoveryJournal(cwd, errors, env = process.env) {
+    const directory = path.join(await resolveStateDir(cwd, env), "recovery");
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     await fs.writeFile(path.join(directory, "configuration.json"), `${JSON.stringify({
         code: "configuration-recovery-required",
@@ -591,8 +591,8 @@ async function writeRecoveryJournal(cwd, errors) {
         errors: errors.map((error) => error.replace(/(?:sk-|key=)[^\s:]+/gi, "[redacted]")),
     }, null, 2)}\n`, { mode: 0o600 });
 }
-export async function saveProjectProfileSubmission(cwd, submission) {
-    const current = await loadState(cwd);
+export async function saveProjectProfileSubmission(cwd, submission, env = process.env) {
+    const current = await loadState(cwd, { env });
     const settings = "profile" in submission ? submission : { profile: submission };
     const profile = await normalizeProjectProfile(cwd, settings.profile);
     const sandboxMode = normalizeSandboxMode(settings.sandboxMode, current.config.sandboxMode ?? "strict");
@@ -608,13 +608,13 @@ export async function saveProjectProfileSubmission(cwd, submission) {
         hostActions: current.config.hostActions ?? defaultHostActionPolicy(),
     });
     assertSandboxModeAvailable(sandboxMode);
-    const modelConfiguration = await loadModelConfiguration(cwd, current.config.modelPriority);
-    const catalog = createModelCatalog(modelConfiguration);
+    const modelConfiguration = await loadModelConfiguration(cwd, current.config.modelPriority, env);
+    const catalog = createModelCatalog(modelConfiguration, env);
     const all = new Map((catalog.all?.() ?? catalog.available()).map((model) => [modelId(model), model]));
     const available = new Set(catalog.available().map(modelId));
     applyAdaptiveClassifierDefault(execution, sandboxMode, modelConfiguration.primary);
     assertExecutionModels(execution, all, available, sandboxMode, Boolean(modelConfiguration.primary));
-    const state = await saveProjectSettings(cwd, profile, sandboxMode, execution);
+    const state = await saveProjectSettings(cwd, profile, sandboxMode, execution, env);
     return state.config.profile;
 }
 function normalizeSandboxMode(value, fallback) {

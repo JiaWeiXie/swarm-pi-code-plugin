@@ -4,8 +4,8 @@ import http, {} from "node:http";
 import { once } from "node:events";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { CredentialDraftVault, OAuthSessionManager } from "../providers/credentials.js";
-import { resolveModelConfigurationFile, } from "../state/model-config.js";
-import { loadState } from "../state/state.js";
+import {} from "../state/model-config.js";
+import { loadState, prepareConfigurationStorage, } from "../state/state.js";
 import { configureBuiltInProvider, createManualCustomProvider, discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, saveConfigurationSubmission, saveProjectProfileSubmission, signOutProvider, stageCustomProviderCredential, verifyProviderConnection, } from "./configuration-service.js";
 import { EndpointDiscoveryError } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
@@ -13,8 +13,9 @@ const LOOPBACK_HOST = "127.0.0.1";
 const MAX_BODY_BYTES = 256 * 1024;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 export async function startConfigurationServer(cwd, options = {}) {
-    const token = randomBytes(32).toString("base64url");
     const env = options.env ?? process.env;
+    const storage = await prepareConfigurationStorage(cwd, env, { migrate: true });
+    const token = randomBytes(32).toString("base64url");
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const credentialVault = new CredentialDraftVault();
     const oauthSessions = new OAuthSessionManager(credentialVault, AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE), { timeoutMs: Math.min(timeoutMs, 10 * 60 * 1000) });
@@ -57,8 +58,8 @@ export async function startConfigurationServer(cwd, options = {}) {
                 assertJsonRequest(request, origin);
                 const body = await readJsonBody(request);
                 const settings = normalizeProjectSubmission(body);
-                const profile = await saveProjectProfileSubmission(cwd, settings);
-                const sandboxMode = (await loadState(cwd)).config.sandboxMode ?? "strict";
+                const profile = await saveProjectProfileSubmission(cwd, settings, env);
+                const sandboxMode = (await loadState(cwd, { env })).config.sandboxMode ?? "strict";
                 response.setHeader("Connection", "close");
                 response.once("finish", () => void finish("saved"));
                 json(response, 200, { saved: true, profile, sandboxMode });
@@ -73,7 +74,7 @@ export async function startConfigurationServer(cwd, options = {}) {
             if (request.method === "POST" && url.pathname === "/api/providers/custom/credential") {
                 assertJsonRequest(request, origin);
                 const credential = normalizeCustomCredentialRequest(await readJsonBody(request));
-                json(response, 200, await stageCustomProviderCredential(cwd, credentialVault, credential));
+                json(response, 200, await stageCustomProviderCredential(cwd, credentialVault, credential, env));
                 return;
             }
             if (request.method === "POST" && url.pathname === "/api/providers/discover") {
@@ -92,7 +93,7 @@ export async function startConfigurationServer(cwd, options = {}) {
             }
             if (request.method === "POST" && url.pathname === "/api/providers/custom/manual") {
                 assertJsonRequest(request, origin);
-                json(response, 200, await createManualCustomProvider(cwd, normalizeManualProviderRequest(await readJsonBody(request))));
+                json(response, 200, await createManualCustomProvider(cwd, normalizeManualProviderRequest(await readJsonBody(request)), env));
                 return;
             }
             if (request.method === "POST" && url.pathname === "/api/providers/verify") {
@@ -185,7 +186,8 @@ export async function startConfigurationServer(cwd, options = {}) {
         resolveCompletion({
             status,
             saved: status === "saved",
-            modelConfigurationFile: await resolveModelConfigurationFile(cwd),
+            modelConfigurationFile: storage.modelConfigurationFile,
+            configurationStorage: storage,
             ...(options.continuationId ? { continuationId: options.continuationId } : {}),
         });
     }

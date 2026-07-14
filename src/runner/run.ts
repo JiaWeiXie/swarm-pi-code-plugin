@@ -140,7 +140,6 @@ import {
 } from "../state/model-config.js";
 import {
   clearConfiguration,
-  defaultState,
   resolveStateDir,
   loadState,
   saveProfile,
@@ -148,9 +147,9 @@ import {
   setModelPriority,
   updateState,
   type SwarmProfile,
+  prepareConfigurationStorage,
 } from "../state/state.js";
 import type { JobRecord } from "../state/state.js";
-import { StateMigrationConflictError } from "../state/state.js";
 import {
   createContinuation,
   consumeContinuation,
@@ -289,6 +288,7 @@ export type RunnerOutput =
       profile: SwarmProfile | null;
       sandboxMode: SandboxMode;
       jobs: number;
+      configurationStorage: import("../state/state.js").ConfigurationStorage;
     };
 
 export interface RunCommandOptions {
@@ -351,7 +351,10 @@ export async function runCommand(
     );
   }
   if (args.command === "status" || args.command === "doctor") {
-    return handleReadiness(args, cwd, dependencies);
+    const configurationStorage = await prepareConfigurationStorage(cwd, process.env, {
+      migrate: false,
+    });
+    return handleReadiness(args, cwd, dependencies, configurationStorage);
   }
   if (args.command === "resume") {
     const continuation = await readContinuation(cwd, args.continuationId!);
@@ -369,10 +372,23 @@ export async function runCommand(
     }
     return resumed;
   }
+  const configurationStorage = await prepareConfigurationStorage(cwd, process.env, {
+    migrate: !(args.command === "init" && (args.reset || args.json)),
+  });
   const state = await loadState(cwd);
   const modelConfiguration = await loadModelConfiguration(cwd, state.config.modelPriority);
   const activeDependencies = dependencies ?? defaultDependencies(modelConfiguration);
   const available = activeDependencies.catalog.available();
+  if (args.command === "init" && args.json && configurationStorage.migrationStatus !== "none") {
+    return initStatus(
+      state,
+      modelPriority(modelConfiguration),
+      available.map(modelId),
+      args,
+      false,
+      configurationStorage,
+    );
+  }
   if (args.command === "roles") {
     const background = state.config.backgroundRolePolicy;
     const roles = listDefaultRoles().map((role) =>
@@ -2093,119 +2109,131 @@ async function runAgentVerifier(options: {
 async function handleReadiness(
   args: RunnerArguments,
   cwd: string,
-  dependencies?: RunnerDependencies,
+  dependencies: RunnerDependencies | undefined,
+  configurationStorage: import("../state/state.js").ConfigurationStorage,
 ): Promise<RunnerOutput> {
-  try {
-    const state = await loadState(cwd);
-    const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
-    const activeDependencies = dependencies ?? defaultDependencies(configuration);
-    const available = activeDependencies.catalog.available();
-    let report = await inspectReadiness({
-      cwd,
-      state,
-      modelPriority: modelPriority(configuration),
-      availableModels: available.map(modelId),
-      registryError: activeDependencies.catalog.error?.() ?? null,
-    });
-    const recoveryJournal = path.join(await resolveStateDir(cwd), "recovery", "configuration.json");
-    if (await fs.stat(recoveryJournal).catch(() => undefined)) {
-      report = {
-        ...report,
-        status: "blocked",
-        issues: [
-          ...report.issues,
-          {
-            code: "configuration-recovery-required",
-            stage: "recovery",
-            severity: "blocking",
-            recoverable: true,
-            message: "A previous configuration save could not be fully rolled back.",
-            preserved: ["recovery journal", "existing credentials and configuration"],
-            nextActions: [{ action: "doctor", label: "Inspect configuration recovery" }],
-          },
-        ],
-      };
-    }
-    if (args.command !== "doctor") return report;
-    let smokeTest: {
-      status: "not-run" | "passed" | "failed";
-      model: string | null;
-      error?: string;
-    } = {
-      status: "not-run",
-      model: report.activeModel,
-    };
-    if (args.smokeTest && report.activeModel) {
-      const model = available.find((candidate) => modelId(candidate) === report.activeModel);
-      if (model) {
-        try {
-          // "low" is the reasoning-effort floor accepted by both OpenAI and Azure
-          // responses models; "minimal" is OpenAI-only and 400s on Azure gpt-5.x.
-          const session = await activeDependencies.createSession({
-            cwd,
-            mode: "readonly",
-            model,
-            thinkingLevel: "low",
-          });
-          const result = await executeSession({
-            kind: "ask",
-            model: report.activeModel,
-            prompt: "Reply with exactly READY.",
-            session,
-            timeoutMs: 15_000,
-          });
-          if (!result.success) throw new Error(result.error ?? result.output);
-          smokeTest = { status: "passed", model: report.activeModel };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          smokeTest = { status: "failed", model: report.activeModel, error: message };
-          report = {
-            ...report,
-            status: "blocked",
-            issues: [
-              ...report.issues,
-              {
-                code: "model-smoke-test-failed",
-                stage: "models",
-                severity: "blocking",
-                recoverable: true,
-                message,
-                preserved: ["existing configuration"],
-                nextActions: [{ action: "configure", label: "Choose or reconnect a model" }],
-              },
-            ],
-          };
-        }
-      }
-    }
-    return { ...report, smokeTest };
-  } catch (error) {
-    if (!(error instanceof StateMigrationConflictError)) throw error;
-    const workspace = await assessWorkspace(cwd);
-    const state = defaultState();
-    return {
-      status: "blocked",
-      configured: false,
-      activeModel: null,
-      sandboxMode: state.config.sandboxMode ?? "strict",
-      workspace,
-      capabilities: { readonly: "blocked", mutation: "blocked", delivery: "blocked" },
+  const state = await loadState(cwd, { migrateLegacy: false });
+  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
+  const activeDependencies = dependencies ?? defaultDependencies(configuration);
+  const available = activeDependencies.catalog.available();
+  let report = await inspectReadiness({
+    cwd,
+    state,
+    modelPriority: modelPriority(configuration),
+    availableModels: available.map(modelId),
+    registryError: activeDependencies.catalog.error?.() ?? null,
+  });
+  report = {
+    ...report,
+    configurationStorage,
+  };
+  if (configurationStorage.migrationStatus !== "none") {
+    const blocked = configurationStorage.migrationStatus === "blocked";
+    const conflict = configurationStorage.migrationStatus === "conflict";
+    report = {
+      ...report,
+      status: blocked || conflict ? "blocked" : report.status,
+      capabilities:
+        blocked || conflict
+          ? { readonly: "blocked", mutation: "blocked", delivery: "blocked" }
+          : report.capabilities,
       issues: [
+        ...report.issues,
         {
-          code: "state-migration-conflict",
+          code: blocked
+            ? "state-migration-active-jobs"
+            : conflict
+              ? "state-migration-conflict"
+              : "state-migration-pending",
+          stage: "recovery",
+          severity: blocked || conflict ? "blocking" : "warning",
+          recoverable: true,
+          message: blocked
+            ? `Configuration storage migration is blocked by non-terminal Jobs in ${configurationStorage.migratedFrom}.`
+            : conflict
+              ? `Configuration storage migration found conflicting locations${configurationStorage.migratedFrom ? `: ${configurationStorage.migratedFrom} and ${configurationStorage.directory}` : "."}`
+              : `Configuration storage migration is pending from ${configurationStorage.migratedFrom}.`,
+          preserved: [
+            configurationStorage.directory,
+            ...(configurationStorage.migratedFrom ? [configurationStorage.migratedFrom] : []),
+          ],
+          nextActions: [{ action: "configure", label: "Open configuration" }],
+        },
+      ],
+    };
+  }
+  const recoveryJournal = path.join(await resolveStateDir(cwd), "recovery", "configuration.json");
+  if (await fs.stat(recoveryJournal).catch(() => undefined)) {
+    report = {
+      ...report,
+      status: "blocked",
+      issues: [
+        ...report.issues,
+        {
+          code: "configuration-recovery-required",
           stage: "recovery",
           severity: "blocking",
           recoverable: true,
-          message: error.message,
-          preserved: [error.legacyDir, error.destinationDir],
-          nextActions: [{ action: "doctor", label: "Inspect state locations" }],
+          message: "A previous configuration save could not be fully rolled back.",
+          preserved: ["recovery journal", "existing credentials and configuration"],
+          nextActions: [{ action: "doctor", label: "Inspect configuration recovery" }],
         },
       ],
-      ...(args.command === "doctor"
-        ? { smokeTest: { status: "not-run" as const, model: null } }
-        : {}),
     };
   }
+  if (args.command !== "doctor") return report;
+  let smokeTest: {
+    status: "not-run" | "passed" | "failed";
+    model: string | null;
+    error?: string;
+  } = {
+    status: "not-run",
+    model: report.activeModel,
+  };
+  if (args.smokeTest && report.activeModel) {
+    const model = available.find((candidate) => modelId(candidate) === report.activeModel);
+    if (model) {
+      try {
+        // "low" is the reasoning-effort floor accepted by both OpenAI and Azure
+        // responses models; "minimal" is OpenAI-only and 400s on Azure gpt-5.x.
+        const session = await activeDependencies.createSession({
+          cwd,
+          mode: "readonly",
+          model,
+          thinkingLevel: "low",
+        });
+        const result = await executeSession({
+          kind: "ask",
+          model: report.activeModel,
+          prompt: "Reply with exactly READY.",
+          session,
+          timeoutMs: 15_000,
+        });
+        if (!result.success) throw new Error(result.error ?? result.output);
+        smokeTest = { status: "passed", model: report.activeModel };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        smokeTest = { status: "failed", model: report.activeModel, error: message };
+        report = {
+          ...report,
+          status: "blocked",
+          issues: [
+            ...report.issues,
+            {
+              code: "model-smoke-test-failed",
+              stage: "models",
+              severity: "blocking",
+              recoverable: true,
+              message,
+              preserved: ["existing configuration"],
+              nextActions: [{ action: "configure", label: "Choose or reconnect a model" }],
+            },
+          ],
+        };
+      }
+    }
+  }
+  return { ...report, smokeTest };
 }
 
 function isMutationTask(kind: TaskKind): boolean {
@@ -2222,7 +2250,7 @@ async function handleInit(
   if (args.reset) {
     await clearModelConfiguration(cwd);
     const state = await clearConfiguration(cwd);
-    return initStatus(state, [], [], args, true);
+    return initStatus(state, [], [], args, true, await prepareConfigurationStorage(cwd));
   }
 
   const detected = available.map(modelId);
@@ -2250,7 +2278,14 @@ async function handleInit(
   if (profile) await saveProfile(cwd, parseProfile(profile));
   const state = await loadState(cwd);
   const currentModelConfiguration = await loadModelConfiguration(cwd, state.config.modelPriority);
-  return initStatus(state, modelPriority(currentModelConfiguration), detected, args, false);
+  return initStatus(
+    state,
+    modelPriority(currentModelConfiguration),
+    detected,
+    args,
+    false,
+    await prepareConfigurationStorage(cwd),
+  );
 }
 
 function parseStringArrayJson(value: string, label: string): string[] {
@@ -2275,6 +2310,7 @@ function initStatus(
   detected: string[],
   args: RunnerArguments,
   reset: boolean,
+  configurationStorage: import("../state/state.js").ConfigurationStorage,
 ): Extract<RunnerOutput, { configured: boolean }> {
   const activeModel = priority.find((model) => detected.includes(model)) ?? null;
   return {
@@ -2287,6 +2323,7 @@ function initStatus(
     profile: state.config.profile ?? null,
     sandboxMode: state.config.sandboxMode ?? "strict",
     jobs: state.jobs.length,
+    configurationStorage,
   };
 }
 

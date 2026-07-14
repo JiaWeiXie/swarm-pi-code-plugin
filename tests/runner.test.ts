@@ -31,7 +31,14 @@ import {
 } from "../src/state/jobs.js";
 import { defaultModelConfiguration } from "../src/state/model-config.js";
 import { detectSandboxAvailability } from "../src/sandbox/availability.js";
-import { loadState, resolveStateDir, setSandboxMode, updateState } from "../src/state/state.js";
+import {
+  defaultState,
+  loadState,
+  resolveStateDir,
+  setSandboxMode,
+  updateState,
+  writeState,
+} from "../src/state/state.js";
 
 const fakeModel = {
   provider: "test-provider",
@@ -993,6 +1000,48 @@ test("init replaces validated model priority and preserves it in status", async 
       ),
     /not available/i,
   );
+});
+
+test("init --json reports pending migration without moving non-Git user state", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-init-pending-migration-"));
+  const userState = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-init-pending-state-"));
+  const previousUserState = process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR;
+  process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR = userState;
+  try {
+    await writeState(workspace, defaultState(), process.env);
+    const source = await resolveStateDir(workspace, process.env);
+    execFileSync("git", ["init", workspace], { stdio: "ignore" });
+    const destination = await resolveStateDir(workspace, process.env);
+    const result = await runCommand(
+      {
+        command: "init",
+        reconfigure: false,
+        reset: false,
+        json: true,
+      },
+      workspace,
+      {
+        catalog: { available: () => [fakeModel] },
+        readFile: async () => "unused",
+        createSession: async () => {
+          throw new Error("unused");
+        },
+      },
+    );
+    assert.equal(
+      "configurationStorage" in result && result.configurationStorage.migrationStatus,
+      "pending",
+    );
+    assert.equal(
+      "configurationStorage" in result && result.configurationStorage.migratedFrom,
+      source,
+    );
+    assert.equal(fs.existsSync(source), true);
+    assert.equal(fs.existsSync(destination), false);
+  } finally {
+    if (previousUserState === undefined) delete process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR;
+    else process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR = previousUserState;
+  }
 });
 
 test("init reads model priority and profile from host-created JSON files", async () => {
