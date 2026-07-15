@@ -249,6 +249,21 @@ watcher restart, while the bundled SessionStart hook provides recovery context
 without approving or acknowledging anything. If the watcher disappears, the
 next plugin delegation or watch replay can recover the pending result.
 
+Within one process, bounded waits and live Job watchers share one canonical
+`state.json` observer. File events are re-read hints only. Atomic replacement
+rearms the file watcher, watcher creation or runtime errors degrade safely, and
+the state generation check closes the read-to-subscribe race. Bounded
+`jobs wait` retains a 500 ms fallback. A healthy `jobs watch` uses a 5-second
+safety reconciliation to reduce idle state loads, then returns to 500 ms when
+the watcher is unavailable; transient creation failures are retried.
+
+State mutations for the same canonical state directory enter a process-local
+FIFO before acquiring the existing cross-process `state.lock`. This avoids
+same-process lock polling while preserving atomic rename, stale-lock recovery,
+and cross-process exclusion. CLI argument parsing is also kept lightweight:
+runner, configuration-server, pruning, and watch-only modules are imported only
+by the command families that need them.
+
 ## Credentials
 
 Pi `AuthStorage` owns provider credentials in the user scope. Browser input

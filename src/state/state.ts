@@ -26,6 +26,7 @@ import type {
   HostActionPolicy,
   DoctrineId,
 } from "../core/contracts.js";
+import { ProcessLocalQueue } from "./process-queue.js";
 import {
   DEFAULT_ADAPTIVE_POLICY,
   DEFAULT_BACKGROUND_ROLE_POLICY,
@@ -38,6 +39,7 @@ import {
 } from "../orchestration/roles.js";
 
 const execFileAsync = promisify(execFile);
+const stateUpdateQueue = new ProcessLocalQueue();
 
 export interface SwarmProfile {
   goal?: string | undefined;
@@ -996,29 +998,32 @@ async function withStateLock<T>(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<T> {
   const directory = await resolveStateDir(cwd, env);
-  await fs.mkdir(directory, { recursive: true });
-  const lockFile = path.join(directory, "state.lock");
-  const deadline = Date.now() + 5_000;
-  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-  while (!handle) {
-    try {
-      handle = await fs.open(lockFile, "wx", 0o600);
-      await handle.writeFile(`${process.pid}\n`);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const stat = await fs.stat(lockFile).catch(() => undefined);
-      if (stat && Date.now() - stat.mtimeMs > 30_000) {
-        await fs.rm(lockFile, { force: true });
-        continue;
+  return stateUpdateQueue.run(directory, async () => {
+    await fs.mkdir(directory, { recursive: true });
+    const lockFile = path.join(directory, "state.lock");
+    const deadline = Date.now() + 5_000;
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    while (!handle) {
+      try {
+        handle = await fs.open(lockFile, "wx", 0o600);
+        await handle.writeFile(`${process.pid}\n`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const stat = await fs.stat(lockFile).catch(() => undefined);
+        if (stat && Date.now() - stat.mtimeMs > 30_000) {
+          await fs.rm(lockFile, { force: true });
+          continue;
+        }
+        if (Date.now() >= deadline)
+          throw new Error(`Timed out waiting for state lock: ${lockFile}`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      if (Date.now() >= deadline) throw new Error(`Timed out waiting for state lock: ${lockFile}`);
-      await new Promise((resolve) => setTimeout(resolve, 10));
     }
-  }
-  try {
-    return await run();
-  } finally {
-    await handle.close();
-    await fs.rm(lockFile, { force: true });
-  }
+    try {
+      return await run();
+    } finally {
+      await handle.close();
+      await fs.rm(lockFile, { force: true });
+    }
+  });
 }

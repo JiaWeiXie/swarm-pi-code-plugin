@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { hostContextCharacterLimit } from "../host-assistance/context-allowance.js";
-import { loadState, resolveStateDir, updateState } from "./state.js";
+import { loadState, resolveStateDir, resolveStateFile, updateState, } from "./state.js";
+import { canonicalStateFile, stateObservers } from "./state-observer.js";
 export const JOB_HEARTBEAT_INTERVAL_MS = 15_000;
 export const JOB_STALE_AFTER_MS = 60_000;
 export async function startJob(cwd, input) {
@@ -300,43 +301,59 @@ export async function listJobs(cwd, pendingNotifications = false) {
         job.notifications?.some((notification) => notification.status === "pending"))
         .sort((left, right) => timestamp(right) - timestamp(left));
 }
-export async function waitForJob(cwd, jobId, waitTimeoutMs) {
-    const deadline = waitTimeoutMs === undefined ? undefined : Date.now() + waitTimeoutMs;
-    while (true) {
-        const snapshot = await getJob(cwd, jobId);
-        if (snapshot.job.status === "awaiting-approval") {
-            const approval = snapshot.job.approvals?.find((item) => item.id === snapshot.job.pendingApprovalId);
-            if (approval)
-                return { event: "approval-required", jobId, status: "awaiting-approval", approval };
-        }
-        if (snapshot.job.status === "awaiting-host" || snapshot.job.status === "awaiting-decision") {
-            const request = snapshot.job.hostAssistanceRequests?.find((item) => snapshot.job.pendingHostRequestIds?.includes(item.id) && item.status === "pending");
-            if (request) {
+export async function waitForJob(cwd, jobId, waitTimeoutMs, dependencies = {}) {
+    const now = dependencies.now ?? Date.now;
+    const readJob = dependencies.readJob ?? getJob;
+    const resolveFile = dependencies.resolveStateFile ?? resolveStateFile;
+    const observerSource = dependencies.observerSource ?? stateObservers;
+    const deadline = waitTimeoutMs === undefined ? undefined : now() + waitTimeoutMs;
+    const stateFile = await canonicalStateFile(await resolveFile(cwd));
+    const observer = observerSource.acquire(stateFile);
+    try {
+        while (true) {
+            const generation = observer.generation();
+            const snapshot = await readJob(cwd, jobId);
+            if (snapshot.job.status === "awaiting-approval") {
+                const approval = snapshot.job.approvals?.find((item) => item.id === snapshot.job.pendingApprovalId);
+                if (approval)
+                    return { event: "approval-required", jobId, status: "awaiting-approval", approval };
+            }
+            if (snapshot.job.status === "awaiting-host" || snapshot.job.status === "awaiting-decision") {
+                const request = snapshot.job.hostAssistanceRequests?.find((item) => snapshot.job.pendingHostRequestIds?.includes(item.id) && item.status === "pending");
+                if (request) {
+                    return {
+                        event: request.kind === "decision" ? "human-decision-required" : "host-assistance-required",
+                        jobId,
+                        status: request.kind === "decision" ? "awaiting-decision" : "awaiting-host",
+                        request: structuredClone(request),
+                    };
+                }
+            }
+            if (isTerminalJobStatus(snapshot.job.status)) {
+                if (snapshot.result)
+                    return snapshot.result;
+                return terminalResult(snapshot.job, snapshot.job.status, `Job ${jobId} reached ${snapshot.job.status} without a result artifact.`);
+            }
+            const checkedAt = now();
+            if (deadline !== undefined && checkedAt >= deadline) {
                 return {
-                    event: request.kind === "decision" ? "human-decision-required" : "host-assistance-required",
+                    event: "wait-timed-out",
                     jobId,
-                    status: request.kind === "decision" ? "awaiting-decision" : "awaiting-host",
-                    request: structuredClone(request),
+                    status: snapshot.job.status,
+                    ...(snapshot.job.phase ? { phase: snapshot.job.phase } : {}),
+                    ...(snapshot.job.progressMessage
+                        ? { progressMessage: snapshot.job.progressMessage }
+                        : {}),
+                    ...(snapshot.job.lastProgressAt ? { lastProgressAt: snapshot.job.lastProgressAt } : {}),
+                    ...(snapshot.job.updatedAt ? { updatedAt: snapshot.job.updatedAt } : {}),
                 };
             }
+            const remaining = deadline === undefined ? 500 : deadline - checkedAt;
+            await observer.waitForChange(generation, Math.min(500, remaining));
         }
-        if (isTerminalJobStatus(snapshot.job.status)) {
-            if (snapshot.result)
-                return snapshot.result;
-            return terminalResult(snapshot.job, snapshot.job.status, `Job ${jobId} reached ${snapshot.job.status} without a result artifact.`);
-        }
-        if (deadline !== undefined && Date.now() >= deadline) {
-            return {
-                event: "wait-timed-out",
-                jobId,
-                status: snapshot.job.status,
-                ...(snapshot.job.phase ? { phase: snapshot.job.phase } : {}),
-                ...(snapshot.job.progressMessage ? { progressMessage: snapshot.job.progressMessage } : {}),
-                ...(snapshot.job.lastProgressAt ? { lastProgressAt: snapshot.job.lastProgressAt } : {}),
-                ...(snapshot.job.updatedAt ? { updatedAt: snapshot.job.updatedAt } : {}),
-            };
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    finally {
+        observer.release();
     }
 }
 export async function acknowledgeJob(cwd, jobId, notificationId) {

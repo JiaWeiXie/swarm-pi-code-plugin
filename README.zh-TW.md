@@ -344,7 +344,7 @@ Job status 與 `jobs wait` exit code 表達的是不同層次：status 是持久
 
 核准通知與 terminal notification 分開確認。Capability lease 會綁定 job generation、policy hash、action fingerprint 與有效期限。policy hash 包含 project scope，因此變更允許資料夾會阻止重用舊 lease。核准後會重新評估原本暫停的 action：完全吻合且仍有效的 lease 可以一次通過 `require-approval` gate，但 immutable deny 會先行判斷，因此 lease 永遠不能授權 Git 交付、部署、受保護路徑或其他 hard-denied action。Approve 或 deny 會在同一個 state transaction 中解決該核准並只 acknowledge 對應的核准通知；terminal notification 必須在 Host 顯示結果後另外明確確認。
 
-`jobs watch --emit ndjson` 會輪詢 canonical state，並在 watcher 重啟時重播待處理事件，讓 Host 可以復原遺漏的通知。事件採 allowlist，不會輸出 worker token、provider credential、raw prompt、完整 WorkerAssessment、完整 agent output 或 logs；resolved event 只會額外顯示安全的 principal、風險與 auto-resolution flag。`--once` 供選用的 SessionStart recovery hook 使用；它不能建立 receipt、核准、拒絕、回覆、建立 lease 或 acknowledge。Host 必須依 `eventId` 去重；只有正在處理該 turn 的活躍 Host model 可以執行 Host-first adjudication。
+`jobs watch --emit ndjson` 會觀察 canonical state，並在 watcher 重啟時重播待處理事件，讓 Host 可以復原遺漏的通知。Process-local state-file watcher 只提供低延遲提示，canonical state read 仍是唯一權威來源；watcher 健康時保留 5 秒 safety reconciliation，無法建立或資源耗盡時則回到原本的 500 ms interval。有限時間的 `jobs wait` 共用同一個 observer，但一律保留 500 ms fallback。事件採 allowlist，不會輸出 worker token、provider credential、raw prompt、完整 WorkerAssessment、完整 agent output 或 logs；resolved event 只會額外顯示安全的 principal、風險與 auto-resolution flag。`--once` 供選用的 SessionStart recovery hook 使用；它不能建立 receipt、核准、拒絕、回覆、建立 lease 或 acknowledge。Host 必須依 `eventId` 去重；只有正在處理該 turn 的活躍 Host model 可以執行 Host-first adjudication。
 
 ### Assistance、Discovery 與 Host Actions
 
@@ -438,9 +438,11 @@ Repository 使用 mise 提供固定版本的 Node.js 環境：
 ```bash
 mise install
 mise run install
+npm run test:state
 mise run check
 ```
 
+`npm run test:state` 是 state、Job observation 與 locking 變更的 additive fast path；它不會取代完整的 `mise run check` 交付 gate。
 開發環境使用 mise 的 Node.js `24.15.0`；已安裝的 Plugin 支援 Node.js `22.19.0` 以上版本，以符合 Pi SDK 的 engine requirement。
 
 常用檢查：

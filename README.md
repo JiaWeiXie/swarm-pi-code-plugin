@@ -519,8 +519,12 @@ operation atomically resolves that approval and acknowledges only its matching
 approval notification. Terminal notifications remain pending until the Host has
 shown and explicitly acknowledged the terminal result.
 
-`jobs watch --emit ndjson` polls canonical state and replays pending events so a
-Host can recover after a restart. Events are allowlisted and exclude worker
+`jobs watch --emit ndjson` observes canonical state and replays pending events so a
+Host can recover after a restart. A process-local state-file watcher provides
+low-latency hints; canonical state reads remain authoritative. Healthy watchers
+retain a 5-second safety reconciliation, while unavailable or exhausted watchers
+fall back to the original 500 ms interval. Bounded `jobs wait` uses the same
+shared observer but always retains its 500 ms fallback. Events are allowlisted and exclude worker
 tokens, provider credentials, raw prompts, complete agent output, and logs.
 The stream includes approval, Host Assistance, Human Decision, progress, and
 terminal required/resolved events. Resolved events may include a safe Host/user
@@ -709,9 +713,12 @@ The repository uses mise to provide the pinned Node.js environment:
 ```bash
 mise install
 mise run install
+npm run test:state
 mise run check
 ```
 
+`npm run test:state` is an additive fast path for state, Job observation, and
+locking changes; it does not replace the full `mise run check` delivery gate.
 `mise run check` runs type checking, oxlint, oxfmt's formatting check, the test
 suite, and runtime-parity verification. Development uses Node.js `24.15.0` from mise. Installed plugin packages support
 Node.js `22.19.0` or newer to match the Pi SDK engine requirement.

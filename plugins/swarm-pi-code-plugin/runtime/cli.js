@@ -1,16 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { parseArguments } from "./runner/args.js";
-import { runCommand } from "./runner/run.js";
-import { createJobEventSnapshot, createWatchReadyEvent, dedupeJobEvents, } from "./state/job-events.js";
-import { isTerminalJobStatus, reconcileJobs } from "./state/jobs.js";
-import { loadState } from "./state/state.js";
-import { formatPruneReport } from "./state/prune.js";
-import { startConfigurationServer } from "./web/configuration-server.js";
 export async function main(argv = process.argv.slice(2)) {
     const wantsJson = argv.includes("--json");
     try {
         const args = parseArguments(argv);
         if (args.command === "configure") {
+            const { startConfigurationServer } = await import("./web/configuration-server.js");
             const session = await startConfigurationServer(process.cwd(), {
                 host: args.host,
                 port: args.port,
@@ -44,6 +39,7 @@ export async function main(argv = process.argv.slice(2)) {
             process.once("SIGINT", abort);
             process.once("SIGTERM", abort);
         }
+        const { runCommand } = await import("./runner/run.js");
         const result = await runCommand(args, process.cwd(), undefined, {
             signal: controller.signal,
         }).finally(() => {
@@ -51,6 +47,7 @@ export async function main(argv = process.argv.slice(2)) {
             process.removeListener("SIGTERM", abort);
         });
         if (args.command === "jobs" && args.jobsAction === "prune" && !args.json) {
+            const { formatPruneReport } = await import("./state/prune.js");
             process.stdout.write(formatPruneReport(result));
         }
         else {
@@ -91,62 +88,78 @@ export function isDelegatedCommand(command) {
         command === "setup");
 }
 async function streamJobWatch(args, cwd, signal) {
+    const [jobEvents, jobs, stateObserver, state] = await Promise.all([
+        import("./state/job-events.js"),
+        import("./state/jobs.js"),
+        import("./state/state-observer.js"),
+        import("./state/state.js"),
+    ]);
     const watcherId = randomUUID();
     const seen = new Set();
     let since;
     let first = true;
-    while (true) {
-        if (signal.aborted)
-            return 0;
-        await reconcileJobs(cwd);
-        const state = await loadState(cwd);
-        const projectionOptions = {
-            includeProgress: true,
-        };
-        if (args.jobId)
-            projectionOptions.jobId = args.jobId;
-        if (!first) {
-            projectionOptions.includeResolved = true;
-            if (since)
-                projectionOptions.since = since;
-        }
-        const snapshot = createJobEventSnapshot(state, projectionOptions);
-        if (first) {
-            writeNdjson(createWatchReadyEvent(watcherId, snapshot.pendingCount, snapshot.snapshotAt));
-        }
-        for (const event of dedupeJobEvents(snapshot.events, seen))
-            writeNdjson(event);
-        first = false;
-        since = snapshot.snapshotAt;
-        if (args.once)
-            return 0;
-        if (args.jobId) {
-            const job = state.jobs.find((candidate) => candidate.id === args.jobId);
-            if (job && isTerminalJobStatus(String(job.status)))
+    const observer = stateObserver.stateObservers.acquire(await stateObserver.canonicalStateFile(await state.resolveStateFile(cwd)));
+    try {
+        while (true) {
+            if (signal.aborted)
                 return 0;
+            const generation = observer.generation();
+            await jobs.reconcileJobs(cwd);
+            const currentState = await state.loadState(cwd);
+            const projectionOptions = {
+                includeProgress: true,
+            };
+            if (args.jobId)
+                projectionOptions.jobId = args.jobId;
+            if (!first) {
+                projectionOptions.includeResolved = true;
+                if (since)
+                    projectionOptions.since = since;
+            }
+            const snapshot = jobEvents.createJobEventSnapshot(currentState, projectionOptions);
+            if (first) {
+                writeNdjson(jobEvents.createWatchReadyEvent(watcherId, snapshot.pendingCount, snapshot.snapshotAt));
+            }
+            for (const event of jobEvents.dedupeJobEvents(snapshot.events, seen))
+                writeNdjson(event);
+            first = false;
+            since = snapshot.snapshotAt;
+            if (args.once)
+                return 0;
+            if (args.jobId) {
+                const job = currentState.jobs.find((candidate) => candidate.id === args.jobId);
+                if (job && jobs.isTerminalJobStatus(String(job.status)))
+                    return 0;
+            }
+            await waitForWatchInterval(signal, observer, generation);
         }
-        await waitForWatchInterval(signal);
+    }
+    finally {
+        observer.release();
     }
 }
 function writeNdjson(value) {
     process.stdout.write(`${JSON.stringify(value)}\n`);
 }
-async function waitForWatchInterval(signal) {
+export function jobWatchFallbackMs(observer) {
+    return observer.isWatching() ? 5_000 : 500;
+}
+async function waitForWatchInterval(signal, observer, generation) {
     await new Promise((resolve) => {
         if (signal.aborted) {
             resolve();
             return;
         }
-        const timeout = setTimeout(done, 500);
-        const abort = () => {
-            clearTimeout(timeout);
-            signal.removeEventListener("abort", abort);
-            resolve();
-        };
+        let settled = false;
+        const abort = () => done();
         function done() {
+            if (settled)
+                return;
+            settled = true;
             signal.removeEventListener("abort", abort);
             resolve();
         }
         signal.addEventListener("abort", abort, { once: true });
+        void observer.waitForChange(generation, jobWatchFallbackMs(observer)).then(done, done);
     });
 }

@@ -9,6 +9,20 @@ function readJson(relativePath: string): Record<string, unknown> {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), "utf8"));
 }
 
+test("performance workflows stay additive and defer heavyweight CLI modules", () => {
+  const packageManifest = readJson("package.json");
+  const scripts = packageManifest.scripts as Record<string, string>;
+  assert.match(scripts["test:state"] ?? "", /state-observer\.test\.js/);
+  assert.match(scripts["test:state"] ?? "", /process-queue\.test\.js/);
+  assert.match(scripts.check ?? "", /npm test/);
+
+  const cli = fs.readFileSync(path.join(repoRoot, "src/cli.ts"), "utf8");
+  assert.doesNotMatch(cli, /^import .*\.\/runner\/run\.js/m);
+  assert.doesNotMatch(cli, /^import .*\.\/web\/configuration-server\.js/m);
+  assert.match(cli, /await import\("\.\/runner\/run\.js"\)/);
+  assert.match(cli, /await import\("\.\/web\/configuration-server\.js"\)/);
+});
+
 test("Claude and Codex manifests use the swarm-pi-code-plugin identity", () => {
   const packageManifest = readJson("package.json");
   const claude = readJson("plugins/swarm-pi-code-plugin/.claude-plugin/plugin.json");
