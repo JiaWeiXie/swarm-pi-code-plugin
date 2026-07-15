@@ -6,6 +6,8 @@ import test from "node:test";
 
 import type { HostAdjudicationReceipt, WorkerAssessment } from "../src/core/contracts.js";
 import { createPolicySnapshot, resolveRolePolicy } from "../src/orchestration/roles.js";
+import { PolicyEngine, actionFingerprint } from "../src/policy/engine.js";
+import { authorizePolicyActionWithApproval } from "../src/policy/extension.js";
 import { compileEffectiveProjectPolicy } from "../src/policy/project-policy.js";
 import { defaultModelConfiguration } from "../src/state/model-config.js";
 import {
@@ -18,6 +20,7 @@ import {
   recordJobApprovalAdjudication,
   requestJobApproval,
   startJob,
+  waitForApprovalResolution,
   waitForJob,
 } from "../src/state/jobs.js";
 
@@ -74,6 +77,77 @@ test("approval transitions remain non-terminal and create a single-use lease", a
   assert.ok(approvalNotification);
   assert.equal(approvalNotification.status, "acknowledged");
   assert.equal(approved.approval.notification, "acknowledged");
+});
+
+test("a suspended policy action resumes with the exact approved lease and consumes it once", async () => {
+  const { cwd, snapshot, job } = await fixture();
+  const events: string[] = [];
+  const engine = new PolicyEngine({
+    snapshot,
+    leases: createJobLeaseProvider(cwd, job.id),
+    onDecision: async (_action, decision) => {
+      events.push(decision.decision);
+    },
+  });
+  const action = {
+    toolName: "bash",
+    input: { command: "node -e \"process.stdout.write('ok')\"" },
+    cwd,
+  };
+  const result = await authorizePolicyActionWithApproval({
+    engine,
+    action,
+    onApproval: async (_action, decision, fingerprint) => {
+      const approval = await requestJobApproval(cwd, job.id, job.workerToken, {
+        actionFingerprint: fingerprint,
+        toolName: action.toolName,
+        actionSummary: "bounded node probe",
+        decision,
+        expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      });
+      await approveJob(cwd, job.id, approval.id, "once");
+      const resolution = await waitForApprovalResolution(cwd, job.id, job.workerToken, approval.id);
+      assert.equal(resolution, "approved");
+      return resolution;
+    },
+  });
+  assert.equal(result.decision, "allow");
+  assert.deepEqual(events, ["require-approval", "allow"]);
+  const lease = (await getJob(cwd, job.id)).job.leases?.[0];
+  assert.ok(lease?.consumedAt);
+  assert.equal(await createJobLeaseProvider(cwd, job.id).consume(lease), false);
+});
+
+test("a capability lease never overrides an immutable hard denial", async () => {
+  const { cwd, snapshot, job } = await fixture();
+  const action = {
+    toolName: "bash",
+    input: { command: "git push origin main" },
+    cwd,
+  };
+  const fingerprint = actionFingerprint(action);
+  const approval = await requestJobApproval(cwd, job.id, job.workerToken, {
+    actionFingerprint: fingerprint,
+    toolName: action.toolName,
+    actionSummary: "forged approval fixture for git push",
+    decision: {
+      decision: "require-approval",
+      risk: "high",
+      capabilities: ["shell.execute"],
+      reason: "test fixture",
+      constraints: [],
+      policyHash: snapshot.hash,
+    },
+    expiresAt: new Date(Date.now() + 30_000).toISOString(),
+  });
+  await approveJob(cwd, job.id, approval.id, "once");
+  const result = await new PolicyEngine({
+    snapshot,
+    leases: createJobLeaseProvider(cwd, job.id),
+  }).authorize(action);
+  assert.equal(result.decision, "deny");
+  assert.match(result.reason, /immutable denial|git delivery/i);
+  assert.equal((await getJob(cwd, job.id)).job.leases?.[0]?.consumedAt, undefined);
 });
 
 test("denied approvals resume the worker without issuing a lease", async () => {

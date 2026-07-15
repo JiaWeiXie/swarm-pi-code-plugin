@@ -24,12 +24,12 @@ export async function createTrustedResourceLoader(options) {
                                 return undefined;
                             }
                             const action = toolAction(event, options.cwd);
-                            let decision = await options.engine.authorize(action, ctx.signal);
-                            if (decision.decision === "require-approval" && options.onApproval) {
-                                const resolution = await options.onApproval(action, decision, actionFingerprint(action), ctx.signal);
-                                if (resolution === "approved")
-                                    decision = await options.engine.authorize(action, ctx.signal);
-                            }
+                            const decision = await authorizePolicyActionWithApproval({
+                                engine: options.engine,
+                                action,
+                                ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+                                ...(ctx.signal ? { signal: ctx.signal } : {}),
+                            });
                             if (decision.decision === "allow") {
                                 consecutiveBlocks = 0;
                                 return undefined;
@@ -47,6 +47,16 @@ export async function createTrustedResourceLoader(options) {
     });
     await loader.reload();
     return loader;
+}
+export async function authorizePolicyActionWithApproval(options) {
+    let decision = await options.engine.authorize(options.action, options.signal);
+    if (decision.decision !== "require-approval" || !options.onApproval)
+        return decision;
+    const resolution = await options.onApproval(options.action, decision, actionFingerprint(options.action), options.signal);
+    if (resolution === "approved") {
+        decision = await options.engine.authorize(options.action, options.signal);
+    }
+    return decision;
 }
 export function shouldBypassGenericPolicy(toolName, bypassToolNames) {
     return bypassToolNames?.has(toolName) === true;

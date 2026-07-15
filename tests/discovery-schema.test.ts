@@ -63,3 +63,86 @@ test("Discovery experiment schema requires explicit clean replay evidence", () =
   assert.equal(parsed.artifact.stage, "experiment");
   assert.equal(parsed.verification.includes("clean-replay-passed"), true);
 });
+
+test("Discovery experiment schema accepts an unexecuted inconclusive result without claiming replay", () => {
+  const unexecuted = {
+    experimentSpec: {
+      hypothesis: "feature works",
+      baseline: "control",
+      dependencies: [],
+      fixture: "fixture",
+      seedOrDataHash: "sha256:data",
+      setupCommand: "setup",
+      runCommand: "run",
+      testCommand: "test",
+      verifyCommand: "verify",
+      cleanupCommand: "cleanup",
+      metrics: ["latency"],
+      tolerance: "5%",
+      cleanReplayCommand: "replay",
+    },
+    execution: {
+      commandsRun: [],
+      testsRun: [],
+      evidence: ["Execution was blocked before the first command by an expired approval."],
+      cleanReplayPassed: false,
+    },
+    conclusion: "inconclusive",
+  };
+  const parsed = parseDiscoveryStageOutput("experiment", JSON.stringify(unexecuted));
+  assert.equal(parsed.artifact.stage, "experiment");
+  assert.equal(parsed.artifact.execution.cleanReplayPassed, false);
+  assert.equal(parsed.verification.includes("clean-replay-passed"), false);
+  assert.equal(parsed.verification.includes("unexecuted-inconclusive"), true);
+});
+
+test("Discovery experiment schema rejects false replay for executed or decisive results", () => {
+  const base = {
+    experimentSpec: {
+      hypothesis: "feature works",
+      baseline: "control",
+      dependencies: [],
+      fixture: "fixture",
+      seedOrDataHash: "sha256:data",
+      setupCommand: "setup",
+      runCommand: "run",
+      testCommand: "test",
+      verifyCommand: "verify",
+      cleanupCommand: "cleanup",
+      metrics: ["latency"],
+      tolerance: "5%",
+      cleanReplayCommand: "replay",
+    },
+    execution: {
+      commandsRun: ["run"],
+      testsRun: ["test"],
+      evidence: ["metric=1"],
+      cleanReplayPassed: false,
+    },
+  };
+  assert.throws(
+    () =>
+      parseDiscoveryStageOutput(
+        "experiment",
+        JSON.stringify({ ...base, conclusion: "inconclusive" }),
+      ),
+    /cleanReplayPassed/,
+  );
+  assert.throws(
+    () =>
+      parseDiscoveryStageOutput(
+        "experiment",
+        JSON.stringify({
+          ...base,
+          execution: {
+            commandsRun: [],
+            testsRun: [],
+            evidence: ["blocked"],
+            cleanReplayPassed: false,
+          },
+          conclusion: "supported",
+        }),
+      ),
+    /cleanReplayPassed|supported/,
+  );
+});

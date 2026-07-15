@@ -511,10 +511,13 @@ is required while the job remains live.
 Approval and terminal notifications are acknowledged independently. A lease is
 bound to the job generation, policy hash, action fingerprint, and expiry. The
 policy hash includes the project scope, so changing allowed folders prevents an
-old lease from being reused. An approve or deny operation atomically resolves
-that approval and acknowledges only its matching approval notification. Terminal
-notifications remain pending until the Host has shown and explicitly
-acknowledged the terminal result.
+old lease from being reused. After approval, the suspended action is evaluated
+again: an exact live lease may satisfy a `require-approval` gate once, but it is
+checked only after immutable denials, so it can never authorize Git delivery,
+deployment, protected paths, or another hard-denied action. An approve or deny
+operation atomically resolves that approval and acknowledges only its matching
+approval notification. Terminal notifications remain pending until the Host has
+shown and explicitly acknowledged the terminal result.
 
 `jobs watch --emit ndjson` polls canonical state and replays pending events so a
 Host can recover after a restart. Events are allowlisted and exclude worker
@@ -554,8 +557,12 @@ while retaining deny-write protection for all Git metadata.
 The experiment report must include reproducibility, test, evidence, metric,
 tolerance, and reported clean-replay fields and concludes only `supported`,
 `refuted`, or `inconclusive`. Its artifact is permanently non-deliverable. The
-control plane schema-validates the replay report but does not
-independently execute every recorded experiment command.
+control plane accepts `cleanReplayPassed: false` only for an explicitly
+unexecuted `inconclusive` result with no commands or tests and with evidence of
+the blocker. Every executed, `supported`, or `refuted` result still requires
+recorded commands, tests, evidence, and `cleanReplayPassed: true`. The control
+plane schema-validates the replay report but does not independently execute
+every recorded experiment command.
 
 An `ActionRecommendation` is inert. Only a successful `implement` or `setup`
 parent plus explicit user confirmation can start an isolated `host-broker`

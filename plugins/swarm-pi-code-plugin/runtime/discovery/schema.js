@@ -10,17 +10,20 @@ export function parseDiscoveryStageOutput(stage, output) {
     }
     if (stage === "experiment") {
         const experimentSpec = parseExperimentSpec(value.experimentSpec);
-        const execution = parseExperimentExecution(value.execution);
         const conclusion = experimentConclusion(value.conclusion);
+        const execution = parseExperimentExecution(value.execution, conclusion);
+        const unexecuted = !execution.cleanReplayPassed;
         return {
             artifact: { stage, experimentSpec, execution, conclusion },
-            verification: [
-                "experiment-spec-complete",
-                "commands-recorded",
-                "tests-recorded",
-                "explicit-evidence-present",
-                "clean-replay-passed",
-            ],
+            verification: unexecuted
+                ? ["experiment-spec-complete", "explicit-evidence-present", "unexecuted-inconclusive"]
+                : [
+                    "experiment-spec-complete",
+                    "commands-recorded",
+                    "tests-recorded",
+                    "explicit-evidence-present",
+                    "clean-replay-passed",
+                ],
         };
     }
     const featureDefinition = parseFeatureDefinition(value.featureDefinition);
@@ -116,15 +119,28 @@ function parseExperimentSpec(input) {
         cleanReplayCommand: text(value.cleanReplayCommand, "experimentSpec.cleanReplayCommand"),
     };
 }
-function parseExperimentExecution(input) {
+function parseExperimentExecution(input, conclusion) {
     const value = record(input, "execution");
-    if (value.cleanReplayPassed !== true)
-        throw new Error("execution.cleanReplayPassed must be true");
+    if (value.cleanReplayPassed !== true && value.cleanReplayPassed !== false) {
+        throw new Error("execution.cleanReplayPassed must be a boolean");
+    }
+    const commandsRun = strings(value.commandsRun, "execution.commandsRun");
+    const testsRun = strings(value.testsRun, "execution.testsRun");
+    const evidence = strings(value.evidence, "execution.evidence", true);
+    const unexecuted = commandsRun.length === 0 && testsRun.length === 0;
+    if (value.cleanReplayPassed === false) {
+        if (conclusion !== "inconclusive" || !unexecuted) {
+            throw new Error("execution.cleanReplayPassed may be false only for an unexecuted inconclusive experiment");
+        }
+    }
+    else if (commandsRun.length === 0 || testsRun.length === 0) {
+        throw new Error("executed experiments require non-empty execution.commandsRun and execution.testsRun");
+    }
     return {
-        commandsRun: strings(value.commandsRun, "execution.commandsRun", true),
-        testsRun: strings(value.testsRun, "execution.testsRun", true),
-        evidence: strings(value.evidence, "execution.evidence", true),
-        cleanReplayPassed: true,
+        commandsRun,
+        testsRun,
+        evidence,
+        cleanReplayPassed: value.cleanReplayPassed,
     };
 }
 function experimentConclusion(value) {

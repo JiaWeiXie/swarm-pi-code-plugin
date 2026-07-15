@@ -70,9 +70,10 @@ export class PolicyEngine {
     }
     async authorize(action, signal) {
         const fingerprint = actionFingerprint(action);
-        const hardDenied = hardDeny(action, this.snapshot);
-        if (hardDenied)
-            return this.record(action, hardDenied, fingerprint);
+        const mandatoryDecision = hardDeny(action, this.snapshot);
+        if (mandatoryDecision?.decision === "deny") {
+            return this.record(action, mandatoryDecision, fingerprint);
+        }
         const capabilities = capabilitiesFor(action);
         const missing = capabilities.filter((capability) => !this.snapshot.rolePolicy.capabilities.includes(capability));
         if (missing.length > 0) {
@@ -86,6 +87,8 @@ export class PolicyEngine {
         if (lease && (await this.leases.consume(lease))) {
             return this.record(action, decision("allow", "high", capabilities, `Allowed by lease ${lease.id}.`, this.snapshot), fingerprint);
         }
+        if (mandatoryDecision)
+            return this.record(action, mandatoryDecision, fingerprint);
         if (rule?.effect === "allow") {
             return this.record(action, decision("allow", "low", capabilities, `Allowed by policy rule ${rule.id}.`, this.snapshot), fingerprint);
         }

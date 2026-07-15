@@ -84,6 +84,13 @@ fingerprint/policy hash, auto-resolution flag, and timestamp.
 - `ask-user` persists the receipt and keeps the request pending.
 - `hard-deny` resolves the matching request without a capability lease.
 
+When a suspended policy action resumes after approval, the engine checks
+immutable denials first, then looks up and atomically consumes the exact lease
+before returning to the ordinary `require-approval` result. This ordering lets
+one matching approval resume heredoc, control-flow, redirection, and similar
+review-gated commands without allowing a lease to override Git delivery,
+deployment, protected-path, or other immutable denials.
+
 An approval carrying `shell.execute` is not read-only by declaration. Before
 the classifier, the trusted runner evaluates the complete Bash command against
 a deliberately small structure-aware inspection grammar. Proven commands take
@@ -211,9 +218,14 @@ Its schema requires:
 - dependencies, fixture, and seed/data hash;
 - setup, run, test, verify, cleanup, and clean-replay commands;
 - metrics and tolerance;
-- commands run, tests run, explicit evidence, and
-  `cleanReplayPassed: true`;
+- for an executed result: non-empty commands run, tests run, explicit evidence,
+  and `cleanReplayPassed: true`;
+- for an unexecuted result only: empty command/test arrays, explicit evidence of
+  the blocker, `cleanReplayPassed: false`, and conclusion `inconclusive`;
 - one conclusion: `supported`, `refuted`, or `inconclusive`.
+
+An executed `inconclusive` result still requires a successful clean replay.
+`supported` and `refuted` can never use the unexecuted exception.
 
 The runner validates the schema, changed paths, and isolated worktree before
 recording the report. The artifact is always `kind: experiment` and

@@ -140,8 +140,10 @@ export class PolicyEngine {
 
   async authorize(action: PolicyAction, signal?: AbortSignal): Promise<PolicyDecision> {
     const fingerprint = actionFingerprint(action);
-    const hardDenied = hardDeny(action, this.snapshot);
-    if (hardDenied) return this.record(action, hardDenied, fingerprint);
+    const mandatoryDecision = hardDeny(action, this.snapshot);
+    if (mandatoryDecision?.decision === "deny") {
+      return this.record(action, mandatoryDecision, fingerprint);
+    }
 
     const capabilities = capabilitiesFor(action);
     const missing = capabilities.filter(
@@ -178,6 +180,8 @@ export class PolicyEngine {
         fingerprint,
       );
     }
+
+    if (mandatoryDecision) return this.record(action, mandatoryDecision, fingerprint);
 
     if (rule?.effect === "allow") {
       return this.record(
