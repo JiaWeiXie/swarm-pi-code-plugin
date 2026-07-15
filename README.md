@@ -135,6 +135,54 @@ $swarm-pi-setup
 | Design and create a new project | `/swarm-pi-code-plugin:swarm-pi-scaffold` | `$swarm-pi-scaffold` |
 | Configure project-local development tools | `/swarm-pi-code-plugin:swarm-pi-setup` | `$swarm-pi-setup` |
 
+### Skill usage and limits
+
+Claude Code commands and Codex skills are two Host entry points for the same
+workflows. Use the name shown above for your Host and describe the request in
+plain language; the Host prepares the runner inputs, validates Pi's evidence,
+and keeps user decisions at the Host boundary.
+
+#### Configuration workflows
+
+| Skill | Use it for and provide | Limits and authorization boundaries |
+| --- | --- | --- |
+| `swarm-pi-configure` | First setup, recovery, provider or model changes, or full reconfiguration. Provide the workspace and whether existing settings should be edited, reset, or only reported as JSON. | Opens the guided local setup and may ask permission to run only `git init` for a non-Git workspace. API keys and OAuth codes belong in the local setup flow, never the Host conversation. Reset does not delete Pi user credentials, reconfiguration does not delete Job history, and active Jobs keep their immutable policy snapshots. Use `swarm-pi-project` when provider connections must remain untouched. |
+| `swarm-pi-project` | Repeatable changes to role routing, Sandbox and approval policy, project scope, Decision Mode, Host Assistance, Advisor, doctrine metadata, or Host Actions. Provide the intended policy or workspace-scope change. | Changes project routing, safety, and profile state only. It does not alter provider credentials, model authentication, model configuration, Job history, or active Job snapshots. A non-Git workspace can be initialized only after explicit approval, and the workflow never adds files, commits, or configures Git identity. |
+
+#### Read-only analysis workflows
+
+| Skill | Use it for and provide | Limits and authorization boundaries |
+| --- | --- | --- |
+| `swarm-pi-ask` | One focused repository question, explanation, or evidence check. Provide the exact question, repository scope, required evidence, freshness needs, and uncertainty to resolve. | Read-only and single-focus. It does not produce a change plan, review a diff, or edit files; route those requests to `plan`, `review`, or `implement`. The Host validates the answer and reports unsupported claims or remaining uncertainty. |
+| `swarm-pi-review` | Actionable bug, security, regression, and missing-test findings for a Git working tree or branch. Provide the intended diff scope and a base ref for branch review. | Read-only. Pi findings are evidence, not authoritative review; the Host confirms every finding against the actual diff and reports tight file and line references. It never fixes findings or modifies files; use `implement` after explicit mutation authorization. |
+| `swarm-pi-plan` | A decision-ready implementation, migration, or architecture plan when requirements and evidence are already sufficient. Provide scope, alternatives, constraints, acceptance criteria, and known decisions. | Read-only and cannot invoke implementation. Unresolved requirements or claims go to `discover`; diff findings go to `review`; an approved code change goes to `implement`. Citations, unknowns, risks, and assumptions remain visible in the final plan. |
+| `swarm-pi-orchestrate` | A bounded panel for architecture, migration, tradeoff, or risk decisions where independent perspectives materially help. Provide one shared decision brief, EvidencePack, constraints, and evidence acceptance criteria. | Read-only. Decision Mode selects one to three base perspectives, with optional quota-bounded Advisor input; the Host owns the final synthesis. Perspectives do not independently repeat expensive builds or test suites, and inline code is not presented as working code without validation. |
+| `swarm-pi-discover` | Unknown requirements or unresolved technical claims that need reproducible research, an experiment, and convergence. Provide the unknowns, constraints, evidence criteria, freshness needs, user gates, and a resource-aware experiment plan. | Research and convergence are read-only; the experiment runs in an isolated child worktree under the immutable Job policy. Research, experiment, and definition gates require review. Experiment artifacts are always `deliverable: false`, cannot be materialized, and conclude only `supported`, `refuted`, or `inconclusive`; a final gated result can be handed to `plan`. |
+
+#### Controlled mutation workflows
+
+| Skill | Use it for and provide | Limits and authorization boundaries |
+| --- | --- | --- |
+| `swarm-pi-implement` | An explicitly authorized, scoped change, fix, or refactor in an existing Git repository. Provide allowed files or folders, acceptance criteria, prohibited actions, and a resource-aware verification plan. | Preserves user changes and never stashes, discards, commits, merges, pushes, or hides them. Pi normally works in a Job-owned isolated worktree; the Host inspects the diff and verification before any materialization. Applying a deliverable artifact to the user's worktree requires explicit approval, and Git delivery remains a separate user decision. Use `scaffold` for a new or non-Git project. |
+| `swarm-pi-scaffold` | Design and create a new project in an empty target, or adopt an inventoried non-Git target. Provide the project goal, target, runtime, package manager, structure, dependency and lifecycle-script policy, done criteria, and verification plan. | Planning is read-only; creation occurs only after approval of the complete `ScaffoldSpec` and uses isolated staging. Adoption requires separate approval of the target inventory. Pi never delivers directly: only a verified `deliverable: true` artifact can be materialized after explicit approval. Use `implement` for an existing Git repository and `setup` for tooling-only work. |
+| `swarm-pi-setup` | Reproducible project-local dependency, build, test, lint, or development-tool configuration. Provide the exact setup request, allowed package manager, lifecycle-script policy, prohibited global actions, and verification plan. | Uses supervised execution and may isolate work according to workspace readiness. Unknown lifecycle scripts, uncertain network targets, native builds, and partially reversible actions require user review. Global installs, Host provisioning, deployment, commits, pushes, and other Git delivery are denied; use `implement` for product code. |
+
+#### Request template
+
+Use this template with the Claude Code command or Codex skill that matches the
+workflow:
+
+```text
+Goal:
+Workspace and allowed scope:
+Evidence or inputs to use:
+Constraints and prohibited actions:
+Done criteria:
+Verification required:
+```
+
+#### Shared boundaries
+
 Claude Code commands and Codex skills use the same runner protocol: they check
 readiness and pending notifications first, preserve original requests across
 configuration, and default to supervised execution. Only the model handling an
@@ -142,6 +190,15 @@ active Host turn may adjudicate an eligible Host-first request from the full
 durable context; hooks, watchers, timeouts, and replay only notify. Adoption,
 artifact materialization, delivery, and requests outside the automatic ceiling
 still require an explicit user decision.
+
+No skill expands the original user intent, configured workspace roots, allowed
+task types, Sandbox capabilities, or immutable Job policy. Pi output remains
+untrusted evidence until the Host checks it against the repository, actual diff,
+runtime side effects, and fresh verification. Secrets must not be collected in
+the Host conversation. Deletion, private data or connectors, Git metadata and
+delivery, deployment, messages, transactions, and irreversible or uncertain
+external effects are never implied by invoking a skill and require user review
+or remain denied by policy.
 
 ### First setup
 

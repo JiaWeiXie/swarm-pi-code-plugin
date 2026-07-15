@@ -112,7 +112,53 @@ $swarm-pi-setup
 | 設計並建立新專案 | `/swarm-pi-code-plugin:swarm-pi-scaffold` | `$swarm-pi-scaffold` |
 | 設定專案內的開發工具 | `/swarm-pi-code-plugin:swarm-pi-setup` | `$swarm-pi-setup` |
 
+### Skills 使用方式與限制
+
+Claude Code commands 與 Codex skills 是相同 workflows 的兩種 Host 入口。請使用上表中對應 Host 的名稱，並以自然語言描述請求；Host 會準備 runner 輸入、驗證 Pi 證據，並把需要使用者決定的事項保留在 Host 邊界。
+
+#### 設定 Workflows
+
+| Skill | 適用情境與應提供資訊 | 限制與授權邊界 |
+| --- | --- | --- |
+| `swarm-pi-configure` | 第一次設定、復原、變更 Provider 或模型，或完整重新設定。請提供 workspace，以及要編輯既有設定、重設，或只以 JSON 回報狀態。 | 開啟本機引導式設定；非 Git workspace 時只能在取得同意後詢問並執行 `git init`。API key 與 OAuth code 只能輸入本機設定流程，不得放在 Host 對話。Reset 不會刪除 Pi 使用者憑證，reconfigure 不會刪除 Job 歷史，執行中的 Job 仍保留 immutable policy snapshot。不變更 Provider 連線時改用 `swarm-pi-project`。 |
+| `swarm-pi-project` | 重複調整角色路由、Sandbox 與核准政策、專案範圍、Decision Mode、Host Assistance、Advisor、doctrine metadata 或 Host Actions。請提供預期政策或 workspace scope 變更。 | 只變更專案路由、安全性與 profile state，不會改動 Provider 憑證、模型驗證、模型設定、Job 歷史或執行中 Job 的 snapshot。非 Git workspace 只能在明確同意後初始化；流程不會 add 檔案、commit 或設定 Git identity。 |
+
+#### 唯讀分析 Workflows
+
+| Skill | 適用情境與應提供資訊 | 限制與授權邊界 |
+| --- | --- | --- |
+| `swarm-pi-ask` | 一個聚焦的 repository 問題、解釋或證據檢查。請提供精確問題、repository scope、所需證據、時效要求與待釐清的不確定性。 | 唯讀且一次只處理一個焦點。不會產生變更計畫、review diff 或修改檔案；這些請求應分別改用 `plan`、`review` 或 `implement`。Host 會驗證答案，並回報未受支持的主張或剩餘不確定性。 |
+| `swarm-pi-review` | 對 Git working tree 或 branch 提出可採取行動的 bug、安全性、regression 與缺少測試 findings。請提供預期 diff scope；branch review 另提供 base ref。 | 唯讀。Pi findings 是待驗證證據，不是權威 review；Host 會對照實際 diff 確認每項 finding，並提供精確 file 與 line reference。不會修正 finding 或修改檔案；明確授權修改後改用 `implement`。 |
+| `swarm-pi-plan` | 在需求與證據已足夠時，建立可直接決策的實作、migration 或 architecture 計畫。請提供 scope、替代方案、限制、驗收條件與已知決策。 | 唯讀且不能觸發實作。未解需求或主張改用 `discover`，diff findings 改用 `review`，已核准的程式修改改用 `implement`。最終計畫會保留 citation、unknown、risk 與 assumption。 |
+| `swarm-pi-orchestrate` | Architecture、migration、tradeoff 或 risk 決策需要多個獨立觀點時，執行有界 panel。請提供一份共用 decision brief、EvidencePack、限制與證據驗收條件。 | 唯讀。Decision Mode 會選擇一至三個基本觀點，並可加入受 quota 限制的 Advisor；最終整合由 Host 負責。各觀點不會各自重複昂貴的 build 或 test suite，未經驗證的 inline code 不會被描述為可運作程式碼。 |
+| `swarm-pi-discover` | 未知需求或未解技術主張需要可重現的研究、實驗與收斂時使用。請提供 unknown、限制、證據條件、時效要求、使用者 gate 與考量資源的 experiment plan。 | Research 與 convergence 唯讀；experiment 會在 immutable Job policy 下的隔離 child worktree 執行。Research、experiment 與 definition gate 都需要 review。Experiment artifact 一律為 `deliverable: false`、不能 materialize，結論只能是 `supported`、`refuted` 或 `inconclusive`；通過最終 gate 的結果可交給 `plan`。 |
+
+#### 受控修改 Workflows
+
+| Skill | 適用情境與應提供資訊 | 限制與授權邊界 |
+| --- | --- | --- |
+| `swarm-pi-implement` | 在既有 Git repository 中執行已明確授權、範圍受限的修改、修正或 refactor。請提供允許的檔案或資料夾、驗收條件、禁止動作與考量資源的驗證計畫。 | 保留使用者變更，絕不 stash、discard、commit、merge、push 或隱藏它們。Pi 通常在 Job 擁有的隔離 worktree 工作；任何 materialization 前都由 Host 檢查 diff 與驗證。將可交付 artifact 套用到使用者 worktree 需要明確同意，Git delivery 仍是另一個使用者決策。新專案或非 Git 專案改用 `scaffold`。 |
+| `swarm-pi-scaffold` | 在空 target 設計並建立新專案，或採用已完成 inventory 的非 Git target。請提供專案目標、target、runtime、package manager、結構、dependency 與 lifecycle-script policy、完成條件及驗證計畫。 | Planning 唯讀；只有在完整 `ScaffoldSpec` 獲得同意後，才會在隔離 staging 建立專案。Adoption 需要另外核准 target inventory。Pi 不會直接交付；只有通過驗證且 `deliverable: true` 的 artifact 能在明確同意後 materialize。既有 Git repository 改用 `implement`，只有 tooling 變更則改用 `setup`。 |
+| `swarm-pi-setup` | 設定可重現的專案內 dependency、build、test、lint 或開發工具。請提供精確 setup 請求、允許的 package manager、lifecycle-script policy、禁止的全域動作與驗證計畫。 | 使用 supervised execution，並可依 workspace readiness 隔離工作。未知 lifecycle script、不確定的 network target、native build 與部分可逆動作需要使用者 review。禁止 global install、Host provisioning、deployment、commit、push 與其他 Git delivery；product code 應改用 `implement`。 |
+
+#### 請求範本
+
+請搭配符合 workflow 的 Claude Code command 或 Codex skill 使用以下範本：
+
+```text
+目標：
+Workspace 與允許範圍：
+應使用的證據或輸入：
+限制與禁止動作：
+完成條件：
+必要驗證：
+```
+
+#### 共通邊界
+
 Claude Code commands 與 Codex skills 使用相同的 Host protocol：委派前檢查 readiness 與待通知事項、在設定失敗時保留原始請求，並預設使用 supervised 執行。只有正在處理 Host turn 的活躍模型可以根據完整 durable context 裁決符合 Host-first ceiling 的 request；hook、watcher、timeout 與 replay 只能通知。Adoption、artifact materialization、Git delivery，以及超出自動核准範圍的 request，仍需要使用者明確決定。
+
+任何 skill 都不會擴張原始使用者意圖、設定的 workspace roots、允許的 task types、Sandbox capabilities 或 immutable Job policy。Pi 輸出在 Host 對照 repository、實際 diff、runtime side effects 與最新驗證前，仍是不受信任的證據。Secrets 不得在 Host 對話中收集。刪除、私人資料或 connector、Git metadata 與 delivery、deployment、訊息、交易，以及不可逆或結果不確定的外部作用，不會因呼叫 skill 而自動獲得授權，必須由使用者 review，或維持 policy denial。
 
 ### 第一次設定
 
