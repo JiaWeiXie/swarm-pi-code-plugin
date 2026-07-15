@@ -664,7 +664,10 @@ mise run build
 
 ### Plugin versions
 
-Version 0.9.0 adds safe retention-based Job pruning with read-only preview,
+Version 0.10.0 makes Adaptive authorization and Host-first assistance evaluate
+bounded read-only inspections by side-effect risk and reversibility, while
+preserving fail-closed handling for mutation, egress, expansion, and scope
+escape. Version 0.9.0 adds safe retention-based Job pruning with read-only preview,
 resumable quarantine/tombstone cleanup, conservative worktree ownership checks,
 and sharper trigger boundaries across the ten Swarm Pi skills. Version 0.8.0
 adds guided configuration terminology, strict structured-policy

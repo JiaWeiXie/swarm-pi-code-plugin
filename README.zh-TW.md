@@ -407,7 +407,9 @@ mise run build
 
 ### Plugin 版號
 
-0.9.0 加入具唯讀預覽的 retention Job pruning、可恢復的 quarantine／tombstone
+0.10.0 讓 Adaptive authorization 與 Host-first assistance 依副作用風險及可逆性
+判斷有界的唯讀檢查，同時對 mutation、egress、expansion 與 scope escape 維持
+fail-closed。0.9.0 加入具唯讀預覽的 retention Job pruning、可恢復的 quarantine／tombstone
 清理、保守的 worktree 歸屬檢查，以及 10 個 Swarm Pi Skill 更精確的觸發邊界。
 0.8.0 加入設定頁術語指南、嚴格的 structured-policy validation、具名 Host
 context allowance，以及更明確的 Host Action 觸發邊界。既有專案仍可讀取 legacy
