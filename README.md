@@ -200,6 +200,18 @@ delivery, deployment, messages, transactions, and irreversible or uncertain
 external effects are never implied by invoking a skill and require user review
 or remain denied by policy.
 
+### Telemetry foundation status
+
+The current P0 slice defines versioned local contracts, privacy allowlist
+validators, a side-effect-free no-op `TelemetryRecorder`, and fixed-precision
+cost logic for static pricing fixtures. It is not an enabled collector: no
+events are stored or transmitted, no hidden home-directory folder or sidecar
+is created, and no Dashboard, lifecycle instrumentation, pricing refresh, or
+billing integration exists. Local models remain usage-only; stale, unknown,
+unsupported, and multi-currency states stay explicit. The earlier sidecar
+discovery is `inconclusive`, so this code makes no performance or billing
+accuracy claim. See the [telemetry contract reference](docs/telemetry.md).
+
 ### First setup
 
 Run the host-specific setup entry point. The browser walks through six steps:

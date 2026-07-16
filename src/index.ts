@@ -68,3 +68,7 @@ export { buildWorkerPrompt } from "./runner/prompts.js";
 export { runCommand } from "./runner/run.js";
 export * from "./web/configuration-service.js";
 export * from "./web/configuration-server.js";
+export * from "./telemetry/contracts.js";
+export * from "./telemetry/privacy.js";
+export * from "./telemetry/recorder.js";
+export * from "./telemetry/cost.js";

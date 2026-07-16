@@ -103,3 +103,21 @@ Bootstrap artifacts add a delivery boundary: models write only to a staging
 repository, while the trusted control plane owns Git initialization, artifact
 commits, target fingerprint checks, and materialization. Runtime state is kept
 outside the checked-out worktree and is never part of a scaffold snapshot.
+
+## Telemetry-specific boundary
+
+The P0 telemetry code is a contract and calculation foundation only. The
+default recorder is inert and creates no files, directories, processes, sockets,
+network requests, or durable state. Strict parsing and privacy validation use an
+explicit allowlist and reject prompts, completions, reasoning, source text,
+paths, URLs/endpoints, personal data, secrets, credentials, raw provider
+configuration, Git metadata, and arbitrary free-form text. Usage counters are
+allowlisted by exact field name; an unknown token-bearing field is rejected.
+
+Pricing is static fixture input in this slice. Integer minor-unit arithmetic
+keeps rounding deterministic, stale fixtures remain visibly stale, local models
+remain usage-only, and currencies are never combined. No lifecycle instrumentation,
+sidecar, queue, IPC, home-directory telemetry root, automatic pricing refresh,
+dashboard, upload, or billing accuracy claim exists yet. The prior sidecar
+discovery is `inconclusive`, and a future collector would require a new threat
+review plus explicit user opt-in and Host-owned verification.
