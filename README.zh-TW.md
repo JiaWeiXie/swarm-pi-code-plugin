@@ -467,7 +467,9 @@ mise run build
 
 ### Plugin 版號
 
-0.10.0 讓 Adaptive authorization 與 Host-first assistance 依副作用風險及可逆性
+0.11.0 加入版本化的本機 telemetry、pricing 與 cost contracts，但預設不啟用資料
+收集；同時 canonicalize 受限檔案系統 alias，並強化 Discovery parser-preflight
+evidence。0.10.0 讓 Adaptive authorization 與 Host-first assistance 依副作用風險及可逆性
 判斷有界的唯讀檢查，同時對 mutation、egress、expansion 與 scope escape 維持
 fail-closed。0.9.0 加入具唯讀預覽的 retention Job pruning、可恢復的 quarantine／tombstone
 清理、保守的 worktree 歸屬檢查，以及 10 個 Swarm Pi Skill 更精確的觸發邊界。

@@ -759,7 +759,10 @@ mise run build
 
 ### Plugin versions
 
-Version 0.10.0 makes Adaptive authorization and Host-first assistance evaluate
+Version 0.11.0 adds versioned local telemetry, pricing, and cost contracts
+without enabling collection by default, canonicalizes scoped filesystem aliases,
+and hardens Discovery parser-preflight evidence. Version 0.10.0 makes Adaptive
+authorization and Host-first assistance evaluate
 bounded read-only inspections by side-effect risk and reversibility, while
 preserving fail-closed handling for mutation, egress, expansion, and scope
 escape. Version 0.9.0 adds safe retention-based Job pruning with read-only preview,
