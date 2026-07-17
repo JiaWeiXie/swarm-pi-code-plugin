@@ -91,9 +91,6 @@ export function assertTaskAdmitted(policy, kind) {
 }
 export async function assertPathAllowed(policy, operation, candidate) {
     const lexical = path.resolve(policy.executionRoot, candidate);
-    if (!isInside(policy.executionRoot, lexical)) {
-        throw rejection("project-scope-violation", "preflight", `Path is outside the execution workspace: ${candidate}`, policy.effective, [candidate]);
-    }
     let canonical;
     try {
         canonical = await canonicalPath(lexical);

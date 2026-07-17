@@ -53,6 +53,12 @@ Worker capability. On macOS, the Sandbox invokes the Command Line Tools Git
 binary directly when available so the `xcrun` shim does not need to write its
 host cache.
 
+Filesystem boundaries canonicalize paths before checking the execution workspace
+and configured operation roots. This makes macOS `/var/...` and
+`/private/var/...` worktree aliases equivalent without widening scope; traversal,
+escaping symlinks, protected paths, and paths outside the canonical root remain
+denied.
+
 Runtime configuration and jobs stay outside the checked-out worktree. Git
 repositories use `.git/swarm-pi-code-plugin/` through the common Git directory;
 non-Git folders use an OS user-state namespace. Credentials stay in Pi's user

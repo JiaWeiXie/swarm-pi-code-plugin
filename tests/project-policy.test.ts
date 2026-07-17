@@ -17,6 +17,15 @@ function workspace(): string {
   return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-policy-")));
 }
 
+function filesystemAlias(canonical: string): string | undefined {
+  const alias = canonical.startsWith("/private/")
+    ? canonical.slice("/private".length)
+    : canonical.startsWith("/var/")
+      ? `/private${canonical}`
+      : undefined;
+  return alias && fs.realpathSync(alias) === canonical ? alias : undefined;
+}
+
 test("default project policy allows every task kind and the workspace", async () => {
   const policy = await compileEffectiveProjectPolicy({ cwd: workspace() });
   assert.deepEqual(policy.allowedTaskKinds, [
@@ -338,4 +347,23 @@ test("path behavior follows the filesystem's actual case semantics", async () =>
   if (insensitive) await assertPathAllowed(bound, "read", "SRC/file.ts");
   else
     await assert.rejects(() => assertPathAllowed(bound, "read", "SRC/file.ts"), ProjectPolicyError);
+});
+
+test("path checks accept the macOS /var alias for a canonical /private/var workspace", async (t) => {
+  const cwd = workspace();
+  const alias = filesystemAlias(cwd);
+  if (!alias) {
+    t.skip("the host does not expose a /var and /private/var alias");
+    return;
+  }
+  fs.mkdirSync(path.join(cwd, "src"));
+  const bound = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd, profile: { dirs: ["src"] } }),
+    cwd,
+  );
+  const aliasedCandidate = path.join(alias, "src", "new.ts");
+  assert.equal(
+    await assertPathAllowed(bound, "write", aliasedCandidate),
+    path.join(cwd, "src", "new.ts"),
+  );
 });

@@ -12,6 +12,15 @@ import {
 } from "../src/policy/project-policy.js";
 import { assertMutationPath, createScopedFilesystemTools } from "../src/pi/scoped-tools.js";
 
+function filesystemAlias(canonical: string): string | undefined {
+  const alias = canonical.startsWith("/private/")
+    ? canonical.slice("/private".length)
+    : canonical.startsWith("/var/")
+      ? `/private${canonical}`
+      : undefined;
+  return alias && fs.realpathSync(alias) === canonical ? alias : undefined;
+}
+
 test("mutation paths stay inside the assigned worktree", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-scope-"));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-outside-"));
@@ -22,6 +31,44 @@ test("mutation paths stay inside the assigned worktree", async () => {
     path.join(root, "src", "new.ts"),
   );
   await assert.rejects(() => assertMutationPath(root, path.join(outside, "bad.ts")), /outside/i);
+});
+
+test("scoped path checks accept the macOS /var alias for a canonical workspace", async (t) => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-scope-alias-")));
+  const alias = filesystemAlias(root);
+  if (!alias) {
+    t.skip("the host does not expose a /var and /private/var alias");
+    return;
+  }
+  fs.mkdirSync(path.join(root, "src"));
+  const aliasedCandidate = path.join(alias, "src", "new.ts");
+  assert.equal(await assertMutationPath(root, aliasedCandidate), aliasedCandidate);
+  const bound = await bindProjectPolicy(
+    await compileEffectiveProjectPolicy({ cwd: root, profile: { dirs: ["src"] } }),
+    root,
+  );
+  const tools = createScopedFilesystemTools({
+    cwd: root,
+    mode: "implement",
+    boundProjectPolicy: bound,
+  });
+  const write = tools.find((entry) => (entry as { name: string }).name === "write") as {
+    execute: (
+      id: string,
+      params: unknown,
+      signal: undefined,
+      update: undefined,
+      context: unknown,
+    ) => Promise<unknown>;
+  };
+  await write.execute(
+    "call",
+    { path: aliasedCandidate, content: "alias\n" },
+    undefined,
+    undefined,
+    {},
+  );
+  assert.equal(fs.readFileSync(path.join(root, "src", "new.ts"), "utf8"), "alias\n");
 });
 
 test("mutation paths reject symlinks that escape the worktree", async () => {

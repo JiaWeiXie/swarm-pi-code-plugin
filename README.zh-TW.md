@@ -38,6 +38,8 @@ Git delivery 永遠由 Host 管理。執行期設定與工作資料不放在 che
 
 isolated Experiment 可以唯讀 linked worktree 的 Git 管理路徑，用來建立與驗證乾淨 baseline。這些路徑仍然禁止寫入、不能取得修改 lease，也不會讓 Worker 擁有 commit 或交付能力。在 macOS 上，Sandbox 會在可用時直接使用 Command Line Tools 的 Git binary，避免 `xcrun` shim 嘗試寫入 Host cache。
 
+檔案系統邊界會先將路徑 canonicalize，再檢查 execution workspace 與設定的 operation roots。因此 macOS 的 `/var/...` 與 `/private/var/...` worktree alias 會被視為同一個位置，但不會擴大範圍；traversal、逃逸的 symlink、protected path，以及 canonical root 外的路徑仍會被拒絕。
+
 詳細內容請參考[架構文件](docs/architecture.md)、[設定文件](docs/configuration.md)，以及
 [設定欄位指南](docs/configuration-field-guide.zh-TW.md)；指南從 Host、Worker、Job、
 capability、fan-out 與 lease 等關鍵詞開始，再提供欄位預設、完整例子、安全取捨

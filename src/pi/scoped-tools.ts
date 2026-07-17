@@ -17,23 +17,8 @@ import { isProtectedWorkspacePath } from "../git/worktree.js";
 import { assertPathAllowed, ProjectPolicyError } from "../policy/project-policy.js";
 
 export async function assertMutationPath(cwd: string, candidate: string): Promise<string> {
-  const lexicalRoot = path.resolve(cwd);
-  const root = await fs.realpath(cwd);
-  const absolute = path.resolve(cwd, candidate);
-  assertInside(lexicalRoot, absolute);
-  assertUnprotected(lexicalRoot, absolute);
-
-  const existingAncestor = await closestExistingPath(absolute);
-  try {
-    if ((await fs.lstat(absolute)).isSymbolicLink()) {
-      throw new Error(`Mutation path cannot be a symlink: ${candidate}`);
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  const realAncestor = await fs.realpath(existingAncestor);
-  assertInside(root, realAncestor);
-  return absolute;
+  const resolved = await resolveScopedPath(cwd, candidate, true);
+  return resolved.absolute;
 }
 
 interface PathIdentity {
@@ -47,7 +32,7 @@ export async function secureWriteFile(
   candidate: string,
   content: string | Uint8Array,
 ): Promise<void> {
-  const absolute = await assertMutationPath(cwd, candidate);
+  const absolute = (await resolveScopedPath(cwd, candidate, true)).canonical;
   const root = await fs.realpath(cwd);
   const parent = path.dirname(absolute);
   const identities = await captureDirectoryChain(root, parent);
@@ -80,7 +65,7 @@ export async function secureWriteFile(
 }
 
 async function secureReadFile(cwd: string, candidate: string): Promise<Buffer> {
-  const absolute = await assertReadPath(cwd, candidate);
+  const absolute = (await resolveScopedPath(cwd, candidate)).canonical;
   const root = await fs.realpath(cwd);
   const identities = await captureDirectoryChain(root, path.dirname(absolute));
   const handle = await fs.open(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -100,9 +85,7 @@ async function secureReadFile(cwd: string, candidate: string): Promise<Buffer> {
 }
 
 async function secureAccess(cwd: string, candidate: string, write: boolean): Promise<void> {
-  const absolute = write
-    ? await assertMutationPath(cwd, candidate)
-    : await assertReadPath(cwd, candidate);
+  const absolute = (await resolveScopedPath(cwd, candidate, write)).canonical;
   const root = await fs.realpath(cwd);
   const identities = await captureDirectoryChain(root, path.dirname(absolute));
   const flags = (write ? constants.O_RDWR : constants.O_RDONLY) | (constants.O_NOFOLLOW ?? 0);
@@ -119,20 +102,75 @@ async function secureAccess(cwd: string, candidate: string, write: boolean): Pro
   }
 }
 
-async function assertReadPath(cwd: string, candidate: string): Promise<string> {
-  const lexicalRoot = path.resolve(cwd);
+interface ResolvedScopedPath {
+  root: string;
+  absolute: string;
+  canonical: string;
+}
+
+async function resolveScopedPath(
+  cwd: string,
+  candidate: string,
+  protectMutation = false,
+): Promise<ResolvedScopedPath> {
   const root = await fs.realpath(cwd);
   const absolute = path.resolve(cwd, candidate);
-  assertInside(lexicalRoot, absolute);
   const existingAncestor = await closestExistingPath(absolute);
+  try {
+    if ((await fs.lstat(absolute)).isSymbolicLink()) {
+      throw new Error(`Scoped path cannot be a symlink: ${candidate}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   const realAncestor = await fs.realpath(existingAncestor);
   assertInside(root, realAncestor);
-  return absolute;
+
+  const lexicalRoot = await findLexicalRoot(root, existingAncestor);
+  const canonical = lexicalRoot
+    ? path.join(root, path.relative(lexicalRoot, absolute))
+    : path.join(realAncestor, path.relative(existingAncestor, absolute));
+  assertInside(root, canonical);
+  await assertNoSymlinkComponents(root, canonical);
+  if (protectMutation) assertUnprotected(root, canonical);
+  return { root, absolute, canonical };
+}
+
+async function findLexicalRoot(root: string, candidate: string): Promise<string | undefined> {
+  let current = candidate;
+  while (true) {
+    try {
+      if ((await fs.realpath(current)) === root) return current;
+    } catch {
+      // The candidate's existing ancestor was already resolved by the caller.
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+async function assertNoSymlinkComponents(root: string, candidate: string): Promise<void> {
+  const relative = path.relative(root, candidate);
+  assertInside(root, candidate);
+  let current = root;
+  for (const component of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, component);
+    try {
+      if ((await fs.lstat(current)).isSymbolicLink()) {
+        throw new Error(`Scoped path cannot contain a symlink: ${candidate}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return;
+    }
+  }
 }
 
 async function secureMkdir(cwd: string, candidate: string): Promise<void> {
-  const absolute = await assertMutationPath(cwd, candidate);
-  const root = await fs.realpath(cwd);
+  const resolved = await resolveScopedPath(cwd, candidate, true);
+  const absolute = resolved.canonical;
+  const root = resolved.root;
   const relative = path.relative(root, absolute);
   let current = root;
   for (const component of relative.split(path.sep).filter(Boolean)) {

@@ -127,15 +127,6 @@ export async function assertPathAllowed(
   candidate: string,
 ): Promise<string> {
   const lexical = path.resolve(policy.executionRoot, candidate);
-  if (!isInside(policy.executionRoot, lexical)) {
-    throw rejection(
-      "project-scope-violation",
-      "preflight",
-      `Path is outside the execution workspace: ${candidate}`,
-      policy.effective,
-      [candidate],
-    );
-  }
   let canonical: string;
   try {
     canonical = await canonicalPath(lexical);
