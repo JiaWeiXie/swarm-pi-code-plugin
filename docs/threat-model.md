@@ -76,11 +76,16 @@ Claude Code; the Codex manifest does not declare hooks.
 The strict read-only implementation verifier is a semantic model review, not a
 trusted command-running verifier. Likewise, experiment `cleanReplayPassed` is
 schema-validated evidence reported by the experimenter, not a control-plane
-replay receipt. `false` is accepted only to record a fully unexecuted,
-evidence-backed `inconclusive` result; it cannot satisfy an executed,
-`supported`, or `refuted` experiment. Until trusted verification executes
-allowlisted commands, Hosts must run the relevant build, lint, typecheck, and
-tests before delivery.
+replay receipt. `false` is accepted only to record a fully unexecuted or
+preflight-blocked, evidence-backed `inconclusive` result; a preflight-blocked
+report must contain exactly the declared simple setup command and declared
+`node --check <file>` test, with pairwise-distinct lifecycle commands plus
+syntax or blocking evidence. Shell composition and related expansion or
+redirection constructs are rejected for this exception. These checks do not
+inspect setup-script semantics, and the exception cannot satisfy a workload-
+executed, `supported`, or `refuted` experiment. Until trusted verification
+executes allowlisted commands, Hosts must run the relevant build, lint,
+typecheck, and tests before delivery.
 
 Decision Mode, Advisor, and `first-principles-qds-v1` do not form a safety
 boundary. Advisor output is untrusted evidence. The doctrine value is currently

@@ -1491,6 +1491,7 @@ test("discover runs fixed stages, propagates prior evidence, and parses experime
     true,
   );
   assert.match(prompts[1] ?? "", /repository evidence exists/);
+  assert.match(prompts[1] ?? "", /review-gate:approved/);
   assert.match(prompts[2] ?? "", /supported/);
   assert.equal(
     "discovery" in result &&

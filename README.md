@@ -580,11 +580,17 @@ The experiment report must include reproducibility, test, evidence, metric,
 tolerance, and reported clean-replay fields and concludes only `supported`,
 `refuted`, or `inconclusive`. Its artifact is permanently non-deliverable. The
 control plane accepts `cleanReplayPassed: false` only for an explicitly
-unexecuted `inconclusive` result with no commands or tests and with evidence of
-the blocker. Every executed, `supported`, or `refuted` result still requires
-recorded commands, tests, evidence, and `cleanReplayPassed: true`. The control
-plane schema-validates the replay report but does not independently execute
-every recorded experiment command.
+unexecuted `inconclusive` result with no commands or tests, or for an
+`inconclusive` parser-preflight failure that records exactly the declared setup
+command followed by the declared `node --check <file>` test, with the same test
+recorded in `testsRun` and explicit blocking evidence. That exception requires
+six pairwise-distinct lifecycle commands and a setup command with no shell
+composition, redirection, expansion, substitution, assignment, control flow,
+or here-document. Every workload-executed, `supported`, or `refuted` result
+still requires recorded commands, tests, evidence, and
+`cleanReplayPassed: true`. These checks validate worker-reported command shape;
+the control plane does not inspect setup-script semantics or independently
+execute every recorded experiment command.
 
 An `ActionRecommendation` is inert. Only a successful `implement` or `setup`
 parent plus explicit user confirmation can start an isolated `host-broker`

@@ -1,3 +1,4 @@
+import { analyzeShellCommand } from "../policy/read-only-shell.js";
 export function parseDiscoveryStageOutput(stage, output) {
     const value = parseObject(output);
     if (stage === "research") {
@@ -11,12 +12,18 @@ export function parseDiscoveryStageOutput(stage, output) {
     if (stage === "experiment") {
         const experimentSpec = parseExperimentSpec(value.experimentSpec);
         const conclusion = experimentConclusion(value.conclusion);
-        const execution = parseExperimentExecution(value.execution, conclusion);
-        const unexecuted = !execution.cleanReplayPassed;
+        const execution = parseExperimentExecution(value.execution, conclusion, experimentSpec);
+        const unexecuted = execution.commandsRun.length === 0 && execution.testsRun.length === 0;
         return {
             artifact: { stage, experimentSpec, execution, conclusion },
-            verification: unexecuted
-                ? ["experiment-spec-complete", "explicit-evidence-present", "unexecuted-inconclusive"]
+            verification: !execution.cleanReplayPassed
+                ? unexecuted
+                    ? ["experiment-spec-complete", "explicit-evidence-present", "unexecuted-inconclusive"]
+                    : [
+                        "experiment-spec-complete",
+                        "explicit-evidence-present",
+                        "preflight-blocked-inconclusive",
+                    ]
                 : [
                     "experiment-spec-complete",
                     "commands-recorded",
@@ -119,7 +126,7 @@ function parseExperimentSpec(input) {
         cleanReplayCommand: text(value.cleanReplayCommand, "experimentSpec.cleanReplayCommand"),
     };
 }
-function parseExperimentExecution(input, conclusion) {
+function parseExperimentExecution(input, conclusion, experimentSpec) {
     const value = record(input, "execution");
     if (value.cleanReplayPassed !== true && value.cleanReplayPassed !== false) {
         throw new Error("execution.cleanReplayPassed must be a boolean");
@@ -128,9 +135,10 @@ function parseExperimentExecution(input, conclusion) {
     const testsRun = strings(value.testsRun, "execution.testsRun");
     const evidence = strings(value.evidence, "execution.evidence", true);
     const unexecuted = commandsRun.length === 0 && testsRun.length === 0;
+    const preflightBlocked = isPreflightBlocked({ commandsRun, testsRun, evidence }, experimentSpec);
     if (value.cleanReplayPassed === false) {
-        if (conclusion !== "inconclusive" || !unexecuted) {
-            throw new Error("execution.cleanReplayPassed may be false only for an unexecuted inconclusive experiment");
+        if (conclusion !== "inconclusive" || (!unexecuted && !preflightBlocked)) {
+            throw new Error("execution.cleanReplayPassed may be false only for an unexecuted or parser-preflight-blocked inconclusive experiment");
         }
     }
     else if (commandsRun.length === 0 || testsRun.length === 0) {
@@ -142,6 +150,53 @@ function parseExperimentExecution(input, conclusion) {
         evidence,
         cleanReplayPassed: value.cleanReplayPassed,
     };
+}
+function isPreflightBlocked(execution, experimentSpec) {
+    const lifecycleCommands = [
+        experimentSpec.setupCommand,
+        experimentSpec.runCommand,
+        experimentSpec.testCommand,
+        experimentSpec.verifyCommand,
+        experimentSpec.cleanupCommand,
+        experimentSpec.cleanReplayCommand,
+    ];
+    if (new Set(lifecycleCommands).size !== lifecycleCommands.length ||
+        !isSimpleShellCommand(experimentSpec.setupCommand) ||
+        !isNodeParserCheck(experimentSpec.testCommand) ||
+        execution.commandsRun.length !== 2 ||
+        execution.testsRun.length !== 1 ||
+        execution.commandsRun[0] !== experimentSpec.setupCommand ||
+        execution.commandsRun[1] !== experimentSpec.testCommand ||
+        execution.testsRun[0] !== experimentSpec.testCommand) {
+        return false;
+    }
+    return execution.evidence.some((item) => /syntax|parse|parser|error|fail|blocked|denied|not permitted/i.test(item));
+}
+function isNodeParserCheck(command) {
+    const analysis = analyzeShellCommand(command);
+    if (!isSimpleShellAnalysis(analysis))
+        return false;
+    const invocation = analysis.commands[0];
+    return (invocation?.executable === "node" &&
+        invocation.args.length === 2 &&
+        invocation.args[0] === "--check" &&
+        Boolean(invocation.args[1]) &&
+        !invocation.args[1].startsWith("-"));
+}
+function isSimpleShellCommand(command) {
+    return isSimpleShellAnalysis(analyzeShellCommand(command));
+}
+function isSimpleShellAnalysis(analysis) {
+    return (!analysis.malformed &&
+        analysis.commands.length === 1 &&
+        analysis.operators.length === 0 &&
+        analysis.redirectionTargets.length === 0 &&
+        !analysis.hasExpansion &&
+        !analysis.hasCommandSubstitution &&
+        !analysis.hasBackticks &&
+        !analysis.hasHereDoc &&
+        !analysis.hasControlFlow &&
+        !analysis.hasAssignments);
 }
 function experimentConclusion(value) {
     if (value === "supported" || value === "refuted" || value === "inconclusive")

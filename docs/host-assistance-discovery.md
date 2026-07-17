@@ -220,19 +220,29 @@ Its schema requires:
 - metrics and tolerance;
 - for an executed result: non-empty commands run, tests run, explicit evidence,
   and `cleanReplayPassed: true`;
-- for an unexecuted result only: empty command/test arrays, explicit evidence of
-  the blocker, `cleanReplayPassed: false`, and conclusion `inconclusive`;
+- for an unexecuted result: empty command/test arrays, explicit evidence of the
+  blocker, `cleanReplayPassed: false`, and conclusion `inconclusive`; a
+  preflight-blocked result may instead record exactly the declared setup
+  command followed by the declared `node --check <file>` test, repeat that test
+  in `testsRun`, and include explicit syntax/blocking evidence with the same
+  conclusion;
+- for the preflight-blocked exception: all six lifecycle commands must be
+  pairwise distinct, and the setup command must contain no shell composition,
+  redirection, expansion, substitution, assignment, control flow, or
+  here-document;
 - one conclusion: `supported`, `refuted`, or `inconclusive`.
 
-An executed `inconclusive` result still requires a successful clean replay.
-`supported` and `refuted` can never use the unexecuted exception.
+An experiment that reaches workload execution still requires a successful clean
+replay, even when its conclusion is `inconclusive`. `supported` and `refuted`
+can never use either the unexecuted or preflight-blocked exception.
 
 The runner validates the schema, changed paths, and isolated worktree before
 recording the report. The artifact is always `kind: experiment` and
 `deliverable: false`; `jobs materialize` must reject it.
 
-Current limitation: the control plane validates the reported commands and
-clean-replay result but does not independently execute the complete replay
+Current limitation: the control plane validates the shape and declared phases
+of the reported commands plus the clean-replay result. It does not inspect the
+semantics of the setup script or independently execute the complete replay
 sequence. Treat the report as structured experiment evidence, not as a trusted
 deterministic replay receipt.
 
