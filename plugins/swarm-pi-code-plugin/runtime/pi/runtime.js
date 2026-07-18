@@ -1,14 +1,14 @@
-import { createAgentSession, SessionManager, SettingsManager, } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, ModelRuntime, SessionManager, SettingsManager, } from "@earendil-works/pi-coding-agent";
 import { createTrustedResourceLoader } from "../policy/extension.js";
 import { createPiEnvironment } from "./environment.js";
 import { createScopedFilesystemTools, createScopedMutationTools } from "./scoped-tools.js";
 import { toolsForMode } from "./tool-profiles.js";
 import { createHostAssistanceTool } from "./host-assistance-tool.js";
 export async function createWorkerSession(options) {
-    const environment = options.authStorage && options.modelRegistry
-        ? { authStorage: options.authStorage, modelRegistry: options.modelRegistry }
-        : createPiEnvironment(options.modelConfiguration);
-    const { authStorage, modelRegistry } = environment;
+    const environment = options.modelRuntime
+        ? { modelRuntime: options.modelRuntime }
+        : await createPiEnvironment(options.modelConfiguration);
+    const { modelRuntime } = environment;
     const settingsManager = SettingsManager.inMemory();
     const resourceLoader = await createTrustedResourceLoader({
         cwd: options.cwd,
@@ -45,8 +45,7 @@ export async function createWorkerSession(options) {
     const allowedToolNames = workerToolAllowlist(options.mode, customTools);
     return createAgentSession({
         cwd: options.cwd,
-        authStorage,
-        modelRegistry,
+        modelRuntime,
         sessionManager: SessionManager.inMemory(),
         settingsManager,
         resourceLoader,

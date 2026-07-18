@@ -14,4 +14,4 @@ Read `../references/host-protocol.md`, then classify the request and use the mat
 
 When a worker is blocked by missing context, let the Host route a bounded assistance request and return the cited result to the same session. Never choose the underlying Web, Context7, connector, or skill directly.
 
-Keep the worktree read-only even in lenient mode. Do not self-approve, edit files, or turn a plan/review into an implementation. Validate terminal claims and report failure plainly.
+Keep the worktree read-only even in lenient, autopilot, or full-access mode. Do not self-approve, edit files, or turn a plan/review into an implementation. Validate terminal claims and report failure plainly.

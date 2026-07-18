@@ -48,11 +48,11 @@ repository instructions, or a supervisor approval.
 | Hook or event stream leaks worker context | SessionStart recovery only, strict event allowlist, no prompt/output/log/token fields, Codex hook trust review |
 | Network destination changes after approval | destination checks at connect time, hostname and resolved-address policy |
 | Provider protocol is guessed incorrectly | explicit wire protocol, canonical roots, one protocol per connection |
-| Browser or job artifact leaks a credential | opaque draft IDs, AuthStorage-only secrets, response and journal redaction |
+| Browser or job artifact leaks a credential | opaque draft IDs, CredentialStore-only secrets, response and journal redaction |
 | OAuth flow outlives setup | bounded polling, AbortSignal, timeout, cancel and server-dispose cleanup |
 | Literal header triggers Pi config syntax | controlled allowlist, control-character rejection, literal escaping |
 | Settings change during a background job | immutable provider/model snapshot, PolicySnapshot v3, request v5 hashes |
-| Credential is revoked after submission | resolve current AuthStorage at execution and fail explicitly |
+| Credential is revoked after submission | resolve current CredentialStore at execution and fail explicitly |
 | Background mutation conflicts with host | job-owned worktree and branch, no automatic integration |
 | Logs expose source or secrets | redacted summaries by default, mode 0600 artifacts, bounded diagnostics |
 

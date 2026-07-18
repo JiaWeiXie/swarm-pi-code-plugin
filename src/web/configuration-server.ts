@@ -3,9 +3,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
-
 import type { Host } from "../core/contracts.js";
+import { createFileCredentialStore } from "../pi/credentials.js";
 import { CredentialDraftVault, OAuthSessionManager } from "../providers/credentials.js";
 import { type CustomProviderConfiguration, type ProviderProfile } from "../state/model-config.js";
 import {
@@ -71,7 +70,7 @@ export async function startConfigurationServer(
   const credentialVault = new CredentialDraftVault();
   const oauthSessions = new OAuthSessionManager(
     credentialVault,
-    AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE),
+    createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE),
     { timeoutMs: Math.min(timeoutMs, 10 * 60 * 1000) },
   );
   let origin = "";
@@ -191,7 +190,7 @@ export async function startConfigurationServer(
       if (request.method === "POST" && url.pathname === "/api/oauth/start") {
         assertJsonRequest(request, origin);
         const oauth = normalizeOAuthStart(await readJsonBody(request));
-        json(response, 202, oauthSessions.start(oauth.provider, oauth.preferredMethod));
+        json(response, 202, await oauthSessions.start(oauth.provider, oauth.preferredMethod));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/oauth/status") {

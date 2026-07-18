@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 
-import { CredentialDraftVault, OAuthSessionManager } from "../src/providers/credentials.js";
 import { customProviderHeaderVariable } from "../src/pi/environment.js";
+import { CredentialDraftVault, OAuthSessionManager } from "../src/providers/credentials.js";
 
 test("credential drafts expose only opaque metadata", () => {
   const vault = new CredentialDraftVault();
@@ -35,11 +35,12 @@ test("custom-header drafts keep secret values in provider-scoped credential env"
 
 test("ChatGPT subscription OAuth supports device-code login without exposing tokens", async () => {
   const vault = new CredentialDraftVault();
-  const manager = new OAuthSessionManager(vault, AuthStorage.inMemory(), {
+  const manager = new OAuthSessionManager(vault, new InMemoryCredentialStore(), {
     timeoutMs: 5_000,
-    login: async (storage, provider, callbacks) => {
+    login: async (_runtime, provider, interaction) => {
       assert.equal(provider, "openai-codex");
-      const method = await callbacks.onSelect({
+      const method = await interaction.prompt({
+        type: "select",
         message: "Choose login method",
         options: [
           { id: "browser", label: "Browser" },
@@ -47,21 +48,22 @@ test("ChatGPT subscription OAuth supports device-code login without exposing tok
         ],
       });
       assert.equal(method, "device_code");
-      callbacks.onDeviceCode({
+      interaction.notify({
+        type: "device_code",
         userCode: "ABCD-EFGH",
         verificationUri: "https://auth.openai.com/codex/device",
         expiresInSeconds: 900,
       });
-      storage.set(provider, {
+      return {
         type: "oauth",
         access: "access-token-secret",
         refresh: "refresh-token-secret",
         expires: Date.now() + 3_600_000,
-      });
+      };
     },
   });
 
-  const started = manager.start("openai-codex", "device_code");
+  const started = await manager.start("openai-codex", "device_code");
   let status = await manager.waitForStatus(started.id, started.revision, 1_000);
   while (status.status !== "completed") {
     status = await manager.waitForStatus(started.id, status.revision, 1_000);
@@ -77,13 +79,19 @@ test("ChatGPT subscription OAuth supports device-code login without exposing tok
 
 test("OAuth prompts use revision-fenced responses and cancellation", async () => {
   const vault = new CredentialDraftVault();
-  const manager = new OAuthSessionManager(vault, AuthStorage.inMemory(), {
+  const manager = new OAuthSessionManager(vault, new InMemoryCredentialStore(), {
     timeoutMs: 5_000,
-    login: async (_storage, _provider, callbacks) => {
-      await callbacks.onPrompt({ message: "Enter code", placeholder: "code" });
+    login: async (_runtime, _provider, interaction) => {
+      await interaction.prompt({ type: "text", message: "Enter code", placeholder: "code" });
+      return {
+        type: "oauth",
+        access: "access-token-secret",
+        refresh: "refresh-token-secret",
+        expires: Date.now() + 3_600_000,
+      };
     },
   });
-  const started = manager.start("anthropic");
+  const started = await manager.start("anthropic");
   const waiting =
     started.status === "awaiting-input"
       ? started

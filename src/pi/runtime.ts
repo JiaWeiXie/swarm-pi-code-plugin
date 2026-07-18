@@ -1,9 +1,8 @@
 import {
   createAgentSession,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
-  type AuthStorage,
-  type ModelRegistry,
   type CreateAgentSessionOptions,
 } from "@earendil-works/pi-coding-agent";
 
@@ -45,16 +44,14 @@ export interface CreateWorkerSessionOptions {
     request: HostAssistanceRequest,
     signal?: AbortSignal,
   ) => Promise<HostAssistanceResult>;
-  authStorage?: AuthStorage;
-  modelRegistry?: ModelRegistry;
+  modelRuntime?: ModelRuntime;
 }
 
 export async function createWorkerSession(options: CreateWorkerSessionOptions) {
-  const environment =
-    options.authStorage && options.modelRegistry
-      ? { authStorage: options.authStorage, modelRegistry: options.modelRegistry }
-      : createPiEnvironment(options.modelConfiguration);
-  const { authStorage, modelRegistry } = environment;
+  const environment = options.modelRuntime
+    ? { modelRuntime: options.modelRuntime }
+    : await createPiEnvironment(options.modelConfiguration);
+  const { modelRuntime } = environment;
   const settingsManager = SettingsManager.inMemory();
   const resourceLoader = await createTrustedResourceLoader({
     cwd: options.cwd,
@@ -94,8 +91,7 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
 
   return createAgentSession({
     cwd: options.cwd,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     sessionManager: SessionManager.inMemory(),
     settingsManager,
     resourceLoader,

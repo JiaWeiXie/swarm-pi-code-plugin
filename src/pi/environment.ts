@@ -1,4 +1,5 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { CredentialStore } from "@earendil-works/pi-ai";
 
 import { getProviderDefinition } from "../providers/capabilities.js";
 import { wireProtocolForRuntimeApi } from "../providers/endpoints.js";
@@ -11,6 +12,7 @@ import {
   type ModelConfiguration,
   type ProviderProfile,
 } from "../state/model-config.js";
+import { createFileCredentialStore, OverlayCredentialStore } from "./credentials.js";
 
 // Pi's thinking-level vocabulary (off/minimal/low/medium/high/xhigh/max) is
 // wider than any single provider's accepted reasoning.effort set. Custom
@@ -43,33 +45,44 @@ function customProviderEffortMap(
 }
 
 export interface PiEnvironment {
-  authStorage: AuthStorage;
-  modelRegistry: ModelRegistry;
+  credentials: CredentialStore;
+  modelRuntime: ModelRuntime;
 }
 
 export interface PiEnvironmentOptions {
-  authStorage?: AuthStorage | undefined;
+  credentials?: CredentialStore | undefined;
+  modelRuntime?: ModelRuntime | undefined;
+  allowModelNetwork?: boolean | undefined;
 }
 
-export function createPiEnvironment(
+export async function createPiEnvironment(
   configuration: ModelConfiguration,
   env: NodeJS.ProcessEnv = process.env,
   options: PiEnvironmentOptions = {},
-): PiEnvironment {
-  const persistentAuth =
-    options.authStorage ?? AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-  const authStorage = withProviderEnvironment(
-    persistentAuth,
+): Promise<PiEnvironment> {
+  const delegate =
+    options.credentials ?? createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  const credentials = new OverlayCredentialStore(
+    delegate,
     providerEnvironmentOverlays(configuration),
   );
-  const modelRegistry = ModelRegistry.create(authStorage, env.SWARM_PI_CODE_PLUGIN_MODELS_FILE);
-  applyProviderProfiles(modelRegistry, configuration);
-  applyCustomProviders(modelRegistry, configuration);
-  return { authStorage, modelRegistry };
+  const modelRuntime =
+    options.modelRuntime ??
+    (await ModelRuntime.create({
+      credentials,
+      ...(env.SWARM_PI_CODE_PLUGIN_MODELS_FILE
+        ? { modelsPath: env.SWARM_PI_CODE_PLUGIN_MODELS_FILE }
+        : {}),
+      allowModelNetwork: options.allowModelNetwork ?? false,
+    }));
+  applyProviderProfiles(modelRuntime, configuration);
+  applyCustomProviders(modelRuntime, configuration);
+  await modelRuntime.refresh({ allowNetwork: false });
+  return { credentials, modelRuntime };
 }
 
 export function applyProviderProfiles(
-  registry: ModelRegistry,
+  registry: ModelRuntime,
   configuration: ModelConfiguration,
 ): void {
   for (const profile of configuration.providerProfiles) {
@@ -81,14 +94,14 @@ export function applyProviderProfiles(
 }
 
 export function applyCustomProviders(
-  registry: ModelRegistry,
+  registry: ModelRuntime,
   configuration: ModelConfiguration,
 ): void {
   for (const provider of configuration.customProviders) {
     const authMethod = provider.auth?.method ?? (provider.requiresApiKey ? "api-key" : "none");
     const headers = resolvedHeaders(provider.id, provider.headers ?? []);
     const effortMap = customProviderEffortMap(provider);
-    const input: Parameters<ModelRegistry["registerProvider"]>[1] = {
+    const input: Parameters<ModelRuntime["registerProvider"]>[1] = {
       name: provider.name,
       baseUrl: provider.baseUrl,
       apiKey:
@@ -153,27 +166,6 @@ export function providerEnvironmentOverlays(
     if (Object.keys(overlay).length) overlays.set(profile.provider, overlay);
   }
   return overlays;
-}
-
-function withProviderEnvironment(
-  storage: AuthStorage,
-  overlays: Map<string, Record<string, string>>,
-): AuthStorage {
-  if (overlays.size === 0) return storage;
-  return new Proxy(storage, {
-    get(target, property) {
-      if (property === "getProviderEnv") {
-        return (provider: string): Record<string, string> | undefined => {
-          const stored = target.getProviderEnv(provider);
-          const overlay = overlays.get(provider);
-          if (!stored && !overlay) return undefined;
-          return { ...stored, ...overlay };
-        };
-      }
-      const value = Reflect.get(target, property, target) as unknown;
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
 }
 
 function profileHeaders(profile: ProviderProfile): Record<string, string> {

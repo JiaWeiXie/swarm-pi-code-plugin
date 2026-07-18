@@ -365,6 +365,12 @@ ask 高於 allow。
   判斷；不確定時依設定拒絕或等待 supervisor。
 - **Lenient**：在 OS Sandbox 仍存在的前提下提供較寬的 shell／network。不是「沒有
   Sandbox」，但 Worker 可見資料更可能被送往外部服務。
+- **Autopilot**：維持與 Lenient 相同的 OS Sandbox 隔離（同樣需要沙盒後端），但會讓
+  例行 shell 在無人監督下自動執行，不會停下等待 supervisor；這種例行 shell 自動化是
+  該模式的內建特性，而 git／deploy 仍必須通過人工核准 gate。
+- **Full-access**：移除 Plugin 自己的 OS Sandbox，讓 Worker 的 Bash 不再被包裹，因此
+  與 Lenient 不同，就本 Plugin 而言它*確實*未沙盒化；Worker 的觸及範圍完全取決於 Host
+  自己的沙盒。它不需要沙盒後端，因此一律可選。
 - **Authorization**：針對某一個動作判斷允許、詢問或拒絕。Sandbox 是外層圍欄，
   authorization 是圍欄內的通行判斷；兩者都必須通過。
 - **Classifier**：專門閱讀「提議中的動作 + 有限 policy context」並評估風險的模型。

@@ -7,6 +7,7 @@ import { createPiEnvironment } from "./environment.js";
 export interface ModelCatalog {
   all?(): PiModel[];
   available(): PiModel[];
+  refresh?(): Promise<void>;
   displayName?(provider: string): string;
   authStatus?(provider: string): {
     configured: boolean;
@@ -72,16 +73,22 @@ export function describeProviders(
 export function createModelCatalog(
   configuration: ModelConfiguration,
   env: NodeJS.ProcessEnv = process.env,
-): ModelCatalog {
-  const { modelRegistry: registry } = createPiEnvironment(configuration, env);
-
-  return {
-    all: () => registry.getAll(),
-    available: () => registry.getAvailable(),
-    displayName: (provider) => registry.getProviderDisplayName(provider),
-    authStatus: (provider) => registry.getProviderAuthStatus(provider),
-    error: () => registry.getError(),
-  };
+  options: { refresh?: boolean } = {},
+): Promise<ModelCatalog> {
+  return createPiEnvironment(configuration, env).then(async ({ modelRuntime: runtime }) => {
+    const catalog: ModelCatalog = {
+      all: () => [...runtime.getModels()],
+      available: () => [...runtime.getAvailableSnapshot()],
+      refresh: async () => {
+        await runtime.refresh({ allowNetwork: true });
+      },
+      displayName: (provider) => runtime.getProvider(provider)?.name ?? provider,
+      authStatus: (provider) => runtime.getProviderAuthStatus(provider),
+      error: () => runtime.getError(),
+    };
+    if (options.refresh) await catalog.refresh!();
+    return catalog;
+  });
 }
 
 export function selectModel(models: PiModel[], requested?: string): PiModel | undefined {

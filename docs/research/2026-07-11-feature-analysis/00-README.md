@@ -1,53 +1,35 @@
-# Feature Analysis: Current Index
+# 功能分析：目前索引
 
-This directory is the maintained decision record for the feature research that
-started on 2026-07-11. It is internal planning material, not user guidance.
-Current product behavior belongs in the root READMEs and the references under
-`docs/`.
+此目錄是 2026-07-11 開始的功能研究之維護決策紀錄。這是內部規劃資料，不是使用者指南。目前的產品行為以根目錄 README 與 `docs/` 下的參考文件為準。
 
-The original research grew into several overlapping proposal lists. Those
-superseded drafts were removed on 2026-07-13 after their surviving decisions
-were consolidated here. Git history remains the source for the original
-interviews, line-level observations, and proposal numbering.
+原始研究逐漸形成數份互相重疊的提案清單。這些已被取代的草稿在 2026-07-13 移除，剩餘決策已整合至此。Git 歷史仍是原始訪談、逐行觀察與提案編號的來源。
 
-## Maintained Documents
+## 維護中的文件
 
-| Document | Purpose |
+| 文件 | 用途 |
 | --- | --- |
-| [01-project-analysis.md](01-project-analysis.md) | Current 0.5.0 capability and gap assessment |
-| [04-first-principles-review.md](04-first-principles-review.md) | Durable Question/Delete/Simplify decisions |
-| [05-roadmap.md](05-roadmap.md) | Evidence-based remaining roadmap |
-| [09-claude-codex-concurrency-plan.md](09-claude-codex-concurrency-plan.md) | Shared-control-plane concurrency contract and residual risks |
-| [10-sandbox-host-autonomy-plan.md](10-sandbox-host-autonomy-plan.md) | Discover Sandbox lifecycle and Host-first adjudication implementation record |
+| [01-project-analysis.md](01-project-analysis.md) | 目前 0.5.0 能力與缺口評估 |
+| [04-first-principles-review.md](04-first-principles-review.md) | 持久的 Question/Delete/Simplify 決策 |
+| [05-roadmap.md](05-roadmap.md) | 以證據為基礎的剩餘路線圖 |
+| [09-claude-codex-concurrency-plan.md](09-claude-codex-concurrency-plan.md) | 共用控制平面的並行契約與剩餘風險 |
+| [10-sandbox-host-autonomy-plan.md](10-sandbox-host-autonomy-plan.md) | Discover Sandbox 生命週期與 Host 優先裁決的實作紀錄 |
 
-## Current Outcome
+## 目前結果
 
-The research no longer maps one proposal to one feature. The implemented
-product is better described as four capability groups:
+研究結果不再是一項提案對應一項功能。實作後的產品更適合描述為四組能力：
 
-1. A bounded delegation control plane: enforced project policy, scoped tools,
-   approval leases, durable jobs, worktree artifacts, audit export, and
-   explicit materialization.
-2. Generic Host Assistance: a worker can request bounded workspace, Web,
-   documentation, paper, connector, skill, or human-decision help and consume
-   one correlated response in the same live session.
-3. Discovery: a fixed research → experiment → convergence workflow with
-   schema-gated reports, human gates, and an isolated non-materializable
-   experiment child.
-4. Isolated Host Actions: an inert recommendation can become a separate
-   `host-broker` child only after explicit confirmation and policy checks.
+1. 有界的委派控制平面：受強制執行的專案政策、限定範圍的工具、核准租約、持久化工作、工作樹產物、稽核匯出，以及明確的物化操作。
+2. 通用 Host Assistance：Worker 可以請求有界的工作區、Web、文件、論文、連接器、技能或人工決策協助，並在同一個執行中的工作階段消費一個關聯回應。
+3. Discovery：固定的研究 → 實驗 → 收斂流程，搭配結構描述閘門、人工閘門，以及隔離且不可物化的實驗子工作。
+4. 隔離的 Host Actions：只有在明確確認與政策檢查後，惰性的建議才可以轉成獨立的 `host-broker` 子工作。
 
-Several planned guarantees remain incomplete. In particular, the current
-implementation does not yet provide a deterministic command-running verifier,
-a runtime Review Coordinator, automatic Question/Delete/Simplify convergence,
-or a control-plane replay of experiment commands. These gaps are first-class
-roadmap items and must not be described as completed behavior.
+幾項規劃中的保證仍未完成。尤其是，目前實作尚未提供決定性的命令執行驗證器、執行期 Review Coordinator、自動 Question/Delete/Simplify 收斂，或實驗命令的控制平面重播。這些缺口是正式的路線圖項目，不得描述為已完成的行為。
 
-## Explicit Non-goals
+## 明確的非目標
 
-- arbitrary user-defined workflow DAGs;
-- an external semantic/result cache for repository answers;
-- a native MCP client inside Pi workers;
-- cross-job or cross-workspace model-session reuse;
-- automatic execution of Host recommendations;
-- automatic commit, merge, push, deployment, or experiment materialization.
+- 任意的使用者自訂工作流程 DAG；
+- 外部的儲存庫答案語意／結果快取；
+- Pi Worker 內建的原生 MCP 用戶端；
+- 跨工作或跨工作區的模型工作階段重用；
+- 自動執行 Host 建議；
+- 自動 commit、merge、push、部署或物化實驗結果。

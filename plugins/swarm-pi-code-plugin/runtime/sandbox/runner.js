@@ -68,6 +68,35 @@ export async function createSandboxRunner(options) {
         },
     };
 }
+/**
+ * Full-access runner: the same {@link SandboxRunner} interface, but the bash tool
+ * runs commands directly with NO OS sandbox (no Seatbelt/Bubblewrap, no
+ * SandboxManager). This deliberately removes the plugin's own confinement — any
+ * remaining boundary comes only from the host process's own sandbox, if the host
+ * applied one. It needs no sandbox backend, so (like strict) it never checks
+ * availability and never participates in the wrapped-runner singleton.
+ *
+ * The worker's shell inherits the real environment (so ordinary tools behave
+ * normally), minus the plugin's own injected secrets (`SWARM_PI_CODE_PLUGIN_*`:
+ * provider API keys, auth-file path, worker token) which a shell never needs.
+ */
+export async function createUnsandboxedRunner(options) {
+    const cwd = await fs.realpath(await resolveWorkspaceRoot(options.cwd));
+    const env = options.env ?? process.env;
+    const operations = unsandboxedBashOperations(env);
+    let disposed = false;
+    return {
+        cwd,
+        mode: options.mode,
+        createBashTool() {
+            return createBashToolDefinition(cwd, { operations });
+        },
+        async dispose() {
+            disposed = true;
+            void disposed;
+        },
+    };
+}
 export async function sandboxConfiguration(cwd, tempRoot, mode, env = process.env, sandboxMode = "lenient", trustedDomains = [], boundProjectPolicy, allowGitMetadataRead = false) {
     cwd = await fs.realpath(cwd);
     if (boundProjectPolicy && boundProjectPolicy.executionRoot !== cwd) {
@@ -220,6 +249,86 @@ async function executeSandboxed(command, cwd, tempRoot, env, onData, signal, tim
         signal?.removeEventListener("abort", stop);
         SandboxManager.cleanupAfterCommand();
     }
+}
+function unsandboxedBashOperations(env) {
+    let queue = Promise.resolve();
+    return {
+        async exec(command, cwd, { onData, signal, timeout }) {
+            let release;
+            const previous = queue;
+            queue = new Promise((resolve) => {
+                release = resolve;
+            });
+            await previous;
+            try {
+                return await executeUnsandboxed(command, cwd, env, onData, signal, timeout);
+            }
+            finally {
+                release();
+            }
+        },
+    };
+}
+async function executeUnsandboxed(command, cwd, env, onData, signal, timeout) {
+    if (signal?.aborted)
+        throw new Error("aborted");
+    const child = spawn("/bin/bash", ["-c", command], {
+        cwd,
+        detached: process.platform !== "win32",
+        env: fullAccessEnvironment(env),
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
+    let timedOut = false;
+    let timeoutHandle;
+    const stop = () => killProcessTree(child.pid);
+    if (timeout !== undefined && timeout > 0) {
+        timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            stop();
+        }, timeout * 1000);
+    }
+    if (signal) {
+        if (signal.aborted)
+            stop();
+        else
+            signal.addEventListener("abort", stop, { once: true });
+    }
+    try {
+        const exitCode = await new Promise((resolve, reject) => {
+            child.once("error", reject);
+            child.once("close", resolve);
+        });
+        if (signal?.aborted)
+            throw new Error("aborted");
+        if (timedOut)
+            throw new Error(`timeout:${timeout}`);
+        return { exitCode };
+    }
+    finally {
+        if (timeoutHandle)
+            clearTimeout(timeoutHandle);
+        signal?.removeEventListener("abort", stop);
+    }
+}
+/**
+ * Environment for full-access shells: the real environment (so ordinary tools
+ * work), minus the plugin's own injected secrets. The `SWARM_PI_CODE_PLUGIN_*`
+ * prefix covers provider API keys, the auth-file path, and the worker token; a
+ * shell never needs them. The user's own credentials (AWS, kube, etc.) are kept
+ * because full-access work may legitimately require them.
+ */
+function fullAccessEnvironment(env) {
+    const safe = {};
+    for (const [name, value] of Object.entries(env)) {
+        if (name.startsWith("SWARM_PI_CODE_PLUGIN_"))
+            continue;
+        safe[name] = value;
+    }
+    // Keep automation from hanging on an interactive git credential prompt.
+    safe.GIT_TERMINAL_PROMPT = "0";
+    return safe;
 }
 function killProcessTree(pid) {
     if (!pid)

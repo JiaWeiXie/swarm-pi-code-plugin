@@ -14,7 +14,7 @@ import { acquireWorktreeLease, assertWorktreeBaseline, captureIgnoredPaths, capt
 import { executeSession } from "../pi/execute.js";
 import { createModelCatalog, describeModels, describeProviders, modelId, orderModels, } from "../pi/models.js";
 import { createWorkerSession } from "../pi/runtime.js";
-import { createSandboxRunner } from "../sandbox/runner.js";
+import { createSandboxRunner, createUnsandboxedRunner, } from "../sandbox/runner.js";
 import { PiPolicyClassifier } from "../policy/classifier.js";
 import { ClassifierDecisionCache, PolicyEngine, actionFingerprint, assessPolicyActionEffect, } from "../policy/engine.js";
 import { assertTaskAdmitted, assertPathAllowed, assertChangedPathsAllowed, bindProjectPolicy, compileEffectiveProjectPolicy, loadRepositoryDenyRules, ProjectPolicyError, renderProjectPolicy, } from "../policy/project-policy.js";
@@ -29,20 +29,32 @@ import { spawnBackgroundWorker } from "./background.js";
 import { buildWorkerPrompt } from "./prompts.js";
 import { assertPolicySnapshotValid, assertRoleCompatible, createPolicySnapshot, defaultRoleForTask, defaultHostAssistancePolicy, listDefaultRoles, isWorkerRole, normalizeAdaptivePolicy, resolveRolePolicy, } from "../orchestration/roles.js";
 const approvalQueues = new Map();
-export function defaultDependencies(modelConfiguration) {
+export async function defaultDependencies(modelConfiguration, options = {}) {
     return {
-        catalog: createModelCatalog(modelConfiguration),
+        catalog: await createModelCatalog(modelConfiguration, process.env, options.refreshModels === undefined ? {} : { refresh: options.refreshModels }),
         readFile: (file) => fs.readFile(file, "utf8"),
         createSession: async (options) => {
             const { session } = await createWorkerSession({ ...options, modelConfiguration });
             return session;
         },
         createSandboxRunner,
+        createUnsandboxedRunner,
         createClassifier: (options) => new PiPolicyClassifier({
             ...options,
             modelConfiguration,
         }),
     };
+}
+/**
+ * A child job must never silently inherit the autonomy modes — an isolated child
+ * (a discovery experiment or a Host Action delivery child) running unsandboxed
+ * (full-access) or auto-crossing boundaries (autopilot) would exceed what the
+ * user opted into for the parent. Downgrade both to lenient so the child keeps a
+ * working, OS-sandboxed shell with normal gates; every other mode is inherited
+ * verbatim.
+ */
+function downgradeChildSandboxMode(mode) {
+    return mode === "full-access" || mode === "autopilot" ? "lenient" : mode;
 }
 export async function runCommand(args, cwd, dependencies, options = {}) {
     if (args.command === "configure") {
@@ -73,7 +85,10 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
     });
     const state = await loadState(cwd);
     const modelConfiguration = await loadModelConfiguration(cwd, state.config.modelPriority);
-    const activeDependencies = dependencies ?? defaultDependencies(modelConfiguration);
+    const activeDependencies = dependencies ??
+        (await defaultDependencies(modelConfiguration, {
+            refreshModels: args.command === "models" && args.refresh === true,
+        }));
     const available = activeDependencies.catalog.available();
     if (args.command === "init" && args.json && configurationStorage.migrationStatus !== "none") {
         return initStatus(state, modelPriority(modelConfiguration), available.map(modelId), args, false, configurationStorage);
@@ -762,7 +777,7 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDis
             // Admission gate on the durable background path, not only on fresh submission.
             assertTaskAdmitted(request.policySnapshot.effectiveProjectPolicy, request.kind);
         }
-        const activeDependencies = dependencies ?? defaultDependencies(modelConfiguration);
+        const activeDependencies = dependencies ?? (await defaultDependencies(modelConfiguration));
         const candidates = orderModels(activeDependencies.catalog.available(), {
             requested: request.model,
             priority: request.policySnapshot?.rolePolicy.models.length
@@ -1075,13 +1090,17 @@ async function runStartedJob(options) {
                 return hostAssistanceUnavailable(reason, message);
             }
         };
-        if ((options.sandboxMode === "lenient" || options.sandboxMode === "adaptive") &&
+        if ((options.sandboxMode === "lenient" ||
+            options.sandboxMode === "adaptive" ||
+            options.sandboxMode === "autopilot") &&
             kind !== "discover" &&
             options.dependencies.createSandboxRunner) {
             sandboxRunner = await options.dependencies.createSandboxRunner({
                 cwd: options.cwd,
                 mode: workerMode,
-                sandboxMode: options.sandboxMode,
+                // Autopilot shares Lenient's OS-sandbox isolation; its extra autonomy is
+                // enforced by the policy engine, not the sandbox config.
+                sandboxMode: options.sandboxMode === "autopilot" ? "lenient" : options.sandboxMode,
                 trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
                 ...(boundProjectPolicy ? { boundProjectPolicy } : {}),
                 ...(options.sandboxMode === "adaptive"
@@ -1106,6 +1125,30 @@ async function runStartedJob(options) {
                         },
                     }
                     : {}),
+            });
+        }
+        else if (options.sandboxMode === "full-access" &&
+            workerMode === "readonly" &&
+            kind !== "discover" &&
+            options.dependencies.createSandboxRunner) {
+            // Full-access is unconfined only for mutation jobs. Read-only jobs keep
+            // Lenient OS isolation so Bash cannot mutate the workspace or host.
+            sandboxRunner = await options.dependencies.createSandboxRunner({
+                cwd: options.cwd,
+                mode: "readonly",
+                sandboxMode: "lenient",
+                trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
+                ...(boundProjectPolicy ? { boundProjectPolicy } : {}),
+            });
+        }
+        else if (options.sandboxMode === "full-access" &&
+            workerMode === "implement" &&
+            kind !== "discover" &&
+            options.dependencies.createUnsandboxedRunner) {
+            // Full-access removes the plugin's OS sandbox for mutation jobs.
+            sandboxRunner = await options.dependencies.createUnsandboxedRunner({
+                cwd: options.cwd,
+                mode: workerMode,
             });
         }
         if (kind === "orchestrate") {
@@ -1536,7 +1579,7 @@ async function runAgentVerifier(options) {
 async function handleReadiness(args, cwd, dependencies, configurationStorage) {
     const state = await loadState(cwd, { migrateLegacy: false });
     const configuration = await loadModelConfiguration(cwd, state.config.modelPriority);
-    const activeDependencies = dependencies ?? defaultDependencies(configuration);
+    const activeDependencies = dependencies ?? (await defaultDependencies(configuration));
     const available = activeDependencies.catalog.available();
     let report = await inspectReadiness({
         cwd,
@@ -1801,15 +1844,18 @@ async function runHostActionChild(options) {
     if (duplicate)
         throw new Error(`Host Action already started for recommendation: ${duplicate.id}`);
     const modelConfiguration = await loadModelConfiguration(options.cwd, state.config.modelPriority);
-    const dependencies = options.dependencies ?? defaultDependencies(modelConfiguration);
+    const dependencies = options.dependencies ?? (await defaultDependencies(modelConfiguration));
     const parentSnapshot = parentRequest.policySnapshot;
     if (!parentSnapshot)
         throw new Error("Host Action requires a snapshotted parent policy");
     const role = parentRequest.kind === "setup" ? "environment-engineer" : "executor";
     const rolePolicy = resolveRolePolicy(role, {}, modelPriority(modelConfiguration));
+    // A Host Action delivery child must not run unsandboxed even if the parent is
+    // full-access; downgrade so the isolated child keeps an OS-sandboxed shell.
+    const childSandboxMode = downgradeChildSandboxMode(parentSnapshot.sandboxMode);
     const childSnapshot = parentSnapshot.version === 3
         ? createPolicySnapshot({
-            sandboxMode: parentSnapshot.sandboxMode,
+            sandboxMode: childSandboxMode,
             approvalMode: parentSnapshot.approvalMode,
             rolePolicy,
             adaptivePolicy: structuredClone(parentSnapshot.adaptivePolicy),
@@ -1822,14 +1868,14 @@ async function runHostActionChild(options) {
         })
         : parentSnapshot.version === 2
             ? createPolicySnapshot({
-                sandboxMode: parentSnapshot.sandboxMode,
+                sandboxMode: childSandboxMode,
                 approvalMode: parentSnapshot.approvalMode,
                 rolePolicy,
                 adaptivePolicy: structuredClone(parentSnapshot.adaptivePolicy),
                 effectiveProjectPolicy: structuredClone(parentSnapshot.effectiveProjectPolicy),
             })
             : createPolicySnapshot({
-                sandboxMode: parentSnapshot.sandboxMode,
+                sandboxMode: childSandboxMode,
                 approvalMode: parentSnapshot.approvalMode,
                 rolePolicy,
                 adaptivePolicy: structuredClone(parentSnapshot.adaptivePolicy),
@@ -1845,7 +1891,7 @@ async function runHostActionChild(options) {
         "Stay within the parent policy, project scope, and task intent. Do not commit, merge, push, deploy, message, transact, or materialize.",
     ].join("\n\n");
     const timeoutMs = Math.min(parentRequest.timeoutMs, hostActionPolicy.ttlMs);
-    const sandboxMode = parentRequest.sandboxMode ?? childSnapshot.sandboxMode;
+    const sandboxMode = downgradeChildSandboxMode(parentRequest.sandboxMode ?? childSnapshot.sandboxMode);
     const child = await startJob(options.cwd, {
         host: parentRequest.host,
         kind: "implement",
@@ -2040,11 +2086,26 @@ async function runDiscoveryWorkflow(options) {
         let stageSandbox;
         let result;
         try {
-            if (!child && options.sandboxMode !== "strict" && options.dependencies.createSandboxRunner) {
+            if (!child &&
+                options.sandboxMode === "full-access" &&
+                options.dependencies.createSandboxRunner) {
                 stageSandbox = await options.dependencies.createSandboxRunner({
                     cwd: options.cwd,
                     mode: "readonly",
-                    sandboxMode: options.sandboxMode,
+                    sandboxMode: "lenient",
+                    trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
+                    ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+                });
+            }
+            else if (!child &&
+                (options.sandboxMode === "adaptive" ||
+                    options.sandboxMode === "lenient" ||
+                    options.sandboxMode === "autopilot") &&
+                options.dependencies.createSandboxRunner) {
+                stageSandbox = await options.dependencies.createSandboxRunner({
+                    cwd: options.cwd,
+                    mode: "readonly",
+                    sandboxMode: options.sandboxMode === "autopilot" ? "lenient" : options.sandboxMode,
                     trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
                     ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
                     ...(options.sandboxMode === "adaptive"
@@ -2164,11 +2225,25 @@ async function runDiscoveryWorkflow(options) {
             let advisorSandbox;
             let advisorResult;
             try {
-                if (options.sandboxMode !== "strict" && options.dependencies.createSandboxRunner) {
+                if (options.sandboxMode === "full-access" && options.dependencies.createSandboxRunner) {
                     advisorSandbox = await options.dependencies.createSandboxRunner({
                         cwd: options.cwd,
                         mode: "readonly",
-                        sandboxMode: options.sandboxMode,
+                        sandboxMode: "lenient",
+                        trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
+                        ...(options.boundProjectPolicy
+                            ? { boundProjectPolicy: options.boundProjectPolicy }
+                            : {}),
+                    });
+                }
+                else if ((options.sandboxMode === "adaptive" ||
+                    options.sandboxMode === "lenient" ||
+                    options.sandboxMode === "autopilot") &&
+                    options.dependencies.createSandboxRunner) {
+                    advisorSandbox = await options.dependencies.createSandboxRunner({
+                        cwd: options.cwd,
+                        mode: "readonly",
+                        sandboxMode: options.sandboxMode === "autopilot" ? "lenient" : options.sandboxMode,
                         trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
                         ...(options.boundProjectPolicy
                             ? { boundProjectPolicy: options.boundProjectPolicy }
@@ -2365,9 +2440,12 @@ function discoveryOutputContract(stage) {
 async function runIsolatedExperimentChild(options) {
     const rolePolicy = resolveRolePolicy("experimenter", {}, options.candidates.map((candidate) => modelId(candidate)));
     const parent = options.parentSnapshot;
+    // An isolated experiment child must not run unsandboxed: downgrade an inherited
+    // full-access mode to lenient for both the child snapshot and the child job.
+    const childSandboxMode = downgradeChildSandboxMode(parent.sandboxMode);
     const childSnapshot = parent.version === 3
         ? createPolicySnapshot({
-            sandboxMode: parent.sandboxMode,
+            sandboxMode: childSandboxMode,
             approvalMode: parent.approvalMode,
             rolePolicy,
             adaptivePolicy: structuredClone(parent.adaptivePolicy),
@@ -2381,14 +2459,14 @@ async function runIsolatedExperimentChild(options) {
         })
         : parent.version === 2
             ? createPolicySnapshot({
-                sandboxMode: parent.sandboxMode,
+                sandboxMode: childSandboxMode,
                 approvalMode: parent.approvalMode,
                 rolePolicy,
                 adaptivePolicy: structuredClone(parent.adaptivePolicy),
                 effectiveProjectPolicy: structuredClone(parent.effectiveProjectPolicy),
             })
             : createPolicySnapshot({
-                sandboxMode: parent.sandboxMode,
+                sandboxMode: childSandboxMode,
                 approvalMode: parent.approvalMode,
                 rolePolicy,
                 adaptivePolicy: structuredClone(parent.adaptivePolicy),
@@ -2399,7 +2477,7 @@ async function runIsolatedExperimentChild(options) {
         prompt: options.prompt,
         cwd: options.sourceCwd,
         executionMode: "supervised",
-        sandboxMode: options.sandboxMode,
+        sandboxMode: childSandboxMode,
         timeoutMs: Math.max(1_000, options.deadline - Date.now()),
         role: "experimenter",
         thinkingLevel: rolePolicy.thinkingLevel,
@@ -2523,17 +2601,21 @@ async function runIsolatedExperimentChild(options) {
                 return waitForHostAssistanceResolution(options.stateCwd, child.id, child.workerToken, summary.id, signal);
             }
             : undefined;
+        // Experiment children never silently inherit an autonomy mode: an isolated
+        // child must not run unsandboxed or auto-cross boundaries. Downgrade to lenient
+        // so the child still gets a working (but OS-sandboxed) shell for its experiment.
+        const childSandboxMode = downgradeChildSandboxMode(options.sandboxMode);
         childSandbox =
-            options.sandboxMode === "strict" || !options.dependencies.createSandboxRunner
+            childSandboxMode === "strict" || !options.dependencies.createSandboxRunner
                 ? undefined
                 : await options.dependencies.createSandboxRunner({
                     cwd: executionCwd,
                     mode: "implement",
-                    sandboxMode: options.sandboxMode,
+                    sandboxMode: childSandboxMode,
                     trustedDomains: childSnapshot.adaptivePolicy.trustedDomains,
                     allowGitMetadataRead: true,
                     ...(boundPolicy ? { boundProjectPolicy: boundPolicy } : {}),
-                    ...(options.sandboxMode === "adaptive"
+                    ...(childSandboxMode === "adaptive"
                         ? {
                             authorizeNetwork: discoveryNetworkAuthorizer({
                                 cwd: executionCwd,

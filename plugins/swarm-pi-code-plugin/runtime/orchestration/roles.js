@@ -232,6 +232,9 @@ export function defaultHostAssistancePolicy() {
         reviewMode: "host-first",
         autoApprovalScope: "reversible",
         autoApproveDiscoveryGates: true,
+        outwardApprovalGranularity: "each-time",
+        autoGitWrites: false,
+        autoDelivery: false,
     };
 }
 export function defaultAdvisorPolicy() {
@@ -268,7 +271,12 @@ function isHostAssistancePolicy(value) {
             value.autoApprovalScope === "read-only" ||
             value.autoApprovalScope === "reversible") &&
         (value.autoApproveDiscoveryGates === undefined ||
-            typeof value.autoApproveDiscoveryGates === "boolean"));
+            typeof value.autoApproveDiscoveryGates === "boolean") &&
+        (value.outwardApprovalGranularity === undefined ||
+            value.outwardApprovalGranularity === "each-time" ||
+            value.outwardApprovalGranularity === "first-then-auto") &&
+        (value.autoGitWrites === undefined || typeof value.autoGitWrites === "boolean") &&
+        (value.autoDelivery === undefined || typeof value.autoDelivery === "boolean"));
 }
 function isAdvisorPolicy(value) {
     return (isRecord(value) &&

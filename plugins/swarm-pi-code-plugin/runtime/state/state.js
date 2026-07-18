@@ -599,6 +599,10 @@ function normalizeHostAssistancePolicy(value) {
             ? candidate.autoApprovalScope
             : "context-only",
         autoApproveDiscoveryGates: candidate.autoApproveDiscoveryGates === true,
+        // Autopilot outward-boundary controls. Missing/legacy → stricter defaults.
+        outwardApprovalGranularity: candidate.outwardApprovalGranularity === "first-then-auto" ? "first-then-auto" : "each-time",
+        autoGitWrites: candidate.autoGitWrites === true,
+        autoDelivery: candidate.autoDelivery === true,
     };
 }
 function normalizeAdvisorPolicy(value) {
@@ -723,7 +727,12 @@ function stringValue(value) {
     return typeof value === "string" ? value : undefined;
 }
 function sandboxModeValue(value) {
-    return value === "adaptive" || value === "lenient" ? value : "strict";
+    return value === "adaptive" ||
+        value === "lenient" ||
+        value === "autopilot" ||
+        value === "full-access"
+        ? value
+        : "strict";
 }
 function rolePolicyOverrides(value) {
     const record = asRecord(value);

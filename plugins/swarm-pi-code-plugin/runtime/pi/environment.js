@@ -1,7 +1,8 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { getProviderDefinition } from "../providers/capabilities.js";
 import { wireProtocolForRuntimeApi } from "../providers/endpoints.js";
 import { CONTROLLED_SECRET_HEADER_NAMES, DEFAULT_MODEL_CONTEXT_WINDOW, DEFAULT_MODEL_MAX_TOKENS, } from "../state/model-config.js";
+import { createFileCredentialStore, OverlayCredentialStore } from "./credentials.js";
 // Pi's thinking-level vocabulary (off/minimal/low/medium/high/xhigh/max) is
 // wider than any single provider's accepted reasoning.effort set. Custom
 // providers carry no thinkingLevelMap, so Pi levels pass through verbatim and
@@ -28,13 +29,21 @@ function customProviderEffortMap(provider) {
         ? OPENAI_SAFE_EFFORT_MAP
         : undefined;
 }
-export function createPiEnvironment(configuration, env = process.env, options = {}) {
-    const persistentAuth = options.authStorage ?? AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-    const authStorage = withProviderEnvironment(persistentAuth, providerEnvironmentOverlays(configuration));
-    const modelRegistry = ModelRegistry.create(authStorage, env.SWARM_PI_CODE_PLUGIN_MODELS_FILE);
-    applyProviderProfiles(modelRegistry, configuration);
-    applyCustomProviders(modelRegistry, configuration);
-    return { authStorage, modelRegistry };
+export async function createPiEnvironment(configuration, env = process.env, options = {}) {
+    const delegate = options.credentials ?? createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+    const credentials = new OverlayCredentialStore(delegate, providerEnvironmentOverlays(configuration));
+    const modelRuntime = options.modelRuntime ??
+        (await ModelRuntime.create({
+            credentials,
+            ...(env.SWARM_PI_CODE_PLUGIN_MODELS_FILE
+                ? { modelsPath: env.SWARM_PI_CODE_PLUGIN_MODELS_FILE }
+                : {}),
+            allowModelNetwork: options.allowModelNetwork ?? false,
+        }));
+    applyProviderProfiles(modelRuntime, configuration);
+    applyCustomProviders(modelRuntime, configuration);
+    await modelRuntime.refresh({ allowNetwork: false });
+    return { credentials, modelRuntime };
 }
 export function applyProviderProfiles(registry, configuration) {
     for (const profile of configuration.providerProfiles) {
@@ -109,25 +118,6 @@ export function providerEnvironmentOverlays(configuration) {
             overlays.set(profile.provider, overlay);
     }
     return overlays;
-}
-function withProviderEnvironment(storage, overlays) {
-    if (overlays.size === 0)
-        return storage;
-    return new Proxy(storage, {
-        get(target, property) {
-            if (property === "getProviderEnv") {
-                return (provider) => {
-                    const stored = target.getProviderEnv(provider);
-                    const overlay = overlays.get(provider);
-                    if (!stored && !overlay)
-                        return undefined;
-                    return { ...stored, ...overlay };
-                };
-            }
-            const value = Reflect.get(target, property, target);
-            return typeof value === "function" ? value.bind(target) : value;
-        },
-    });
 }
 function profileHeaders(profile) {
     const headers = resolvedHeaders(profile.provider, profile.headers);

@@ -6,13 +6,12 @@ import test from "node:test";
 import http from "node:http";
 import { once } from "node:events";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
-
 import { WORKFLOW_BOUNDS } from "../src/orchestration/roles.js";
 import { getProviderDefinition } from "../src/providers/capabilities.js";
 import { CredentialDraftVault } from "../src/providers/credentials.js";
 import { compileEffectiveProjectPolicy } from "../src/policy/project-policy.js";
 import { createModelCatalog, modelId } from "../src/pi/models.js";
+import { createFileCredentialStore } from "../src/pi/credentials.js";
 import { loadState, resolveStateDir, resolveStateFile, updateState } from "../src/state/state.js";
 import {
   defaultModelConfiguration,
@@ -171,7 +170,7 @@ test("configuration page starts from connections and uses the original Swarm Pi 
 test("configuration view retains models referenced only by saved role and classifier policies", async () => {
   const { workspace, env } = fixture();
   const configuration = defaultModelConfiguration();
-  const catalog = createModelCatalog(configuration, env);
+  const catalog = await createModelCatalog(configuration, env);
   const available = new Set(catalog.available().map(modelId));
   const unavailable = catalog.all?.().find((model) => !available.has(modelId(model)));
   assert.ok(unavailable, "the pinned Pi catalog should expose an unavailable model");
@@ -570,16 +569,16 @@ test("sign out removes credentials for built-in and configured custom providers 
     customProviders,
     providerProfiles: [],
   });
-  const auth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-  auth.set("local-test", { type: "api_key", key: "custom-secret" });
-  auth.set("openai", { type: "api_key", key: "openai-secret" });
+  const auth = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  await auth.modify("local-test", async () => ({ type: "api_key", key: "custom-secret" }));
+  await auth.modify("openai", async () => ({ type: "api_key", key: "openai-secret" }));
 
   await signOutProvider(workspace, "local-test", env);
   await signOutProvider(workspace, "openai", env);
 
-  const reloadedAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-  assert.equal(reloadedAuth.hasAuth("local-test"), false);
-  assert.equal(reloadedAuth.hasAuth("openai"), false);
+  const reloadedAuth = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  assert.equal(await reloadedAuth.read("local-test"), undefined);
+  assert.equal(await reloadedAuth.read("openai"), undefined);
   await assert.rejects(
     () => signOutProvider(workspace, "unknown-provider", env),
     /Unknown provider/,

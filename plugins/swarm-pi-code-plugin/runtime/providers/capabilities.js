@@ -334,6 +334,27 @@ const DEFINITIONS = [
         oauthProvider: "github-copilot",
     },
     {
+        id: "radius",
+        name: "Radius",
+        category: "subscription",
+        protocolMode: "fixed",
+        runtimeApis: ["radius"],
+        authMethods: ["oauth", "api-key"],
+        defaultAuthMethod: "oauth",
+        fields: [
+            {
+                ...API_KEY_FIELD,
+                visibleWhen: { field: "authMethod", equals: "api-key" },
+            },
+        ],
+        modelSource: "pi-catalog",
+        configurable: true,
+        oauthProvider: "radius",
+        notes: [
+            "Radius uses Pi's dynamic pi-messages catalog; refresh it explicitly when the gateway publishes new models.",
+        ],
+    },
+    {
         id: "azure-openai-responses",
         name: "Azure OpenAI",
         category: "cloud",

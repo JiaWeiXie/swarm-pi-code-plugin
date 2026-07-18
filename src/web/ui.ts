@@ -125,10 +125,12 @@ export function renderConfigurationPage(
         <div class="form-band">
           <div class="form-copy"><h2>Sandbox mode</h2><p>Select a static or policy-controlled execution boundary.</p></div>
           <div class="form-control">
-            <div class="scope-toggle three" role="radiogroup" aria-label="Sandbox execution mode">
+            <div class="scope-toggle five" role="radiogroup" aria-label="Sandbox execution mode">
               <button id="sandbox-strict" type="button" role="radio">Strict</button>
               <button id="sandbox-adaptive" type="button" role="radio">Adaptive</button>
               <button id="sandbox-lenient" type="button" role="radio">Lenient</button>
+              <button id="sandbox-autopilot" type="button" role="radio">Autopilot</button>
+              <button id="sandbox-full-access" type="button" role="radio">Full-access</button>
             </div>
             <p id="sandbox-backend" class="field-hint"></p>
             <div id="sandbox-warning" class="notice warning sandbox-warning" hidden></div>
@@ -182,6 +184,15 @@ export function renderConfigurationPage(
             <label for="host-auto-scope">Host auto-approval ceiling</label><select id="host-auto-scope"><option value="context-only">Context only</option><option value="read-only">Read-only capabilities</option><option value="reversible">Bounded reversible changes</option></select>
             <label class="inline-check"><input id="host-auto-discovery-gates" type="checkbox"> Allow the active Host model to approve bounded Discovery gates</label>
             <span class="field-hint">Recovery hooks and replay never approve. Private connectors, delivery, deployment, messages, and irreversible actions still require the user.</span>
+            <details class="project-advanced">
+              <summary>Autopilot / Full-access outward boundaries</summary>
+              <span class="field-hint">The Autopilot and Full-access modes already auto-run routine shell (build/test, rm/mv/cp, curl/wget, interpreters, redirection). These options additionally allow the outward, irreversible commands below. sudo/su, plugin control paths (.git/.env), secrets, and git metadata are always enforced.</span>
+              <label class="inline-check"><input id="host-auto-git-writes" type="checkbox"> Allow git commit/push/merge in the worker shell (Autopilot or Full-access)</label>
+              <label class="inline-check"><input id="host-auto-delivery" type="checkbox"> Allow deployment commands (kubectl/helm/terraform) in the worker shell</label>
+              <label for="outward-granularity">Outward approval granularity</label>
+              <select id="outward-granularity"><option value="each-time">Confirm each time</option><option value="first-then-auto">Approve first, then automatic</option></select>
+              <span class="field-hint">These cross the plugin's host-owned-delivery boundary. sudo/su, secrets, private connectors, Git metadata, and workspace escape are never crossed. The first (or every) such action is always confirmed by a human, never the Host model. With "approve first, then automatic," a job-scoped grant auto-repeats only identical commands; a distinct command re-prompts.</span>
+            </details>
             <label>Allowed context classes</label><div id="host-context-classes" class="check-list"></div>
             <label for="context-budget">Context allowance</label><select id="context-budget"></select>
             <span id="context-budget-description" class="field-hint"></span>
@@ -571,6 +582,8 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 .field-tips p { margin: 8px 0 0; line-height: 1.5; }
 .sandbox-warning { margin-top: 12px; }
 .scope-toggle.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.scope-toggle.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.scope-toggle.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .role-policy-list { display: grid; gap: 12px; }
 .role-policy-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.5fr) 130px 100px; gap: 14px; align-items: end; padding: 16px 0; border-bottom: 1px solid var(--border); }
 .role-policy-row h2 { margin: 0; font-size: 16px; }
@@ -630,7 +643,7 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
   .limit-grid, .advanced-grid, .model-editor-body { grid-template-columns: 1fr; }
   .fallback-row { grid-template-columns: minmax(0, 1fr) 34px 34px 34px; }
   .scope-toggle { grid-template-columns: 1fr; }
-  .scope-toggle.three, .role-policy-row { grid-template-columns: 1fr; }
+  .scope-toggle.three, .scope-toggle.four, .scope-toggle.five, .role-policy-row { grid-template-columns: 1fr; }
 }
 `;
 
@@ -685,7 +698,7 @@ const clientScript = String.raw`
     oauthSession: null,
     oauthOpenedUrl: "",
     closed: false,
-    sandboxMode: ["strict","adaptive","lenient"].includes(boot.sandboxMode) ? boot.sandboxMode : "strict",
+    sandboxMode: ["strict","adaptive","lenient","autopilot","full-access"].includes(boot.sandboxMode) ? boot.sandboxMode : "strict",
     rolePolicies: structuredClone(boot.rolePolicies || {}),
     adaptivePolicy: structuredClone(boot.adaptivePolicy || {classifierModels:[],classifierThinkingLevel:"medium",approvalPolicy:"deny",trustedDomains:[],rules:[],diagnostics:false}),
     backgroundRolePolicy: structuredClone(boot.backgroundRolePolicy || {mechanicalExecutor:false}),
@@ -728,7 +741,7 @@ const clientScript = String.raw`
       if (draft.advisor) state.advisor = draft.advisor;
       if ("doctrine" in draft) state.doctrine = draft.doctrine;
       if (draft.hostActions) state.hostActions = draft.hostActions;
-      if (["strict","adaptive","lenient"].includes(draft.sandboxMode)) state.sandboxMode = draft.sandboxMode;
+      if (["strict","adaptive","lenient","autopilot","full-access"].includes(draft.sandboxMode)) state.sandboxMode = draft.sandboxMode;
       if (draft.profile) state.profile = draft.profile;
     } else if (draft) localStorage.removeItem(draftKey);
   } catch {}
@@ -1043,14 +1056,19 @@ const clientScript = String.raw`
     });
   }
   function renderSafety() {
-    ["strict","adaptive","lenient"].forEach(mode => {
+    ["strict","adaptive","lenient","autopilot","full-access"].forEach(mode => {
       const button = $("sandbox-" + mode); button.className = state.sandboxMode === mode ? "active" : "";
-      button.setAttribute("aria-checked", String(state.sandboxMode === mode)); button.disabled = mode !== "strict" && !boot.sandboxAvailability.available;
+      // strict and full-access need no sandbox backend, so neither is disabled when it is unavailable.
+      button.setAttribute("aria-checked", String(state.sandboxMode === mode)); button.disabled = mode !== "strict" && mode !== "full-access" && !boot.sandboxAvailability.available;
     });
     $("sandbox-backend").textContent = boot.sandboxAvailability.available ? "Available through " + boot.sandboxAvailability.label + "." : boot.sandboxAvailability.reason;
     $("adaptive-settings").hidden = state.sandboxMode !== "adaptive";
     $("sandbox-warning").hidden = state.sandboxMode === "strict";
-    $("sandbox-warning").textContent = state.sandboxMode === "lenient"
+    $("sandbox-warning").textContent = state.sandboxMode === "full-access"
+      ? "DANGER: Full-access removes this plugin's OS sandbox entirely. The worker's shell runs with no filesystem or network confinement from this plugin. Its actual reach depends only on the host's own sandbox, which this plugin cannot control: on a default Claude Code session (no /sandbox) the worker has unrestricted access to this machine. Use only in a disposable or fully trusted environment."
+      : state.sandboxMode === "autopilot"
+      ? "Autopilot keeps Lenient's OS sandbox but runs routine shell (build/test, rm/mv/cp, curl/wget, interpreters, redirection) unattended without approval. sudo/su, plugin control paths, secrets, and git metadata stay enforced; git/deploy require the options below."
+      : state.sandboxMode === "lenient"
       ? "Lenient permits outbound network access. Project source visible to the worker may be sent to external services."
       : "Adaptive sends limited action context to the selected classifier provider and pauses high-risk bounded actions for approval.";
     const classifier = $("classifier-models"); classifier.replaceChildren();
@@ -1076,6 +1094,9 @@ const clientScript = String.raw`
     $("host-review-mode").value = state.hostAssistance.reviewMode || "user-only";
     $("host-auto-scope").value = state.hostAssistance.autoApprovalScope || "context-only";
     $("host-auto-discovery-gates").checked = state.hostAssistance.autoApproveDiscoveryGates === true;
+    $("host-auto-git-writes").checked = state.hostAssistance.autoGitWrites === true;
+    $("host-auto-delivery").checked = state.hostAssistance.autoDelivery === true;
+    $("outward-granularity").value = state.hostAssistance.outwardApprovalGranularity || "each-time";
     const hostClasses = $("host-context-classes"); hostClasses.replaceChildren();
     [["workspace","Workspace files"],["web","Public Web"],["docs","SDK/API docs"],["paper","Papers"],["connector","Private connector"],["skill","Installed skill"]].forEach(([value,label]) => hostClasses.append(checkRow({
       value,label,checked:state.hostAssistance.contextClasses.includes(value),
@@ -1120,7 +1141,7 @@ const clientScript = String.raw`
       const hostActionCost = requiredNumber("host-action-max-cost", "Host Action recommendation cost metadata", 0);
       const hostActionTtl = requiredInteger("host-action-ttl", "Host Action lease TTL", {min:1,max:1440});
       const rules = validatePolicyRules(JSON.parse($("policy-rules").value || "[]"));
-      if (state.sandboxMode !== "strict" && !boot.sandboxAvailability.available) throw new Error(boot.sandboxAvailability.reason || "Sandbox backend is unavailable.");
+      if (state.sandboxMode !== "strict" && state.sandboxMode !== "full-access" && !boot.sandboxAvailability.available) throw new Error(boot.sandboxAvailability.reason || "Sandbox backend is unavailable.");
       if (state.sandboxMode === "adaptive" && state.adaptivePolicy.classifierModels.length === 0) throw new Error("Choose at least one classifier model for Adaptive mode.");
       if (maxFanOut > maxRequests) throw new Error("Host Assistance fan-out cannot exceed its request limit.");
       if (state.advisor.enabled && (state.advisor.targets.length === 0 || advisorRequests < 1 || advisorPerspectives < 1)) throw new Error("Enabled Advisor requires a target, at least one consultation, and one perspective.");
@@ -1225,7 +1246,11 @@ const clientScript = String.raw`
     (profile.dirs || []).forEach(value => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = value; directories.append(row); });
     const tasks = $("review-tasks"); tasks.replaceChildren();
     profile.tasks.forEach(value => { const known = taskTypes.find(item => item.value === value), row = document.createElement("div"); row.className = "review-item"; row.textContent = known?.label || value; tasks.append(row); });
-    $("review-sandbox").textContent = state.sandboxMode === "lenient"
+    $("review-sandbox").textContent = state.sandboxMode === "full-access"
+      ? "Full-access - NO plugin OS sandbox; worker shell unconfined (see warning)"
+      : state.sandboxMode === "autopilot"
+      ? "Autopilot - Lenient sandbox; routine shell runs unattended"
+      : state.sandboxMode === "lenient"
       ? "Lenient - sandboxed shell and outbound network enabled"
       : state.sandboxMode === "adaptive"
         ? "Adaptive - classified capabilities with " + state.adaptivePolicy.approvalPolicy + " fallback"
@@ -1234,6 +1259,7 @@ const clientScript = String.raw`
     [
       "Decision mode: " + state.decisionMode,
       "Host Assistance: " + state.hostAssistance.mode + " · " + (state.hostAssistance.reviewMode || "user-only") + " · ceiling " + (state.hostAssistance.autoApprovalScope || "context-only") + " · Discovery gates " + (state.hostAssistance.autoApproveDiscoveryGates ? "Host-review" : "user") + " · context " + contextAllowanceLabel(state.contextBudget) + " · requests " + state.hostAssistance.maxRequests + " · fan-out " + state.hostAssistance.maxFanOut,
+      "Outward boundaries: git writes " + (state.hostAssistance.autoGitWrites ? "on" : "off") + " · deployment " + (state.hostAssistance.autoDelivery ? "on" : "off") + " · granularity " + (state.hostAssistance.outwardApprovalGranularity || "each-time"),
       "Advisor: " + (state.advisor.enabled ? "on for " + state.advisor.targets.join(", ") : "off"),
       "Doctrine: " + (state.doctrine || "off"),
       "Host Actions: " + (state.hostActions.enabled ? "isolated · " + state.hostActions.allowedActionClasses.join(", ") + (state.hostActions.remoteActionsEnabled ? " · remote enabled" : " · remote disabled") : "off"),
@@ -1554,6 +1580,17 @@ const clientScript = String.raw`
     state.sandboxMode = "lenient";
     renderSafety();
   });
+  $("sandbox-autopilot").addEventListener("click", () => {
+    // Autopilot shares Lenient's OS sandbox, so it needs the backend available.
+    if (!boot.sandboxAvailability.available) return;
+    state.sandboxMode = "autopilot";
+    renderSafety();
+  });
+  $("sandbox-full-access").addEventListener("click", () => {
+    // full-access needs no sandbox backend, so it is selectable even when unavailable.
+    state.sandboxMode = "full-access";
+    renderSafety();
+  });
   $("approval-deny").addEventListener("click", () => { state.adaptivePolicy.approvalPolicy = "deny"; renderSafety(); });
   $("approval-wait").addEventListener("click", () => { state.adaptivePolicy.approvalPolicy = "wait"; renderSafety(); });
   $("classifier-thinking").addEventListener("change", () => { state.adaptivePolicy.classifierThinkingLevel = $("classifier-thinking").value; });
@@ -1567,6 +1604,9 @@ const clientScript = String.raw`
   $("host-review-mode").addEventListener("change", () => { state.hostAssistance.reviewMode = $("host-review-mode").value; });
   $("host-auto-scope").addEventListener("change", () => { state.hostAssistance.autoApprovalScope = $("host-auto-scope").value; });
   $("host-auto-discovery-gates").addEventListener("change", () => { state.hostAssistance.autoApproveDiscoveryGates = $("host-auto-discovery-gates").checked; });
+  $("host-auto-git-writes").addEventListener("change", () => { state.hostAssistance.autoGitWrites = $("host-auto-git-writes").checked; });
+  $("host-auto-delivery").addEventListener("change", () => { state.hostAssistance.autoDelivery = $("host-auto-delivery").checked; });
+  $("outward-granularity").addEventListener("change", () => { state.hostAssistance.outwardApprovalGranularity = $("outward-granularity").value; });
   $("context-budget").addEventListener("change", () => { state.contextBudget = Number($("context-budget").value); renderSafety(); clearSafetyError(); });
   $("private-connector").addEventListener("change", () => { state.hostAssistance.privateConnector = $("private-connector").value; });
   $("advisor-enabled").addEventListener("change", () => { state.advisor.enabled = $("advisor-enabled").checked; });

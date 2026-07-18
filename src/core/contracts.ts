@@ -14,7 +14,7 @@ export type WorkerMode = "readonly" | "implement";
 
 export type ExecutionMode = "supervised" | "background";
 
-export type SandboxMode = "strict" | "adaptive" | "lenient";
+export type SandboxMode = "strict" | "adaptive" | "lenient" | "autopilot" | "full-access";
 
 export type ApprovalMode = "deny" | "wait";
 
@@ -44,6 +44,14 @@ export type HostContextClass = "workspace" | "web" | "docs" | "paper" | "connect
 export type DataClassification = "public" | "project-internal" | "private" | "secret";
 export type HostAssistanceReviewMode = "user-only" | "host-first";
 export type HostAutoApprovalScope = "context-only" | "read-only" | "reversible";
+/**
+ * Granularity for the outward/irreversible boundaries that Autopilot may
+ * auto-cross (git writes, Host Action delivery). `each-time` requires a fresh
+ * approval per action (once-scoped); `first-then-auto` grants a job-scoped lease
+ * after the first approval so subsequent same-family actions run unattended.
+ * Missing on legacy snapshots; legacy normalization keeps the stricter `each-time`.
+ */
+export type OutwardApprovalGranularity = "each-time" | "first-then-auto";
 export type Reversibility = "read-only" | "reversible" | "partially-reversible" | "irreversible";
 
 export interface HostAssistancePolicy {
@@ -57,6 +65,15 @@ export interface HostAssistancePolicy {
   reviewMode?: HostAssistanceReviewMode;
   autoApprovalScope?: HostAutoApprovalScope;
   autoApproveDiscoveryGates?: boolean;
+  /**
+   * Autopilot outward-boundary controls. `autoGitWrites` lets Autopilot cross the
+   * git commit/push/merge hard-deny; `autoDelivery` widens Host Action delivery.
+   * Both are governed by `outwardApprovalGranularity`. Missing on legacy snapshots;
+   * normalization keeps them off / `each-time`.
+   */
+  outwardApprovalGranularity?: OutwardApprovalGranularity;
+  autoGitWrites?: boolean;
+  autoDelivery?: boolean;
 }
 
 export interface WorkerAssessment {

@@ -37,7 +37,11 @@ Implementation jobs add scoped mutation tools, require a clean assigned
 worktree, and receive a fresh read-only semantic verifier. Strict exposes no shell,
 Adaptive authorizes bounded shell and network actions through policy and
 durable approval, and Lenient retains broad outbound access inside the OS
-sandbox. Git delivery remains host-owned.
+sandbox. Autopilot keeps that same OS-sandbox isolation as Lenient but runs
+routine shell unattended, without stopping for supervisor approval. Full-access
+is an explicit opt-out that removes the plugin's own OS sandbox, so the worker's
+reach then depends entirely on the host's own sandbox. Git delivery remains
+host-owned.
 
 Adaptive recognizes a deliberately narrow shell inspection grammar. Bounded
 `sha256sum`/`shasum` commands, `rustc`/`cargo` version probes, and two-file
@@ -61,9 +65,10 @@ denied.
 
 Runtime configuration and jobs stay outside the checked-out worktree. Git
 repositories use `.git/swarm-pi-code-plugin/` through the common Git directory;
-non-Git folders use an OS user-state namespace. Credentials stay in Pi's user
-credential store. Browser input becomes an opaque, session-local draft and
-never enters project artifacts or localStorage.
+non-Git folders use an OS user-state namespace. Credentials stay in the
+user-scoped, Pi-compatible `CredentialStore` backed by the configured auth file.
+Browser input becomes an opaque, session-local draft and never enters project
+artifacts or localStorage.
 
 See the [architecture reference](docs/architecture.md) and
 [configuration reference](docs/configuration.md), plus the
@@ -81,8 +86,10 @@ boundaries, discover-to-plan handoff, and isolated Host Actions.
 - Node.js 22.19.0 or newer for installed plugins.
 - A supported Claude Code or Codex installation.
 - A Git repository for worktree-aware implementation jobs.
-- macOS, or Linux with `bubblewrap`, `socat`, and `ripgrep`, to enable lenient
-  sandbox mode.
+- macOS, or Linux with `bubblewrap`, `socat`, and `ripgrep`, to enable the
+  lenient and autopilot sandbox modes. Strict and full-access need no sandbox
+  backend and stay selectable everywhere; full-access removes the plugin's own
+  OS sandbox.
 
 ### Claude Code
 
@@ -258,15 +265,24 @@ catalog do not establish them.
 
 ### Provider connections
 
-The setup form is driven by the pinned Pi provider catalog. OpenAI uses the
+The setup form is driven by the Pi v0.80.10 provider catalog. OpenAI uses the
 Responses adapter, Anthropic uses Messages, and mixed providers retain Pi's
 per-model adapter. Cloud providers show only their required project, region,
 resource, account, or deployment fields.
 
+Normal plugin startup uses the local catalog snapshot and does not refresh
+remote model metadata or credentials implicitly. Run `models --refresh` when a
+fresh catalog is explicitly required:
+
+```bash
+mise exec -- node scripts/pi-runner.mjs models --refresh --json
+```
+
 ChatGPT Plus/Pro is a separate **ChatGPT subscription** connection backed by
 Pi's `openai-codex` browser or device-code OAuth. It is not loaded through an
-OpenAI API-key field. GitHub Copilot and Anthropic subscription sign-in use the
-same bounded OAuth flow.
+OpenAI API-key field. GitHub Copilot, Anthropic, and Radius subscription sign-in
+use the same bounded OAuth flow. Radius also accepts an API key and maintains a
+dynamic gateway catalog that can be refreshed explicitly.
 
 Custom endpoints choose one protocol: OpenAI Chat Completions, OpenAI
 Responses, or Anthropic Messages. Model discovery and **Verify API** are
@@ -298,12 +314,32 @@ rewrite model configuration, credentials, or job history.
 New projects default to **Adaptive**, which adds policy-classified Bash and
 network access with bounded capability leases while keeping writes inside the
 configured roots. **Strict** remains the opt-in mode that keeps scoped Pi tools
-and exposes no Bash. **Lenient** adds broad
-outbound access through macOS Seatbelt or Linux Bubblewrap. All shell modes use
-an isolated environment without model tokens, SSH sockets, or host secrets.
-Existing projects keep their explicitly saved mode; a legacy configuration
-with no mode remains Strict. Jobs keep the mode and policy snapshot captured at
-start, so a later settings change affects only new Jobs.
+and exposes no Bash. **Lenient** adds broad outbound access through macOS
+Seatbelt or Linux Bubblewrap. **Autopilot** is a selectable mode that keeps
+Lenient's OS-sandbox isolation — it needs the same Seatbelt or Bubblewrap
+backend — but runs routine shell unattended, without stopping for supervisor
+approval. **Full-access** is a fourth, explicitly opt-in
+mode that removes the plugin's own OS sandbox entirely: the worker's Bash runs
+un-wrapped, deliberately inverting the previous "never fall back to an
+unsandboxed shell" invariant. Like Strict, it needs no sandbox backend, so it is
+always selectable even when Seatbelt or Bubblewrap is unavailable; for policy
+decisions it behaves like Lenient (allow-all).
+
+Because Full-access removes the plugin's own boundary, the worker's actual reach
+depends **entirely on the host's own sandbox, which this plugin cannot control
+or detect**. On a default Claude Code session with no `/sandbox`, the worker has
+unrestricted access to the machine. Codex CLI defaults to workspace-write
+confinement, and its `danger-full-access` removes that confinement. Adaptive,
+Lenient, Autopilot, and Strict use an isolated environment without model tokens,
+SSH sockets, or host secrets. Full-access instead uses the real environment minus
+only the plugin's own injected `SWARM_PI_CODE_PLUGIN_*` variables (provider API
+keys, auth-file path, and worker token); the user's own credentials remain
+present.
+
+Existing projects keep their explicitly saved mode; a legacy configuration with
+no mode remains Strict, and Full-access is never a migration default. Jobs keep
+the mode and policy snapshot captured at start, so a later settings change
+affects only new Jobs.
 
 Repository deny rules keep their internal `repo:` identity across new and child
 snapshots only when they exactly match the immutable effective project policy;
@@ -316,12 +352,16 @@ capability view from that frozen parent snapshot. Because different policy
 content must never reuse the same hash, the child has its own stage hash and
 includes the parent's hash as `parentPolicyHash` in its canonical snapshot.
 Receipts bind to the child stage hash while audits can verify the immutable
-parent lineage.
+parent lineage. Discovery Experiment children and Host Action delivery children
+never inherit Full-access or Autopilot: they downgrade to Lenient so they always
+keep an OS sandbox.
 
 Adaptive classifier prompts expose only the proposed action and limited policy
 context to the configured provider. Lenient source visible to the worker can be
-sent to external services. Unsupported platforms and missing dependencies fail
-closed and never fall back to an unsandboxed shell.
+sent to external services. For Adaptive, Lenient, Autopilot, and Strict,
+unsupported platforms and missing dependencies fail closed and never fall back
+to an unsandboxed shell. Full-access is the single explicit, opt-in exception to that
+guarantee: choosing it is a deliberate opt-out of the plugin's own OS sandbox.
 
 Decision Mode controls bounded orchestration depth: Cost runs one base
 perspective, Balance two, and Power three. Host Assistance context allowance
@@ -344,6 +384,30 @@ high-risk evidence falls back to the user. Legacy policies missing these fields
 remain User-only until resaved. Strict never gains a capability through a Host
 receipt, and secrets, private connectors, Git metadata, deletion, delivery,
 deployment, messaging, and transactions are never auto-approved.
+
+**Autopilot** is a selectable Sandbox mode — the fifth mode, sitting after
+Lenient. Selecting it gives the same OS-sandbox isolation as Lenient (it needs
+the Seatbelt or Bubblewrap backend, unlike Strict and Full-access) plus
+intrinsic unattended autonomy: routine shell that would otherwise stop for
+supervisor approval — build/test, `rm`/`mv`/`cp`, `curl`/`wget`, interpreters
+such as `node`/`python`, redirection, and workspace-external paths — runs
+without stopping, still inside the OS sandbox; this is what lets Autopilot
+"never stop". That routine-shell autonomy is intrinsic to Autopilot (and to
+Full-access); plain Lenient is unchanged and still gates those actions behind
+supervisor approval. The outward, irreversible boundary is unchanged and still
+applies under Autopilot and Full-access: `autoGitWrites` and `autoDelivery` let
+the worker shell run `git commit`/`push`/`merge` and deployment commands
+(`kubectl`/`helm`/`terraform`) that are otherwise immutable hard-denials; these
+always pass through a human approval gate and are never auto-approved by the
+host model. The `outwardApprovalGranularity` setting governs those git/deploy
+approvals: `each-time` confirms every action once, while `first-then-auto`
+approves the first and then auto-repeats through a job-scoped lease. That lease
+is fingerprint-exact, so `first-then-auto` only auto-repeats identical
+commands — a different commit message re-prompts; full cross-command auto-repeat
+is a documented future item. sudo/su privilege escalation, plugin control paths
+(`.git`, `.env`, `.swarm-pi-policy.json`), secrets, forbidden/loopback domains,
+and direct Git-metadata writes are always enforced, even under Full-access or
+Autopilot.
 
 In Adaptive mode, a structure-aware, fail-closed Bash analyzer now provides a
 real deterministic read-only fast path before the model classifier. It accepts
@@ -382,13 +446,17 @@ Configured allowed task kinds are an admission gate: a disallowed kind is reject
 before the job runs, rather than being a prompt suggestion. Configured allowed
 folders constrain the scoped filesystem tools, and implementation writes are
 enforced at three layers: the tool boundary, the sandbox write allowlist in
-adaptive and lenient Bash modes, and a postflight changed-path check. Omitting
-these restrictions preserves whole-workspace behavior for backward
-compatibility. Reads and writes differ: while the scoped Pi filesystem tools
-enforce read scope and the three layers above enforce implementation writes,
-raw Bash reads in adaptive and lenient modes are not folder-scoped and can read
-within the workspace subject to the sensitive deny paths; use Strict mode when
-folder-level read confidentiality is required. See [Enforced Project Policy](docs/orchestration-and-policy.md#enforced-project-policy)
+adaptive and lenient Bash modes, and a postflight changed-path check. Full-access
+has no OS sandbox, so its raw Bash is not covered by the write allowlist layer;
+only the tool boundary and the postflight changed-path check remain. Because that
+postflight check inspects only the final tracked Git diff, out-of-scope writes
+made during a full-access run are unobserved. Omitting these restrictions
+preserves whole-workspace behavior for backward compatibility. Reads and writes
+differ: while the scoped Pi filesystem tools enforce read scope and the layers
+above enforce implementation writes, raw Bash reads in adaptive, lenient, and
+full-access modes are not folder-scoped and can read within the workspace subject
+to the sensitive deny paths; use Strict mode when folder-level read
+confidentiality is required. See [Enforced Project Policy](docs/orchestration-and-policy.md#enforced-project-policy)
 for the technical contract.
 
 ### Non-interactive runner
@@ -397,6 +465,7 @@ The shared runner is useful for automation and host integration:
 
 ```bash
 mise exec -- node scripts/pi-runner.mjs models --json
+mise exec -- node scripts/pi-runner.mjs models --refresh --json
 mise exec -- node scripts/pi-runner.mjs providers --json
 mise exec -- node scripts/pi-runner.mjs configure --host codex --section project --no-open
 mise exec -- node scripts/pi-runner.mjs init --json
@@ -531,8 +600,10 @@ bound to the job generation, policy hash, action fingerprint, and expiry. The
 policy hash includes the project scope, so changing allowed folders prevents an
 old lease from being reused. After approval, the suspended action is evaluated
 again: an exact live lease may satisfy a `require-approval` gate once, but it is
-checked only after immutable denials, so it can never authorize Git delivery,
-deployment, protected paths, or another hard-denied action. An approve or deny
+checked only after immutable denials. The explicit Autopilot/Full-access outward
+options reclassify Git delivery and deployment as approval gates, so a matching
+user lease may authorize only that exact opted-in command; protected paths and
+other hard-denied actions remain non-authorizable. An approve or deny
 operation atomically resolves that approval and acknowledges only its matching
 approval notification. Terminal notifications remain pending until the Host has
 shown and explicitly acknowledged the terminal result.
@@ -859,7 +930,7 @@ validating the packaged plugin.
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
 - [Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.80.6`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.80.10`
 - [Node.js](https://nodejs.org/)
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)

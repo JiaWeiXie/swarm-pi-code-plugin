@@ -1,136 +1,70 @@
-# Discover Sandbox and Host Autonomy Plan
+# Discover Sandbox 與 Host 自主性計畫
 
-Date: 2026-07-13
+日期：2026-07-13
 
-Status: implementation record; runtime, documentation, and Host adapter work in
-progress
+狀態：實作紀錄；執行期、文件與 Host 介面工作進行中
 
-## Incident and Root Cause
+## 事件與根因
 
-The failing Evobox Discover Job was created with an old snapshot whose project
-roots were empty. Independently of that stale scope, the immediate singleton
-failure came from Sandbox ownership. The Discover parent created one
-process-global Sandbox runtime and held it from Research through Gate waiting.
-The Experiment child then ran in the same Node process and attempted to create
-a second runtime manager. The upstream Sandbox backend permits only one live
-manager per process, so the child failed before it could perform the planned
-experiment.
+失敗的 Evobox Discover Job 使用了舊快照，其專案根目錄為空。撇開這個過時的範圍不談，立即造成 singleton 失敗的原因是 Sandbox 所有權。Discover 父工作建立了一個程序全域的 Sandbox runtime，並從 Research 持有到等待閘門。接著 Experiment 子工作在同一個 Node 程序中執行，並嘗試建立第二個 runtime manager。上游 Sandbox backend 每個程序只允許一個存活中的 manager，因此子工作在執行計畫中的實驗前就失敗了。
 
-Changing Discover to Strict would hide this lifecycle bug while also changing
-the Job's snapshotted policy. That is not an acceptable fix. Discover must use
-the mode, roots, and network rules selected when the Job starts, and each
-stage-specific policy view must be cryptographically bound to that immutable
-parent snapshot.
+將 Discover 改為 Strict 會掩蓋這個生命週期錯誤，同時改變 Job 的政策快照。這不是可接受的修正。Discover 必須使用 Job 啟動時選定的模式、根目錄與網路規則，且每個階段專屬的政策視圖都必須以密碼學方式綁定至不可變的父快照。
 
-## Decisions
+## 決策
 
-### Configuration and compatibility
+### 設定與相容性
 
-- A newly created configuration starts in Adaptive mode.
-- A persisted configuration with an explicit mode keeps that mode.
-- A legacy configuration with no mode continues to normalize to Strict. This
-  avoids silently granting shell or network capabilities to an existing
-  project.
-- New Host Assistance policy defaults are Host-first review, Reversible scope,
-  and Discovery gate auto-review. Missing fields in a legacy saved policy
-  normalize to User-only, Context-only, and no gate auto-review.
-- Every running Job uses its immutable policy snapshot. Saving configuration
-  affects only later Jobs.
-- Adaptive requires a classifier once a primary model is selected. The primary
-  model becomes the initial classifier when the new configuration does not yet
-  contain an explicit classifier selection. An incomplete provider setup may be
-  saved, but Job readiness remains fail-closed until the model is available.
+- 新建立的設定以 Adaptive 模式開始。
+- 具備明確模式的持久化設定會保留該模式。
+- 沒有模式的舊版設定持續正規化為 Strict。這可避免對既有專案默默授予 Shell 或網路能力。
+- 新的 Host Assistance 政策預設為 Host-first review、Reversible scope 與 Discovery gate auto-review。舊版已儲存政策中缺少的欄位會正規化為 User-only、Context-only 與不自動審查閘門。
+- 每個執行中的 Job 使用其不可變政策快照。儲存設定只影響後續 Job。
+- 選定主要模型後，Adaptive 需要分類器。當新設定尚未包含明確的分類器選擇時，主要模型會成為初始分類器。Provider 設定不完整仍可儲存，但在模型可用前，Job readiness 仍會 fail-closed。
 
-### Stage-scoped Sandbox ownership
+### 階段範圍的 Sandbox 所有權
 
-Discover no longer owns a Sandbox for its full lifetime. Each stage that needs
-tools creates one runtime and disposes it in `finally`:
+Discover 不再在整個生命週期中擁有 Sandbox。每個需要工具的階段都會建立一個 runtime，並在 `finally` 中釋放：
 
-1. Research uses a read-only Sandbox.
-2. The Sandbox is disposed before the Research gate is surfaced.
-3. Experiment uses a separate implementation Sandbox in the job-owned isolated
-   worktree.
-4. The child inherits the parent's mode, roots, trusted domains, and network
-   policy. It uses the same Adaptive network authorizer as its parent. Its
-   `experimenter` role and disabled Advisor produce a distinct stage policy
-   document, so it must not reuse the parent's hash. Instead, the canonical v3
-   child snapshot includes the exact parent hash as `parentPolicyHash`; this
-   lineage binding is itself covered by the child stage hash.
-5. The Experiment Sandbox may read its linked worktree Git administrative
-   linkage for baseline and clean-replay checks, but those paths remain
-   deny-write. On macOS it prefers the direct Command Line Tools binary so the
-   `xcrun` shim does not require a host-cache write.
-6. Convergence and each optional Advisor consultation use fresh read-only
-   Sandboxes.
-7. Success, error, cancellation, and timeout paths all dispose their current
-   stage runtime. Gate waiting never owns a Sandbox.
+1. Research 使用唯讀 Sandbox。
+2. 在呈現 Research 閘門前釋放 Sandbox。
+3. Experiment 在工作專屬的隔離工作樹中使用獨立的實作 Sandbox。
+4. 子工作繼承父工作的模式、根目錄、信任網域與網路政策。它與父工作使用相同的 Adaptive 網路授權器。其 `experimenter` 角色與停用的 Advisor 會產生不同的階段政策文件，因此不得重用父工作的雜湊。相反地，標準 v3 子快照會將確切的父雜湊納入 `parentPolicyHash`；這個來源綁定本身也包含在子階段雜湊中。
+5. Experiment Sandbox 可以讀取其關聯工作樹的 Git 管理連結，以進行基準與乾淨重播檢查，但這些路徑仍禁止寫入。在 macOS 上，它優先使用直接的 Command Line Tools binary，避免 `xcrun` shim 需要寫入 Host 快取。
+6. Convergence 與每次可選的 Advisor 諮詢都使用新的唯讀 Sandbox。
+7. 成功、錯誤、取消與逾時路徑都會釋放目前的階段 runtime。等待閘門時絕不持有 Sandbox。
 
-This sequencing preserves the upstream process-global singleton invariant. A
-failed Experiment keeps its isolated worktree and durable Job evidence for
-investigation; cleanup remains an explicit Host or user action.
+這個順序保留上游程序全域 singleton 不重疊的限制。失敗的 Experiment 會保留其隔離工作樹與持久化 Job 證據，供調查使用；清理仍是明確的 Host 或使用者動作。
 
-### Host Assistance admission
+### Host Assistance 准入
 
-`request_host_assistance` is a control-plane request, not an ordinary Worker
-tool action. It therefore bypasses only the generic tool classifier and then
-enters its own typed admission path. That path still enforces the snapshotted
-mode, context classes, data classification, request quota, session uniqueness,
-fan-out, expiry, and durable correlation. Bash, filesystem, and network tools
-continue through the generic classifier.
+`request_host_assistance` 是控制平面請求，而不是一般 Worker 工具動作。因此它只繞過一般工具分類器，接著進入自己的型別化准入路徑。該路徑仍會強制執行快照模式、內容類別、資料分類、請求配額、工作階段唯一性、扇出、到期時間與持久化關聯。Bash、檔案系統與網路工具則繼續通過一般分類器。
 
-Every new Worker request must include a `WorkerAssessment` describing purpose,
-blocker, minimum access, exact targets, side effects, exposure, failure modes,
-mitigations, reversibility, rollback, verification, proposed risk, and a safe
-fallback. Legacy persisted requests may omit the field so old Jobs remain
-readable. Worker risk is evidence, not authority; the Host model independently
-adjudicates it.
+每個新的 Worker 請求都必須包含描述目的、阻礙、最小存取權、精確目標、副作用、暴露、失敗模式、緩解措施、可逆性、回滾、驗證、提議風險與安全替代方案的 `WorkerAssessment`。持久化的舊版請求可以省略此欄位，以保持舊 Job 可讀。Worker 風險是證據而非權威；Host 模型會獨立裁決。
 
-### Host-first adjudication
+### Host 優先裁決
 
-Only the model in the active Codex or Claude Code Host turn may produce an
-automatic decision. It reads the full durable request, the original Job intent,
-role ceiling, project policy, Sandbox roots, action fingerprint, and policy
-hash. If the action is within the snapshotted ceiling, it writes a
-`HostAdjudicationReceipt` and invokes the existing CLI with
-`--adjudication-file`.
+只有目前作用中的 Codex 或 Claude Code Host turn 中的模型可以產生自動決策。它會讀取完整的持久化請求、原始 Job 意圖、角色上限、專案政策、Sandbox 根目錄、動作指紋與政策雜湊。如果動作位於快照上限內，它會寫入 `HostAdjudicationReceipt`，並以 `--adjudication-file` 呼叫既有 CLI。
 
-The runtime validates the receipt again. A valid Host-model allow must:
+執行期會再次驗證收據。有效的 Host-model allow 必須：
 
-- identify the same Host and exact v3 policy hash;
-- match the exact 64-character action fingerprint;
-- state a low or medium assessed risk, intent match, and `autoResolved: true`;
-- contain a complete WorkerAssessment;
-- remain within the configured Context-only, Read-only, or Reversible ceiling;
-- use a one-action capability lease for tool approvals.
+- 識別相同的 Host 與確切的 v3 政策雜湊；
+- 符合確切的 64 字元動作指紋；
+- 表示低或中風險、意圖相符與 `autoResolved: true`；
+- 包含完整的 WorkerAssessment；
+- 保持在已設定的 Context-only、Read-only 或 Reversible 上限內；
+- 使用一次動作能力租約進行工具核准。
 
-Read-only public context may be auto-resolved. A reversible local mutation may
-be approved only when the original Job already carries mutation intent and the
-target remains inside the snapshotted workspace or job-owned worktree.
-Discovery decisions may be auto-resolved only for an identified Discovery gate
-when gate auto-review is enabled, and an automatic decision may only choose the
-bounded `approve` outcome.
+唯讀的公開內容可以自動解決。只有當原始 Job 已帶有變更意圖，且目標仍在快照工作區或工作專屬工作樹內時，才可核准可逆的本機變更。只有在啟用閘門自動審查時，Discovery 決策才可針對已識別的 Discovery 閘門自動解決，而且自動決策只能選擇有界的 `approve` 結果。
 
-Strict mode cannot be expanded by a Host receipt. Private connectors, secrets,
-Git metadata, workspace escapes, partial or irreversible changes, deletions,
-delivery actions, deployment, publication, messaging, transactions, action
-recommendations, role escalation, and uncertain intent remain outside the
-automatic ceiling. They fall back to the user or are hard denied by policy.
+Strict 模式不能由 Host 收據擴張。私人連接器、秘密、Git 中繼資料、工作區逃逸、不完整或不可逆變更、刪除、交付動作、部署、發布、傳訊、交易、動作建議、角色提升與不確定意圖都不在自動上限內。它們會回到使用者決策，或由政策硬拒絕。
 
-Recovery hooks, SessionStart, watch replay, timeouts, and background processes
-only project pending or resolved events. They never generate a receipt, resolve
-a request, or issue a lease. Replayed events use stable identifiers; resolving
-the same durable request twice is rejected.
+復原 hooks、SessionStart、watch replay、逾時與背景程序只會投射待處理或已解決的事件。它們絕不產生收據、解決請求或發出租約。重播事件使用穩定識別碼；同一個持久化請求被解決兩次會被拒絕。
 
-### Audit and notification
+### 稽核與通知
 
-The receipt records the principal, Host and optional model identifier, decision,
-risk, rationale, constraints, intent match, fingerprint, policy hash,
-auto-resolution flag, and timestamp. Approval and Host Assistance resolution
-events expose only the safe principal/risk/auto-resolution summary. Full
-requests, assessments, receipts, and leases are preserved in the redacted Job
-audit export.
+收據會記錄 principal、Host、可選的模型識別碼、決策、風險、理由、限制、意圖相符、指紋、政策雜湊、自動解決旗標與時間戳。核准與 Host Assistance 解決事件只公開安全的 principal／風險／自動解決摘要。完整請求、評估、收據與租約會保留在經遮罩的 Job 稽核匯出中。
 
-The existing commands keep their manual meaning when no receipt is supplied:
+未提供收據時，現有命令維持手動含義：
 
 ```text
 jobs approve --job JOB --approval ID [--approval-scope once|job]
@@ -138,65 +72,39 @@ jobs host-respond --job JOB --request ID --response-file RESPONSE
 jobs decide --job JOB --request ID --response-file RESPONSE
 ```
 
-An active Host model adds `--adjudication-file RECEIPT`. The runtime does not
-trust the filename or the Host narrative; it revalidates the durable pending
-record, snapshot, fingerprint, and ceiling immediately before changing state.
+作用中的 Host 模型會加入 `--adjudication-file RECEIPT`。Runtime 不信任檔名或 Host 敘事；在改變狀態前，會立即重新驗證持久化待處理紀錄、快照、指紋與上限。
 
-## Verification Matrix
+## 驗證矩陣
 
-The implementation is accepted only when all of these properties are covered
-by executable tests or packaged-Host validation:
+只有在以下所有性質都由可執行測試或打包 Host 驗證涵蓋時，實作才算接受：
 
-| Case | Expected result |
+| 案例 | 預期結果 |
 | --- | --- |
-| Research → Gate → Experiment → Convergence | Stage runtimes never overlap and each disposes |
-| Experiment failure, cancellation, timeout | Current runtime disposes; evidence remains |
-| Adaptive child network request | Uses the shared authorizer and snapshotted policy |
-| Legacy config missing new Host fields | User-only; no automatic expansion |
-| Public read-only context | Active Host may resolve with an exact receipt |
-| Reversible in-scope implementation write | One exact Host-model lease |
-| Fingerprint, target, command, or policy changes | Receipt or lease is invalid |
-| Strict Job | Host receipt cannot add capabilities |
-| Private connector, secret, Git, delivery, live mutation | User decision or hard deny |
-| SessionStart/watch replay | Notification only; no receipt or lease |
-| Duplicate resolution/replay | Stable event and no duplicate state transition |
-| Codex and Claude fixture | Same decision and fingerprint; identity metadata may differ |
+| Research → Gate → Experiment → Convergence | 階段 runtime 絕不重疊，且各自都會釋放 |
+| Experiment 失敗、取消、逾時 | 目前 runtime 會釋放；證據保留 |
+| Adaptive 子工作網路請求 | 使用共用授權器與快照政策 |
+| 舊版設定缺少新的 Host 欄位 | User-only；不自動擴張 |
+| 公開唯讀內容 | 作用中的 Host 可用確切收據解決 |
+| 可逆且在範圍內的實作寫入 | 一個確切的 Host-model 租約 |
+| 指紋、目標、命令或政策變更 | 收據或租約無效 |
+| Strict Job | Host 收據不能新增能力 |
+| 私人連接器、秘密、Git、交付、即時變更 | 使用者決策或硬拒絕 |
+| SessionStart／watch replay | 僅通知；無收據或租約 |
+| 重複解決／重播 | 穩定事件，且不重複狀態轉換 |
+| Codex 與 Claude fixture | 相同決策與指紋；身份中繼資料可以不同 |
 
-The final development verification also includes targeted tests, typecheck,
-lint, formatting, the full test suite, packaged runtime parity, documentation
-impact checks, skill validation, both plugin manifests, the Claude development
-plugin validator, Codex cachebuster/reinstall checks, and a controlled fresh
-Discover fixture inside this plugin. The fixture must pause at both durable
-review gates, prove that no Sandbox is held while waiting, resolve each gate
-with an exact Host receipt, and complete the isolated Experiment without using
-an external product repository.
+最終開發驗證還包括目標測試、型別檢查、lint、格式化、完整測試套件、打包執行期一致性、文件影響檢查、技能驗證、兩個 Plugin manifest、Claude development plugin validator、Codex cachebuster／重新安裝檢查，以及此 Plugin 內受控且全新的 Discover fixture。Fixture 必須在兩個持久化審查閘門暫停，證明等待時沒有持有 Sandbox，使用確切的 Host 收據解決每個閘門，並在不使用外部產品儲存庫的情況下完成隔離 Experiment。
 
-An earlier external integration validation exposed a false negative in
-Host-first shell classification: a bounded `sha256sum` over two workspace files
-received a generic partially-reversible assessment and waited until the Job
-deadline.
-Checksum inspection is now part of the narrow trusted read-only grammar, with
-tests retaining fail-closed traversal and external absolute-path behavior.
+較早的外部整合驗證揭露 Host-first shell 分類中的假陰性：對兩個工作區檔案執行有界 `sha256sum` 時，收到一般的部分可逆評估，並一直等待到 Job 截止時間。
 
-A later controlled validation found the same false negative for toolchain
-version probes and non-writing file comparisons. The grammar now recognizes
-only bounded `rustc`/`cargo` version forms and two-file `cmp`/`diff` forms;
-compilation, tests, output options, traversal, and external paths remain outside
-the automatic ceiling.
+Checksum 檢查現在已納入狹窄的可信唯讀語法，測試仍保留 fail-closed traversal 與外部絕對路徑行為。
 
-Screenshot-Impact: reviewed-current — `parentPolicyHash` and the linked
-worktree Git read boundary are internal Job/audit and runtime behavior. They add
-no setup field or layout change, so the current Execution Safety and Host
-Assistance screenshots remain accurate.
+後來的受控驗證在工具鏈版本探測與非寫入檔案比較中發現相同的假陰性。語法現在只辨識有界的 `rustc`／`cargo` 版本形式與兩檔案 `cmp`／`diff` 形式；編譯、測試、輸出選項、traversal 與外部路徑仍在自動上限之外。
 
-## Rollout and Rollback
+Screenshot-Impact: reviewed-current — `parentPolicyHash` 與關聯工作樹 Git 讀取邊界是內部 Job／稽核與執行期行為。它們沒有新增設定欄位或版面變更，因此目前的 Execution Safety 與 Host Assistance 螢幕截圖仍然準確。
 
-This change does not bump the release version. The development Codex manifest
-cachebuster may change so a new Codex task loads the updated skill and runtime.
-The installed-version checker must still report one synchronized semantic
-version for both Hosts.
+## 推出與回滾
 
-Runtime rollback is conservative: disable Host-first review (User-only), disable
-Discovery gate auto-review, or select Strict for later Jobs. Existing running
-Jobs retain their original snapshots. No rollback path rewrites a durable Job,
-deletes an experiment worktree, or broadens a lease.
+此變更不會提高發布版本。開發用 Codex manifest cachebuster 可能變更，讓新的 Codex task 載入更新後的 skill 與 runtime。已安裝版本檢查器仍必須為兩個 Host 報告一個同步的語意版本。
+
+執行期回滾採保守方式：停用 Host-first review（User-only）、停用 Discovery gate auto-review，或為後續 Job 選擇 Strict。現有執行中的 Job 保留原始快照。任何回滾路徑都不會改寫持久化 Job、刪除實驗工作樹或擴大租約。

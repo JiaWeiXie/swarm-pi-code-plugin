@@ -644,6 +644,7 @@ function isProviderRuntimeApi(value: string): value is ProviderRuntimeApi {
     "google-vertex",
     "mistral-conversations",
     "openai-codex-responses",
+    "radius",
   ].includes(value);
 }
 

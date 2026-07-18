@@ -70,7 +70,7 @@ async function runClassifierSession(options: {
   signal?: AbortSignal;
   prompt: string;
 }): Promise<string> {
-  const { authStorage, modelRegistry } = createPiEnvironment(options.modelConfiguration);
+  const { modelRuntime } = await createPiEnvironment(options.modelConfiguration);
   const settingsManager = SettingsManager.inMemory();
   const loader = new DefaultResourceLoader({
     cwd: options.cwd,
@@ -85,8 +85,7 @@ async function runClassifierSession(options: {
   await loader.reload();
   const { session } = await createAgentSession({
     cwd: options.cwd,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     model: options.model,
     thinkingLevel: options.thinkingLevel as never,
     noTools: "all",

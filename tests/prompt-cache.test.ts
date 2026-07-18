@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 
 import { createPiEnvironment } from "../src/pi/environment.js";
 import { buildWorkerPrompt, WORKER_PROMPT_VERSION } from "../src/runner/prompts.js";
@@ -40,7 +40,7 @@ test("prompt cache capability metadata reflects pinned provider behavior", () =>
   );
 });
 
-test("long prompt cache retention is provider-scoped and does not mutate process.env", () => {
+test("long prompt cache retention is provider-scoped and does not mutate process.env", async () => {
   const configuration = parseModelConfiguration({
     version: 1,
     primary: null,
@@ -63,16 +63,16 @@ test("long prompt cache retention is provider-scoped and does not mutate process
     updatedAt: null,
   });
   const before = process.env.PI_CACHE_RETENTION;
-  const environment = createPiEnvironment(
-    configuration,
-    {},
-    {
-      authStorage: AuthStorage.inMemory({ openai: { type: "api_key", key: "secret" } }),
-    },
+  const storage = new InMemoryCredentialStore();
+  await storage.modify("openai", async () => ({ type: "api_key", key: "secret" }));
+  const environment = await createPiEnvironment(configuration, {}, { credentials: storage });
+  const credential = await environment.credentials.read("openai");
+  assert.equal(
+    credential?.type === "api_key" ? credential.env?.PI_CACHE_RETENTION : undefined,
+    "long",
   );
-  assert.equal(environment.authStorage.getProviderEnv("openai")?.PI_CACHE_RETENTION, "long");
   assert.equal(process.env.PI_CACHE_RETENTION, before);
-  assert.equal(environment.authStorage.getProviderEnv("anthropic"), undefined);
+  assert.equal(await environment.credentials.read("anthropic"), undefined);
 });
 
 test("extended retention is rejected for OAuth profiles", () => {

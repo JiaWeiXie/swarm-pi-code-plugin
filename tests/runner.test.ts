@@ -269,6 +269,11 @@ test("argument parsing requires host and prompt file for ask", () => {
   assert.throws(() => parseArguments(["jobs", "list", "--apply"]), /only supported by jobs prune/);
 });
 
+test("models refresh is explicit and rejected for other commands", () => {
+  assert.equal(parseArguments(["models", "--refresh", "--json"]).refresh, true);
+  assert.throws(() => parseArguments(["providers", "--refresh"]), /only supported by models/);
+});
+
 test("model helpers expose stable provider/model identifiers", () => {
   assert.deepEqual(describeModels([fakeModel]), [
     {
@@ -1875,6 +1880,67 @@ test(
 
     assert.equal(receivedSandbox, true);
     assert.equal("status" in result && result.status, "succeeded");
+  },
+);
+
+test(
+  "full-access readonly jobs retain OS sandbox isolation",
+  {
+    skip: !detectSandboxAvailability().available,
+  },
+  async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-full-access-readonly-"));
+    await setSandboxMode(workspace, "full-access");
+    let sandboxOptions: { mode: string; sandboxMode?: string } | undefined;
+    let unsandboxedCalled = false;
+    const dependencies: RunnerDependencies = {
+      catalog: { available: () => [fakeModel] },
+      readFile: async () => "Inspect with shell access",
+      createSandboxRunner: async (options) => {
+        sandboxOptions = {
+          mode: options.mode,
+          ...(options.sandboxMode ? { sandboxMode: options.sandboxMode } : {}),
+        };
+        return {
+          cwd: options.cwd,
+          mode: options.mode,
+          createBashTool: () => ({ name: "bash" }) as never,
+          async dispose() {},
+        };
+      },
+      createUnsandboxedRunner: async () => {
+        unsandboxedCalled = true;
+        throw new Error("readonly job must not use unsandboxed runner");
+      },
+      createSession: async (options) => {
+        assert.equal(options.sandboxRunner !== undefined, true);
+        return {
+          subscribe(listener) {
+            listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+            return () => {};
+          },
+          async prompt() {},
+          dispose() {},
+        };
+      },
+    };
+
+    const result = await runCommand(
+      {
+        command: "ask",
+        host: "codex",
+        promptFile: "prompt.md",
+        reconfigure: false,
+        reset: false,
+        json: true,
+      },
+      workspace,
+      dependencies,
+    );
+
+    assert.equal("status" in result && result.status, "succeeded");
+    assert.deepEqual(sandboxOptions, { mode: "readonly", sandboxMode: "lenient" });
+    assert.equal(unsandboxedCalled, false);
   },
 );
 

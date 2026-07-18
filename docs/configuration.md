@@ -32,7 +32,13 @@ does not rewrite provider credentials or model configuration.
 
 New workspace defaults use Adaptive Sandbox mode, Balance Decision Mode,
 Host Assistance on with Host-first review, a Reversible automatic ceiling,
-Discovery gate auto-review, Advisor off, and doctrine off. Cost, Balance, and
+Discovery gate auto-review, Advisor off, and doctrine off. `full-access` is a
+fourth, opt-in Sandbox mode that removes the plugin's own OS sandbox; it is never
+a default and normalization never selects it. Autopilot is a fifth, opt-in
+Sandbox mode that keeps Lenient's OS-sandbox isolation (it needs the same
+sandbox backend) but runs routine shell unattended; it also exposes the outward
+`autoGitWrites` and `autoDelivery` autonomy and an `outwardApprovalGranularity`
+choice, and stays off unless a project explicitly selects it. Cost, Balance, and
 Power currently select one, two, or three
 base `orchestrate` perspectives and bound some decision attempts. Context
 budget, Host Assistance request/fan-out limits, and Advisor quotas remain
@@ -43,7 +49,13 @@ experiment schema gates, or delivery policy.
 The same screen configures Host context classes, User-only versus Host-first
 review, Context-only/Read-only/Reversible automatic scope, Discovery gate
 review, private-connector policy, Advisor targets/limits, doctrine metadata,
-and Host Action classes plus cost/use/expiry bounds. Remote Host Actions are
+and Host Action classes plus cost/use/expiry bounds. Selecting the Autopilot
+mode makes routine supervised shell auto-run without stopping, still inside the
+OS sandbox; under Autopilot and Full-access it also exposes the outward autonomy
+controls: `autoGitWrites` and `autoDelivery` (allow the worker shell to run `git
+commit`/`push`/`merge` and `kubectl`/`helm`/`terraform` behind a mandatory human
+approval gate), and `outwardApprovalGranularity` (`each-time` versus
+`first-then-auto`) for those git/deploy approvals. Remote Host Actions are
 off by default. The doctrine
 toggle is persisted in PolicySnapshot v3, but the runtime does not yet run an
 automatic Question/Delete/Simplify convergence pass. It must not be treated as
@@ -117,13 +129,17 @@ provider or credential tutorial.
 ![Execution and safety settings](assets/setup/05-execution-safety.png)
 ![Configuration review](assets/setup/06-review.png)
 
-Screenshot-Impact: reviewed-current — this change adds Host preflight, CLI
-storage reporting, and runtime migration only; `src/web/ui.ts` and the six
-current setup screens are unchanged.
+Screenshot note: the Execution & safety screen now offers the Full-access and
+Autopilot sandbox modes and the outward autonomy controls (`autoGitWrites`,
+`autoDelivery`, and outward approval granularity), so
+`05-execution-safety.png` (and, if the review summary shifts, `06-review.png`)
+should be regenerated with `mise run docs-screenshots` before release.
 
 | Setting | New-project default | Runtime effect |
 | --- | --- | --- |
-| Sandbox | `adaptive` | OS Sandbox plus policy-classified shell/network; Strict remains selectable |
+| Sandbox | `adaptive` | OS Sandbox plus policy-classified shell/network; Strict, `lenient`, opt-in `autopilot`, and opt-in `full-access` remain selectable |
+| Full-access sandbox | off (opt-in) | Removes the plugin's own OS sandbox; never a default, and worker reach then depends on the host's own sandbox |
+| Autopilot sandbox | off (opt-in) | Fifth mode: keeps Lenient's OS-sandbox isolation (needs the sandbox backend) and auto-runs routine shell unattended; git/deploy stay behind a mandatory human approval gate governed by `outwardApprovalGranularity` |
 | Decision Mode | `balance` | 1/2/3 base orchestration perspectives for Cost/Balance/Power; bounded decision attempts |
 | Host Assistance | on | Enables correlated context, decision, and recommendation requests |
 | Host review | `host-first` | Active Host model independently reviews complete requests; hooks/watchers only notify |
@@ -142,13 +158,17 @@ current setup screens are unchanged.
 - fixed, managed-per-model, or selectable protocol behavior;
 - supported authentication methods;
 - required, optional, advanced, and conditional form fields;
-- field destinations in AuthStorage, provider-scoped environment, controlled
+- field destinations in CredentialStore, provider-scoped environment, controlled
   headers, or non-secret profiles;
 - model source and runtime adapter support.
 
-Coverage tests compare the Registry with every provider exposed by the pinned
-Pi model catalog. A newly added Pi provider fails CI until it is classified; the
+Coverage tests compare the Registry with every provider exposed by the Pi
+v0.80.10 model catalog. A newly added Pi provider fails CI until it is classified; the
 UI never guesses that an unknown provider uses a simple API-key form.
+
+The plugin initializes `ModelRuntime` from the configured auth and model files
+without implicit network refresh. Use `models --refresh` to explicitly update
+the live catalog; worker and classifier startup remain snapshot-based.
 
 Built-in examples include:
 
@@ -158,13 +178,14 @@ Built-in examples include:
 | ChatGPT Plus/Pro | OpenAI Codex Responses | Pi device/browser OAuth | none |
 | Anthropic | Anthropic Messages | API key or Pi OAuth | optional beta header |
 | GitHub Copilot | managed per model | Pi OAuth | none |
+| Radius | Pi dynamic messages | Pi OAuth or API key | gateway catalog refreshed explicitly |
 | Azure OpenAI | Azure Responses | API key | endpoint/resource, API version, deployment map |
 | Amazon Bedrock | Bedrock Converse | ambient identity | AWS profile and region |
 | Google Vertex AI | Vertex runtime | ambient identity or API key | project and location |
 | Cloudflare | managed or Chat-compatible | API key | account and optional gateway IDs |
 
 Azure Microsoft Entra identity is shown only as a capability notice because the
-pinned Pi runtime cannot execute it. It is never marked ready.
+Pi v0.80.10 runtime cannot execute it. It is never marked ready.
 
 ## Wire Protocols
 
@@ -214,7 +235,7 @@ When a non-Git folder later becomes a Git repository, the next interactive
 Configuration resolves both the canonical invocation directory and Git root,
 then moves the complete durable state directory into the Git common directory.
 This includes model/project state, Jobs, artifacts, notifications,
-continuations, and recovery data; Pi `AuthStorage` credentials remain separate.
+continuations, and recovery data; Pi-compatible `CredentialStore` credentials remain separate.
 Status only reports a pending migration and does not move data. A non-terminal
 Job, multiple source candidates, or data at both source and destination blocks
 the operation without merging, overwriting, or deleting either side. An
@@ -260,7 +281,7 @@ Existing IDs remain unchanged when their endpoint and protocol match exactly.
 
 ## Credential Boundary
 
-Secrets remain in Pi `AuthStorage`. A browser secret first enters the
+Secrets remain in the Pi-compatible `CredentialStore`. A browser secret first enters the
 session-local `CredentialDraftVault`; the response contains only an opaque draft
 ID, provider, auth method, masked flag, and expiry. Draft IDs are bound to the
 loopback setup session and are removed after save, cancel, timeout, or expiry.
@@ -279,8 +300,8 @@ ChatGPT Plus/Pro is the `openai-codex` subscription connection. It is not an
 OpenAI API-key option. The browser drives Pi's browser or device-code OAuth with
 bounded long polling, explicit prompt responses, cancellation, and timeout.
 Anthropic and GitHub Copilot use the same generic OAuth session machinery.
-OAuth completes in an in-memory AuthStorage and becomes a credential draft;
-the real AuthStorage changes only during final save.
+OAuth completes in an in-memory credential store and becomes a credential
+draft; the real CredentialStore changes only during final save.
 
 AWS and Google ambient identities are detected without importing host secret
 files. Project, region, and location values are non-secret profile data passed
@@ -291,7 +312,7 @@ as a provider-scoped environment overlay. The plugin never mutates
 
 Raw header JSON is not accepted. Literal headers use a fixed allowlist such as
 `HTTP-Referer`, `X-Title`, and `Anthropic-Beta`. Secret headers use `secretRef`
-and provider-scoped AuthStorage environment values.
+and provider-scoped CredentialStore environment values.
 
 Pi configuration values interpret `$ENV` and `!command`. The runtime escapes
 all literal header values before registering them, so a literal cannot read an
@@ -334,7 +355,7 @@ Credentials may use HTTP only for loopback endpoints.
 ## Transaction and Background Jobs
 
 Save builds a candidate Pi environment from the proposed profiles and an
-in-memory clone of AuthStorage. It validates every selected model, runs required
+in-memory clone of CredentialStore. It validates every selected model, runs required
 smoke tests, then commits credentials, `model.json`, and `state.json`. A failure
 restores prior values. An incomplete rollback writes a redacted recovery journal
 and returns `configuration-recovery-required`.
@@ -356,8 +377,9 @@ the parent's snapshotted effective project policy and receives a new bounded
 action-family lease.
 
 Existing configuration is not rewritten on load. An explicitly stored Sandbox
-mode remains unchanged; legacy state with no mode normalizes to Strict. A
-legacy Host Assistance object missing `reviewMode`, `autoApprovalScope`, or
+mode remains unchanged; legacy state with no mode normalizes to Strict, and
+`full-access` is never produced by normalization or used as a migration default.
+A legacy Host Assistance object missing `reviewMode`, `autoApprovalScope`, or
 `autoApproveDiscoveryGates` normalizes to User-only, Context-only, and gate
 auto-review off until the user saves the updated form. Active Jobs always keep
 their submitted snapshot.
@@ -378,19 +400,20 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 - Legacy custom providers infer auth and wire protocol from existing fields.
 - Existing custom IDs are not rewritten.
 - Existing explicit Sandbox modes are preserved; missing legacy modes remain
-  Strict.
+  Strict, and normalization never selects `full-access`.
 - Missing Host-first policy fields remain User-only until a user saves the
   updated configuration.
 - Legacy jobs with request versions 1–4 retain their original semantics and
   are not retroactively given v5 controls. Version 3 jobs continue to use
   their submitted provider snapshot; version 4 jobs additionally use their
   submitted project-policy snapshot.
-- `init --set-model-priority[-file]`, `models --json`, and `providers --json`
+- `init --set-model-priority[-file]`, `models --json`, `models --refresh --json`,
+  and `providers --json`
   remain available for automation.
 
 ## Acceptance Criteria
 
-- Every pinned Pi provider is explicitly classified by the Registry.
+- Every Pi v0.80.10 provider is explicitly classified by the Registry.
 - ChatGPT subscription and OpenAI API-key connections remain separate.
 - Browser responses, localStorage, state, model config, and jobs contain no
   credential values.

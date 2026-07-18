@@ -49,6 +49,9 @@ export function parseArguments(argv) {
             case "--all":
                 parsed.allModels = true;
                 break;
+            case "--refresh":
+                parsed.refresh = true;
+                break;
             case "--no-open":
                 parsed.noOpen = true;
                 break;
@@ -207,6 +210,9 @@ export function parseArguments(argv) {
     }
     if (parsed.configurationSection && command !== "configure") {
         throw new Error("--section is only supported by configure");
+    }
+    if (parsed.refresh && command !== "models") {
+        throw new Error("--refresh is only supported by models");
     }
     if ((command === "ask" ||
         command === "plan" ||

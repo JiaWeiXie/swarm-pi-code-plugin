@@ -221,7 +221,8 @@ test("plugin package contains both host adapters and a self-contained runner", (
   const pluginPackage = readJson("plugins/swarm-pi-code-plugin/package.json") as {
     dependencies: Record<string, string>;
   };
-  assert.equal(pluginPackage.dependencies["@earendil-works/pi-coding-agent"], "0.80.6");
+  assert.equal(pluginPackage.dependencies["@earendil-works/pi-coding-agent"], "0.80.10");
+  assert.equal(pluginPackage.dependencies["@earendil-works/pi-ai"], "0.80.10");
   assert.equal(pluginPackage.dependencies["@carderne/sandbox-runtime"], "0.0.49");
 
   execFileSync(process.execPath, ["--check", path.join(pluginRoot, "scripts/bootstrap.mjs")]);

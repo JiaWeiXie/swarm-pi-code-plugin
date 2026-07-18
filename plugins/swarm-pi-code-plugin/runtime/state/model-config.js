@@ -458,6 +458,7 @@ function isProviderRuntimeApi(value) {
         "google-vertex",
         "mistral-conversations",
         "openai-codex-responses",
+        "radius",
     ].includes(value);
 }
 function safeProfileUrl(value, provider, authMethod) {

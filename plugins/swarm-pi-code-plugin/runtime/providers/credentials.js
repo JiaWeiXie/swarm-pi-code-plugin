@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { InMemoryCredentialStore, } from "@earendil-works/pi-ai";
 import { getProviderDefinition } from "./capabilities.js";
 import { customProviderHeaderVariable } from "../pi/environment.js";
 import { CONTROLLED_SECRET_HEADER_NAMES, } from "../state/model-config.js";
@@ -80,24 +81,35 @@ export class CredentialDraftVault {
 }
 export class OAuthSessionManager {
     vault;
-    persistentAuth;
+    persistentCredentials;
     sessions = new Map();
     timeoutMs;
     login;
-    constructor(vault, persistentAuth, options = {}) {
+    constructor(vault, persistentCredentials, options = {}) {
         this.vault = vault;
-        this.persistentAuth = persistentAuth;
+        this.persistentCredentials = persistentCredentials;
         this.timeoutMs = options.timeoutMs ?? DEFAULT_OAUTH_TIMEOUT_MS;
         this.login =
-            options.login ?? ((storage, provider, callbacks) => storage.login(provider, callbacks));
+            options.login ??
+                ((runtime, provider, interaction) => runtime.login(provider, "oauth", interaction));
     }
-    start(provider, preferredMethod) {
+    async start(provider, preferredMethod) {
         const definition = getProviderDefinition(provider);
         if (!definition?.oauthProvider || !definition.authMethods.includes("oauth")) {
             throw new Error(`Provider does not support OAuth: ${provider}`);
         }
-        const existing = this.persistentAuth.get(provider);
-        const staging = AuthStorage.inMemory(existing ? { [provider]: structuredClone(existing) } : {});
+        const loginProvider = definition.oauthProvider;
+        const existing = (await this.persistentCredentials.read(provider)) ??
+            (await this.persistentCredentials.read(loginProvider));
+        const staging = new InMemoryCredentialStore();
+        if (existing) {
+            await staging.modify(loginProvider, async () => structuredClone(existing));
+        }
+        const stagingRuntime = await ModelRuntime.create({
+            credentials: staging,
+            modelsPath: null,
+            allowModelNetwork: false,
+        });
         const now = Date.now();
         const controller = new AbortController();
         const record = {
@@ -117,59 +129,25 @@ export class OAuthSessionManager {
         };
         record.timer.unref();
         this.sessions.set(record.id, record);
-        const callbacks = {
+        let selectedMethod = preferredMethod;
+        const interaction = {
             signal: controller.signal,
-            onAuth: (info) => this.update(record, {
-                notice: {
-                    type: "auth-url",
-                    url: safeOAuthUrl(info.url),
-                    ...(info.instructions ? { instructions: info.instructions } : {}),
-                },
-            }),
-            onDeviceCode: (info) => this.update(record, {
-                notice: {
-                    type: "device-code",
-                    userCode: info.userCode,
-                    verificationUri: safeOAuthUrl(info.verificationUri),
-                    ...(info.expiresInSeconds === undefined
-                        ? {}
-                        : { expiresInSeconds: info.expiresInSeconds }),
-                },
-            }),
-            onProgress: (message) => this.update(record, {
-                notice: { type: "progress", message: safeOAuthMessage(message) },
-            }),
-            onSelect: async (prompt) => {
-                if (preferredMethod && prompt.options.some((option) => option.id === preferredMethod)) {
-                    const selected = preferredMethod;
-                    preferredMethod = undefined;
-                    return selected;
+            prompt: (prompt) => {
+                const value = this.handlePrompt(record, prompt, selectedMethod);
+                if (prompt.type === "select" &&
+                    selectedMethod &&
+                    prompt.options.some((option) => option.id === selectedMethod)) {
+                    selectedMethod = undefined;
                 }
-                return this.awaitInput(record, {
-                    id: randomUUID(),
-                    type: "select",
-                    message: safeOAuthMessage(prompt.message),
-                    options: prompt.options.map((option) => ({ id: option.id, label: option.label })),
-                });
+                return value;
             },
-            onPrompt: (prompt) => this.awaitInput(record, {
-                id: randomUUID(),
-                type: "text",
-                message: safeOAuthMessage(prompt.message),
-                ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}),
-                ...(prompt.allowEmpty === undefined ? {} : { allowEmpty: prompt.allowEmpty }),
-            }).then((value) => value ?? ""),
-            onManualCodeInput: () => this.awaitInput(record, {
-                id: randomUUID(),
-                type: "manual-code",
-                message: "Complete login in the browser or paste the authorization code.",
-            }).then((value) => value ?? ""),
+            notify: (event) => this.handleAuthEvent(record, event),
         };
-        void this.login(staging, definition.oauthProvider, callbacks)
-            .then(() => {
+        void this.login(stagingRuntime, loginProvider, interaction)
+            .then(async (result) => {
             if (isOAuthTerminal(record.status))
                 return;
-            const credential = staging.get(provider);
+            const credential = (await staging.read(loginProvider)) ?? result;
             if (!credential || credential.type !== "oauth")
                 throw new Error("OAuth completed without credentials");
             const credentialDraft = this.vault.stageOAuth(provider, credential);
@@ -189,6 +167,53 @@ export class OAuthSessionManager {
             });
         });
         return publicOAuthSession(record);
+    }
+    handlePrompt(record, prompt, preferredMethod) {
+        if (prompt.type === "select") {
+            if (preferredMethod && prompt.options.some((option) => option.id === preferredMethod)) {
+                return Promise.resolve(preferredMethod);
+            }
+            return this.awaitInput(record, {
+                id: randomUUID(),
+                type: "select",
+                message: safeOAuthMessage(prompt.message),
+                options: prompt.options.map((option) => ({ id: option.id, label: option.label })),
+            }).then((value) => value ?? "");
+        }
+        return this.awaitInput(record, {
+            id: randomUUID(),
+            type: prompt.type === "manual_code" ? "manual-code" : "text",
+            message: safeOAuthMessage(prompt.message),
+            ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}),
+        }).then((value) => value ?? "");
+    }
+    handleAuthEvent(record, event) {
+        if (event.type === "auth_url") {
+            this.update(record, {
+                notice: {
+                    type: "auth-url",
+                    url: safeOAuthUrl(event.url),
+                    ...(event.instructions ? { instructions: event.instructions } : {}),
+                },
+            });
+            return;
+        }
+        if (event.type === "device_code") {
+            this.update(record, {
+                notice: {
+                    type: "device-code",
+                    userCode: event.userCode,
+                    verificationUri: safeOAuthUrl(event.verificationUri),
+                    ...(event.expiresInSeconds === undefined
+                        ? {}
+                        : { expiresInSeconds: event.expiresInSeconds }),
+                },
+            });
+            return;
+        }
+        this.update(record, {
+            notice: { type: "progress", message: safeOAuthMessage(event.message) },
+        });
     }
     status(sessionId) {
         return publicOAuthSession(this.requireSession(sessionId));

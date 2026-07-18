@@ -37,7 +37,7 @@ flowchart TB
     B --> L[Lenient OS-sandboxed Bash]
     R --> D[Git common dir or user-state namespace]
     R --> CR[Provider capability registry]
-    CR --> PR[Pi model registry and AuthStorage]
+    CR --> PR[Pi ModelRuntime and CredentialStore]
     D --> MF[model.json]
     D --> S[state.json and jobs]
     H --> V[Host-owned verification and delivery]
@@ -73,6 +73,7 @@ The runner accepts these public command surfaces:
 ```text
 mise exec -- node scripts/pi-runner.mjs init --host <claude|codex> --json
 mise exec -- node scripts/pi-runner.mjs models --json
+mise exec -- node scripts/pi-runner.mjs models --refresh --json
 mise exec -- node scripts/pi-runner.mjs providers --json
 mise exec -- node scripts/pi-runner.mjs configure --host <host> [--section project] [--no-open]
 mise exec -- node scripts/pi-runner.mjs ask --host <host> --prompt-file <file> --json
@@ -119,8 +120,8 @@ experiment child; Host Actions create a separate host-broker child only after
 an explicitly recorded recommendation and explicit confirmation.
 
 The runner creates one in-memory Pi session per delegated model attempt.
-Strict jobs use scoped repository tools only. Adaptive and Lenient jobs add
-OS-sandboxed Bash. Ordinary orchestration perspectives in a stage share one
+Strict jobs use scoped repository tools only. Adaptive, Lenient, and Autopilot
+jobs add OS-sandboxed Bash. Ordinary orchestration perspectives in a stage share one
 manager so parallel sessions cannot reset each other's process boundary.
 Discover is stage-scoped: Research disposes before gate waiting, Experiment
 owns a separate manager in the isolated child worktree, and Convergence or
@@ -235,7 +236,7 @@ resolves the canonical invocation path and Git root as possible user-state
 sources. If exactly one source exists and no destination exists, the entire
 durable state directory is moved into the Git common directory. Jobs, artifacts,
 notifications, continuations, and recovery data move together; credentials in
-Pi `AuthStorage` do not. Source/destination locks, same-filesystem rename, and
+the Pi-compatible `CredentialStore` do not. Source/destination locks, same-filesystem rename, and
 validated staging for cross-filesystem copy preserve the source until success.
 Active Jobs, ambiguous sources, and destination conflicts fail closed without
 merge, overwrite, or deletion. Migration provenance in `state.json` contains
@@ -266,12 +267,18 @@ by the command families that need them.
 
 ## Credentials
 
-Pi `AuthStorage` owns provider credentials in the user scope. Browser input
+The Pi-compatible `CredentialStore` owns provider credentials in the user scope. Browser input
 first enters a token-bound in-memory `CredentialDraftVault`; discovery,
 verification, and save refer to an opaque draft ID. Candidate verification uses
-an in-memory AuthStorage clone, and the real store changes only in the final
+an in-memory credential-store clone, and the real store changes only in the final
 transaction. The key is never stored in `model.json`, `state.json`, job
 artifacts, localStorage, stdout, logs, URLs, or browser responses.
+
+The plugin creates an async Pi `ModelRuntime` with the configured auth and model
+files. Startup uses a local model snapshot; `models --refresh` is the explicit
+network-enabled catalog refresh path. Worker and classifier sessions receive
+the same runtime instance so model authentication and provider environment
+overlays remain consistent.
 
 ChatGPT Plus/Pro uses Pi's `openai-codex` browser or device-code OAuth and the
 `openai-codex-responses` adapter. It is a separate connection from OpenAI API
@@ -281,7 +288,7 @@ timeout, and server shutdown abort the flow.
 Provider profiles are converted to provider-scoped environment overlays and
 controlled request headers. They never mutate `process.env`. Literal header
 values are escaped before Pi configuration resolution, while secret headers
-resolve only through AuthStorage references.
+resolve only through CredentialStore references.
 
 The plugin does not scan `.env` files or copy private credentials from Claude
 Code, Codex, or another application's credential store. Provider discovery is

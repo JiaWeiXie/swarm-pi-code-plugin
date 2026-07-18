@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 
 import { createPiEnvironment, customProviderHeaderVariable } from "../src/pi/environment.js";
 import { parseModelConfiguration, providerHeaderSecretRef } from "../src/state/model-config.js";
 
-test("provider profiles overlay adapter environment without mutating process.env", () => {
+test("provider profiles overlay adapter environment without mutating process.env", async () => {
   const configuration = parseModelConfiguration({
     version: 1,
     primary: null,
@@ -31,13 +31,17 @@ test("provider profiles overlay adapter environment without mutating process.env
     ],
     updatedAt: null,
   });
-  const storage = AuthStorage.inMemory({
-    "azure-openai-responses": { type: "api_key", key: "secret", env: { EXISTING: "preserved" } },
-  });
+  const storage = new InMemoryCredentialStore();
+  await storage.modify("azure-openai-responses", async () => ({
+    type: "api_key",
+    key: "secret",
+    env: { EXISTING: "preserved" },
+  }));
   const before = process.env.AZURE_OPENAI_RESOURCE_NAME;
-  const environment = createPiEnvironment(configuration, {}, { authStorage: storage });
+  const environment = await createPiEnvironment(configuration, {}, { credentials: storage });
+  const credential = await environment.credentials.read("azure-openai-responses");
 
-  assert.deepEqual(environment.authStorage.getProviderEnv("azure-openai-responses"), {
+  assert.deepEqual(credential && credential.type === "api_key" ? credential.env : undefined, {
     EXISTING: "preserved",
     AZURE_OPENAI_RESOURCE_NAME: "project-resource",
     AZURE_OPENAI_API_VERSION: "v1",
@@ -68,26 +72,22 @@ test("OpenAI profile metadata becomes controlled headers", async () => {
     ],
     updatedAt: null,
   });
-  const environment = createPiEnvironment(
-    configuration,
-    {},
-    {
-      authStorage: AuthStorage.inMemory({ openai: { type: "api_key", key: "secret" } }),
-    },
-  );
-  const model = environment.modelRegistry
-    .getAll()
-    .find((candidate) => candidate.provider === "openai")!;
-  const requestAuth = await environment.modelRegistry.getApiKeyAndHeaders(model);
+  const storage = new InMemoryCredentialStore();
+  await storage.modify("openai", async () => ({ type: "api_key", key: "secret" }));
+  const environment = await createPiEnvironment(configuration, {}, { credentials: storage });
+  const model = [...environment.modelRuntime.getModels()].find(
+    (candidate) => candidate.provider === "openai",
+  )!;
+  const requestAuth = await environment.modelRuntime.getAuth(model);
 
-  assert.equal(requestAuth.ok, true);
-  if (requestAuth.ok) {
-    assert.equal(requestAuth.headers?.["OpenAI-Organization"], "org_example");
-    assert.equal(requestAuth.headers?.["OpenAI-Project"], "proj_example");
+  assert.ok(requestAuth);
+  if (requestAuth) {
+    assert.equal(requestAuth.auth.headers?.["OpenAI-Organization"], "org_example");
+    assert.equal(requestAuth.auth.headers?.["OpenAI-Project"], "proj_example");
   }
 });
 
-test("custom secret headers resolve only through provider-scoped AuthStorage env", async () => {
+test("custom secret headers resolve only through provider-scoped CredentialStore env", async () => {
   const provider = "custom-header-test";
   const variable = customProviderHeaderVariable(provider, "x-api-key");
   const configuration = parseModelConfiguration({
@@ -142,21 +142,19 @@ test("custom secret headers resolve only through provider-scoped AuthStorage env
     ],
     updatedAt: null,
   });
-  const environment = createPiEnvironment(
-    configuration,
-    {},
-    {
-      authStorage: AuthStorage.inMemory({
-        [provider]: { type: "api_key", key: "local-no-auth", env: { [variable]: "header-secret" } },
-      }),
-    },
-  );
-  const model = environment.modelRegistry.find(provider, "model")!;
-  const requestAuth = await environment.modelRegistry.getApiKeyAndHeaders(model);
+  const storage = new InMemoryCredentialStore();
+  await storage.modify(provider, async () => ({
+    type: "api_key",
+    key: "local-no-auth",
+    env: { [variable]: "header-secret" },
+  }));
+  const environment = await createPiEnvironment(configuration, {}, { credentials: storage });
+  const model = environment.modelRuntime.getModel(provider, "model")!;
+  const requestAuth = await environment.modelRuntime.getAuth(model);
 
-  assert.equal(requestAuth.ok, true);
-  if (requestAuth.ok) {
-    assert.equal(requestAuth.headers?.["X-Api-Key"], "header-secret");
+  assert.ok(requestAuth);
+  if (requestAuth) {
+    assert.equal(requestAuth.auth.headers?.["X-Api-Key"], "header-secret");
     assert.equal(requestAuth.env?.[variable], "header-secret");
   }
   assert.doesNotMatch(JSON.stringify(configuration), /header-secret/);
@@ -187,27 +185,23 @@ test("literal provider headers cannot invoke Pi config expansion", async () => {
     ],
     updatedAt: null,
   });
-  const environment = createPiEnvironment(
-    configuration,
-    {},
-    {
-      authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "secret" } }),
-    },
-  );
-  const model = environment.modelRegistry
-    .getAll()
-    .find((candidate) => candidate.provider === "openrouter")!;
-  const requestAuth = await environment.modelRegistry.getApiKeyAndHeaders(model);
+  const storage = new InMemoryCredentialStore();
+  await storage.modify("openrouter", async () => ({ type: "api_key", key: "secret" }));
+  const environment = await createPiEnvironment(configuration, {}, { credentials: storage });
+  const model = [...environment.modelRuntime.getModels()].find(
+    (candidate) => candidate.provider === "openrouter",
+  )!;
+  const requestAuth = await environment.modelRuntime.getAuth(model);
 
-  assert.equal(requestAuth.ok, true);
-  if (requestAuth.ok) {
-    assert.equal(requestAuth.headers?.["X-Title"], "!printf unsafe");
-    assert.equal(requestAuth.headers?.["Anthropic-Beta"], "$SWARM_HEADER_MUST_NOT_EXPAND");
+  assert.ok(requestAuth);
+  if (requestAuth) {
+    assert.equal(requestAuth.auth.headers?.["X-Title"], "!printf unsafe");
+    assert.equal(requestAuth.auth.headers?.["Anthropic-Beta"], "$SWARM_HEADER_MUST_NOT_EXPAND");
   }
   delete process.env.SWARM_HEADER_MUST_NOT_EXPAND;
 });
 
-test("openai-family custom providers clamp reasoning effort into the OpenAI/Azure-safe set", () => {
+test("openai-family custom providers clamp reasoning effort into the OpenAI/Azure-safe set", async () => {
   const provider = "azure-responses-test";
   const configuration = parseModelConfiguration({
     version: 1,
@@ -233,15 +227,11 @@ test("openai-family custom providers clamp reasoning effort into the OpenAI/Azur
     providerProfiles: [],
     updatedAt: null,
   });
-  const environment = createPiEnvironment(
-    configuration,
-    {},
-    {
-      authStorage: AuthStorage.inMemory({ [provider]: { type: "api_key", key: "secret" } }),
-    },
-  );
+  const storage = new InMemoryCredentialStore();
+  await storage.modify(provider, async () => ({ type: "api_key", key: "secret" }));
+  const environment = await createPiEnvironment(configuration, {}, { credentials: storage });
 
-  const reasoning = environment.modelRegistry.find(provider, "gpt-5.6-luna")!;
+  const reasoning = environment.modelRuntime.getModel(provider, "gpt-5.6-luna")!;
   // "minimal" (OpenAI-only) and "off" clamp down to Azure's floor; "xhigh"/"max"
   // clamp down to "high" so nothing outside {low,medium,high} ever reaches the wire.
   assert.deepEqual(reasoning.thinkingLevelMap, {
@@ -255,11 +245,11 @@ test("openai-family custom providers clamp reasoning effort into the OpenAI/Azur
   });
 
   // Non-reasoning models get no map, so no reasoning.effort is emitted for them.
-  const plain = environment.modelRegistry.find(provider, "gpt-3.5-nonreasoning")!;
+  const plain = environment.modelRuntime.getModel(provider, "gpt-3.5-nonreasoning")!;
   assert.equal(plain.thinkingLevelMap, undefined);
 });
 
-test("anthropic-messages custom providers are excluded from the OpenAI effort map", () => {
+test("anthropic-messages custom providers are excluded from the OpenAI effort map", async () => {
   const provider = "anthropic-compat-test";
   const configuration = parseModelConfiguration({
     version: 1,
@@ -281,16 +271,12 @@ test("anthropic-messages custom providers are excluded from the OpenAI effort ma
     providerProfiles: [],
     updatedAt: null,
   });
-  const environment = createPiEnvironment(
-    configuration,
-    {},
-    {
-      authStorage: AuthStorage.inMemory({ [provider]: { type: "api_key", key: "secret" } }),
-    },
-  );
+  const storage = new InMemoryCredentialStore();
+  await storage.modify(provider, async () => ({ type: "api_key", key: "secret" }));
+  const environment = await createPiEnvironment(configuration, {}, { credentials: storage });
 
   // Claude takes effort via output_config.effort + native thinking config, not a
   // reasoning.effort string — so a clamped map must NOT be injected here.
-  const model = environment.modelRegistry.find(provider, "claude-compat")!;
+  const model = environment.modelRuntime.getModel(provider, "claude-compat")!;
   assert.equal(model.thinkingLevelMap, undefined);
 });

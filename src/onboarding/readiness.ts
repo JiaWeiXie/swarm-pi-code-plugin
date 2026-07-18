@@ -51,7 +51,9 @@ export async function inspectReadiness(options: {
       ),
     );
   }
-  if (sandboxMode !== "strict") {
+  // full-access needs no sandbox backend (it removes the OS sandbox entirely),
+  // so it is grouped with strict here and never blocks on backend availability.
+  if (sandboxMode !== "strict" && sandboxMode !== "full-access") {
     const sandbox = detectSandboxAvailability();
     if (!sandbox.available) {
       issues.push(
@@ -67,6 +69,31 @@ export async function inspectReadiness(options: {
         ),
       );
     }
+  }
+  if (sandboxMode === "full-access") {
+    issues.push(
+      issue(
+        "sandbox-full-access",
+        "execution-safety",
+        "warning",
+        "Full-access mode removes the plugin's OS sandbox: the worker's shell runs unconfined by this plugin. Its actual reach depends entirely on the host's own sandbox, which this plugin cannot control. On a default Claude Code session (no /sandbox) the worker has unrestricted access to this machine.",
+        [
+          { action: "use-adaptive", label: "Use Adaptive mode instead" },
+          { action: "configure", label: "Review execution safety" },
+        ],
+      ),
+    );
+  }
+  if (sandboxMode === "autopilot") {
+    issues.push(
+      issue(
+        "sandbox-autopilot",
+        "execution-safety",
+        "warning",
+        "Autopilot keeps the OS sandbox but runs routine shell (build/test, rm/mv/cp, curl/wget, interpreters, redirection) unattended without approval. sudo/su, plugin control paths, secrets, and git metadata stay enforced; git and deployment run only when their outward-boundary options are enabled, always through a human decision.",
+        [{ action: "use-lenient", label: "Use Lenient mode instead" }],
+      ),
+    );
   }
   if (!workspace.git) {
     issues.push(
@@ -182,5 +209,10 @@ function issue(
 }
 
 export function sandboxModeForReport(value: unknown): SandboxMode {
-  return value === "adaptive" || value === "lenient" ? value : "strict";
+  return value === "adaptive" ||
+    value === "lenient" ||
+    value === "autopilot" ||
+    value === "full-access"
+    ? value
+    : "strict";
 }

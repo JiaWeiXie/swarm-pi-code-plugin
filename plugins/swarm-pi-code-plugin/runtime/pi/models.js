@@ -43,15 +43,22 @@ export function describeProviders(catalog, configuration) {
         };
     });
 }
-export function createModelCatalog(configuration, env = process.env) {
-    const { modelRegistry: registry } = createPiEnvironment(configuration, env);
-    return {
-        all: () => registry.getAll(),
-        available: () => registry.getAvailable(),
-        displayName: (provider) => registry.getProviderDisplayName(provider),
-        authStatus: (provider) => registry.getProviderAuthStatus(provider),
-        error: () => registry.getError(),
-    };
+export function createModelCatalog(configuration, env = process.env, options = {}) {
+    return createPiEnvironment(configuration, env).then(async ({ modelRuntime: runtime }) => {
+        const catalog = {
+            all: () => [...runtime.getModels()],
+            available: () => [...runtime.getAvailableSnapshot()],
+            refresh: async () => {
+                await runtime.refresh({ allowNetwork: true });
+            },
+            displayName: (provider) => runtime.getProvider(provider)?.name ?? provider,
+            authStatus: (provider) => runtime.getProviderAuthStatus(provider),
+            error: () => runtime.getError(),
+        };
+        if (options.refresh)
+            await catalog.refresh();
+        return catalog;
+    });
 }
 export function selectModel(models, requested) {
     if (!requested) {

@@ -820,6 +820,11 @@ function normalizeHostAssistancePolicy(value: unknown): HostAssistancePolicy {
         ? candidate.autoApprovalScope
         : "context-only",
     autoApproveDiscoveryGates: candidate.autoApproveDiscoveryGates === true,
+    // Autopilot outward-boundary controls. Missing/legacy → stricter defaults.
+    outwardApprovalGranularity:
+      candidate.outwardApprovalGranularity === "first-then-auto" ? "first-then-auto" : "each-time",
+    autoGitWrites: candidate.autoGitWrites === true,
+    autoDelivery: candidate.autoDelivery === true,
   };
 }
 
@@ -972,7 +977,12 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function sandboxModeValue(value: unknown): SandboxMode {
-  return value === "adaptive" || value === "lenient" ? value : "strict";
+  return value === "adaptive" ||
+    value === "lenient" ||
+    value === "autopilot" ||
+    value === "full-access"
+    ? value
+    : "strict";
 }
 
 function rolePolicyOverrides(value: unknown): RolePolicyOverrides {

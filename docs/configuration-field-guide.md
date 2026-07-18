@@ -391,6 +391,14 @@ Deny has priority over ask and allow.
   supervisor according to configuration.
 - **Lenient** provides broader shell/network behavior while retaining the OS
   Sandbox. It is not unsandboxed, but more Worker-visible data may reach services.
+- **Autopilot** keeps Lenient's OS-Sandbox isolation (it needs the same sandbox
+  backend) but auto-runs routine shell unattended, without stopping for a
+  supervisor; that routine-shell autonomy is intrinsic to the mode, and git and
+  deploy still stay behind a mandatory human approval gate.
+- **Full-access** removes the plugin's own OS Sandbox and runs the Worker's Bash
+  un-wrapped, so unlike Lenient it *is* unsandboxed by this plugin; the Worker's
+  reach then depends entirely on the host's own sandbox. It needs no sandbox
+  backend, so it is always selectable.
 - **Authorization** decides whether one proposed action is allowed, must ask, or
   is denied. Sandbox is the outer operating-system boundary; authorization is the
   checkpoint inside it.

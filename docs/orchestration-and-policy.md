@@ -159,7 +159,9 @@ Enforcement runs in this order:
    revalidates the traversed directory identities after the SDK operation.
 3. In adaptive and lenient sandbox modes, the Bash write allowlist limits
    writes to the bound write and shell roots plus the sandbox temporary
-   directory.
+   directory. `full-access` removes the OS sandbox, so this allowlist cannot
+   constrain its raw Bash; only the tool boundary and postflight backstop remain,
+   and out-of-scope writes made during the run are unobserved.
 4. The postflight backstop requires every changed path to be under the write
    roots before checkpointing, verification, artifact delivery, or
    materialization eligibility.
@@ -204,9 +206,9 @@ lease record is optional audit metadata; authorization relies on the exact
 
 Legacy v1 requests and an unrestricted v2 policy materialize
 whole-execution-workspace behavior. Scoped Pi read and search tools enforce
-read and search roots. Raw Bash reads in adaptive and lenient modes are not
-folder-scoped: they can read the workspace outside configured directories,
-subject only to the existing sensitive read deny paths. This is an accepted
+read and search roots. Raw Bash reads in adaptive, lenient, and full-access modes
+are not folder-scoped: they can read the workspace outside configured
+directories, subject only to the existing sensitive read deny paths. This is an accepted
 boundary, not an oversight: pinned `@carderne/sandbox-runtime@0.0.49` reads
 are allow-by-default (deny-then-allow, with `allowRead` overriding `denyRead`).
 Scoping Bash reads would require denying the workspace and re-allowing the
@@ -214,9 +216,10 @@ policy roots plus a complete, ecosystem-specific tooling read closure (such as
 project metadata, dependencies, project references, temporary roots, and
 runtime libraries) that cannot be derived from the project directories; this
 would break normal tooling, and a broad re-allow could reopen already-denied
-sensitive paths. Shell writes remain constrained to the write/shell roots;
-Strict mode, which exposes no Bash, is the option when folder-level read
-confidentiality is required. Reconsider this boundary only if the sandbox
+sensitive paths. Shell writes remain constrained to the write/shell roots in
+adaptive and lenient modes (full-access has no OS sandbox and therefore no such
+constraint on raw Bash); Strict mode, which exposes no Bash, is the option when
+folder-level read confidentiality is required. Reconsider this boundary only if the sandbox
 runtime gains a true allow-only read model, or the project supplies an
 explicit, testable tooling-read dependency manifest.
 
@@ -228,6 +231,37 @@ explicit, testable tooling-read dependency manifest.
 - `lenient` preserves the existing OS-sandboxed Bash and outbound network
   behavior. It remains subject to immutable filesystem, environment, socket,
   Git metadata, and credential restrictions.
+- `autopilot` keeps `lenient`'s OS-sandboxed Bash and outbound network behavior —
+  it needs the same sandbox backend and stays subject to the same immutable
+  filesystem, environment, socket, Git metadata, and credential restrictions —
+  but routine supervised shell (build/test, file moves/removes, fetches,
+  interpreters, redirection, workspace-external paths) auto-runs unattended
+  without stopping for supervisor approval. That routine-shell autonomy is
+  intrinsic to the mode; plain `lenient` still gates it.
+- `full-access` removes the plugin's own OS sandbox: the worker's Bash runs
+  un-wrapped, an explicit opt-out of the "never fall back to an unsandboxed
+  shell" invariant. It is a hybrid — for availability and runner creation it
+  behaves like `strict` (no sandbox backend, so it is always selectable), and
+  for policy decisions it behaves like `lenient` (allow-all). The worker's actual
+  reach then depends entirely on the host's own sandbox, which the plugin cannot
+  control or detect. Its shell environment is the real environment minus only the
+  plugin's injected `SWARM_PI_CODE_PLUGIN_*` variables. Discovery experiment
+  children and Host Action delivery children never inherit `full-access` or
+  `autopilot`; they downgrade to `lenient` so they retain an OS sandbox.
+
+Autopilot is the fifth Sandbox mode, not an autonomy preset. Selecting it keeps
+`lenient`'s OS-sandbox isolation but makes routine supervised shell (build/test,
+file moves/removes, fetches, interpreters, redirection, workspace-external paths)
+auto-run unattended without stopping for supervisor approval; that autonomy is
+intrinsic to the mode, `full-access` behaves the same way for routine shell, and
+plain `lenient` still gates it. The `autoGitWrites` and `autoDelivery`
+capabilities — available under Autopilot and `full-access` — lift `git
+commit`/`push`/`merge` and `kubectl`/`helm`/`terraform` from immutable hard-deny
+to actions the user may approve; they are never host-model auto-approved, and
+`outwardApprovalGranularity` (`each-time` or `first-then-auto`) governs the
+approval scope. sudo/su, plugin control paths, secrets, forbidden/loopback
+domains, and direct Git-metadata writes stay enforced under both `full-access`
+and Autopilot.
 
 Adaptive network access starts denied. Trusted domains may pass deterministic
 policy; all other destinations are evaluated by hostname, port, and resolved
@@ -298,6 +332,17 @@ already authorized by the original task. Git metadata, workspace escape,
 deletion, partial/irreversible changes, action recommendations, role escalation,
 adoption, materialization, delivery, deployment, publication, messaging,
 transactions, and uncertain live services stay outside the ceiling.
+
+Full-access likewise cannot be reached through a Host receipt; it is chosen only
+by explicit configuration, and selecting it removes the plugin's own OS sandbox
+rather than granting a leased capability. Under Autopilot or full-access, the
+`autoGitWrites` and `autoDelivery` capabilities lift `git commit`/`push`/`merge`
+and deployment commands from hard-deny only to a user decision: the git/deploy ceiling forces
+user fallback, so the host model never auto-approves them. The host relays the
+user's decision with an approval scope taken from `outwardApprovalGranularity` —
+`--approval-scope once` for `each-time` or `--approval-scope job` for
+`first-then-auto`, whose job-scoped lease is fingerprint-exact and therefore only
+auto-repeats identical commands.
 
 ## Verification Boundaries
 

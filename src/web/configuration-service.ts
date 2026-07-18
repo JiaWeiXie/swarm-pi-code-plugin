@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
-import { AuthStorage, type AuthCredential } from "@earendil-works/pi-coding-agent";
+import type { Credential } from "@earendil-works/pi-ai";
 
 import type {
   AdaptivePolicyConfig,
@@ -31,6 +31,7 @@ import {
   type RolePolicyOverrides,
 } from "../orchestration/roles.js";
 import { createPiEnvironment, customProviderHeaderVariable } from "../pi/environment.js";
+import { cloneCredentialStore, createFileCredentialStore } from "../pi/credentials.js";
 import { executeSession } from "../pi/execute.js";
 import { createWorkerSession } from "../pi/runtime.js";
 import { createModelCatalog, describeProviders, modelId, type PiModel } from "../pi/models.js";
@@ -204,7 +205,7 @@ export async function configureBuiltInProvider(
   if (!definition.authMethods.includes(request.authMethod)) {
     throw new Error(`${definition.name} does not support ${request.authMethod} authentication`);
   }
-  const persistentAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  const persistentCredentials = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
   const { settings, secret } = normalizeProviderFields(
     definition,
     request.authMethod,
@@ -222,7 +223,7 @@ export async function configureBuiltInProvider(
   if (
     (request.authMethod === "api-key" || request.authMethod === "oauth") &&
     !credentialDraft &&
-    !persistentAuth.hasAuth(definition.id)
+    !(await persistentCredentials.read(definition.id))
   ) {
     throw new Error(`${definition.name} requires a credential`);
   }
@@ -233,18 +234,21 @@ export async function configureBuiltInProvider(
     ...configuration,
     providerProfiles: upsertProviderProfile(configuration.providerProfiles, profile),
   });
-  const stagingAuth = AuthStorage.inMemory(persistentAuth.getAll());
-  if (credentialDraft)
-    stagingAuth.set(definition.id, credentialVault.resolve(definition.id, credentialDraft.id));
-  const pi = createPiEnvironment(candidate, env, { authStorage: stagingAuth });
-  const all = pi.modelRegistry.getAll();
+  const stagingCredentials = await cloneCredentialStore(persistentCredentials);
+  if (credentialDraft) {
+    await stagingCredentials.modify(definition.id, async () =>
+      credentialVault.resolve(definition.id, credentialDraft.id),
+    );
+  }
+  const pi = await createPiEnvironment(candidate, env, { credentials: stagingCredentials });
+  const all = [...pi.modelRuntime.getModels()];
   const providerModels = all.filter((model) => model.provider === definition.id);
   if (providerModels.length === 0) throw new Error(`Pi has no models for ${definition.name}`);
-  const available = new Set(pi.modelRegistry.getAvailable().map(modelId));
+  const available = new Set(pi.modelRuntime.getAvailableSnapshot().map(modelId));
   const models = providerModels.map((model) =>
     browserModel(model, available.has(modelId(model)), candidate),
   );
-  const authStatus = pi.modelRegistry.getProviderAuthStatus(definition.id);
+  const authStatus = pi.modelRuntime.getProviderAuthStatus(definition.id);
   return {
     provider: {
       id: definition.id,
@@ -280,7 +284,7 @@ export async function discoverConfigurationEndpoint(
 ): Promise<EndpointDiscoveryResult & { profile: ProviderProfile }> {
   const state = await loadState(cwd, { env });
   const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
-  const catalog = createModelCatalog(configuration, env);
+  const catalog = await createModelCatalog(configuration, env);
   const all = catalog.all?.() ?? catalog.available();
   const root = normalizeProtocolRoot(request.baseUrl, request.protocol);
   const expectedProvider = stableCustomProviderId(root, request.protocol);
@@ -296,7 +300,7 @@ export async function discoverConfigurationEndpoint(
   const authMethod = request.authMethod ?? "none";
   const credential = request.credentialDraftId
     ? credentialVault.resolve(request.provider, request.credentialDraftId)
-    : AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).get(request.provider);
+    : await createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).read(request.provider);
   const apiKey = credentialSecret(credential, request.provider, authMethod, request.headerName);
   if (authMethod !== "none" && !apiKey) throw new Error("Credential draft is missing or expired");
   const result = await discoverEndpoint(
@@ -505,14 +509,17 @@ export async function verifyProviderConnection(
   });
   assertProviderProfilePolicies(candidate);
   const drafts = normalizeCredentialDrafts(request.credentialDrafts, credentialVault);
-  const persistentAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-  const stagingAuth = AuthStorage.inMemory(persistentAuth.getAll());
-  for (const draft of drafts)
-    stagingAuth.set(draft.provider, credentialVault.resolve(draft.provider, draft.draftId));
-  const pi = createPiEnvironment(candidate, env, { authStorage: stagingAuth });
-  const model = pi.modelRegistry.getAll().find((entry) => modelId(entry) === request.model);
+  const persistentCredentials = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  const stagingCredentials = await cloneCredentialStore(persistentCredentials);
+  for (const draft of drafts) {
+    await stagingCredentials.modify(draft.provider, async () =>
+      credentialVault.resolve(draft.provider, draft.draftId),
+    );
+  }
+  const pi = await createPiEnvironment(candidate, env, { credentials: stagingCredentials });
+  const model = [...pi.modelRuntime.getModels()].find((entry) => modelId(entry) === request.model);
   if (!model) throw new Error(`Unknown model selection: ${request.model}`);
-  if (!pi.modelRegistry.getAvailable().some((entry) => modelId(entry) === request.model)) {
+  if (!pi.modelRuntime.getAvailableSnapshot().some((entry) => modelId(entry) === request.model)) {
     throw new Error(`Model is not authenticated: ${request.model}`);
   }
   const { session } = await createWorkerSession({
@@ -520,8 +527,7 @@ export async function verifyProviderConnection(
     mode: "readonly",
     model,
     modelConfiguration: candidate,
-    authStorage: pi.authStorage,
-    modelRegistry: pi.modelRegistry,
+    modelRuntime: pi.modelRuntime,
     // Lowest reasoning effort accepted by both OpenAI and Azure responses models.
     // "minimal" is OpenAI-only; Azure gpt-5.x rejects it, and map-less custom
     // providers pass the level through verbatim, so use the safe intersection.
@@ -564,7 +570,7 @@ export async function signOutProvider(
   ) {
     throw new Error(`Unknown provider: ${provider}`);
   }
-  AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).logout(provider);
+  await createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).delete(provider);
 }
 
 export async function discoverLocalConfigurationEndpoints(
@@ -573,7 +579,7 @@ export async function discoverLocalConfigurationEndpoints(
 ): Promise<EndpointDiscoveryResult[]> {
   const state = await loadState(cwd, { env });
   const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
-  const catalog = createModelCatalog(configuration, env);
+  const catalog = await createModelCatalog(configuration, env);
   const all = catalog.all?.() ?? catalog.available();
   return discoverLocalEndpoints(all, {
     reservedProviderIds: all.map((model) => model.provider),
@@ -586,7 +592,7 @@ export async function loadConfigurationView(
 ): Promise<ConfigurationView> {
   const state = await loadState(cwd, { env });
   const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
-  const catalog = createModelCatalog(configuration, env);
+  const catalog = await createModelCatalog(configuration, env);
   const all = catalog.all?.() ?? catalog.available();
   const availableModels = catalog.available();
   const available = new Set(availableModels.map(modelId));
@@ -745,7 +751,7 @@ export async function saveConfigurationSubmission(
   assertNoBuiltInProviderOverride(current, candidate);
   assertProviderProfilePolicies(candidate);
 
-  const persistentAuth = AuthStorage.create(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  const persistentCredentials = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
   const credentialDrafts = normalizeCredentialDrafts(
     submission.credentialDrafts,
     options.credentialVault,
@@ -755,11 +761,13 @@ export async function saveConfigurationSubmission(
     draftId: draft.draftId,
     credential: options.credentialVault!.resolve(draft.provider, draft.draftId),
   }));
-  const stagingAuth = AuthStorage.inMemory(persistentAuth.getAll());
-  for (const credential of credentials) stagingAuth.set(credential.provider, credential.credential);
-  const pi = createPiEnvironment(candidate, env, { authStorage: stagingAuth });
+  const stagingCredentials = await cloneCredentialStore(persistentCredentials);
+  for (const credential of credentials) {
+    await stagingCredentials.modify(credential.provider, async () => credential.credential);
+  }
+  const pi = await createPiEnvironment(candidate, env, { credentials: stagingCredentials });
 
-  const all = new Map(pi.modelRegistry.getAll().map((model) => [modelId(model), model]));
+  const all = new Map([...pi.modelRuntime.getModels()].map((model) => [modelId(model), model]));
   const priority = modelPriority(candidate);
   const missing = priority.filter((reference) => !all.has(reference));
   if (missing.length > 0) {
@@ -770,7 +778,7 @@ export async function saveConfigurationSubmission(
       throw new Error(`Unknown credential provider: ${credential.provider}`);
     }
   }
-  const available = new Set(pi.modelRegistry.getAvailable().map(modelId));
+  const available = new Set(pi.modelRuntime.getAvailableSnapshot().map(modelId));
   const unavailable = priority.filter((reference) => !available.has(reference));
   if (unavailable.length > 0) {
     throw new Error(`Selected models are not authenticated: ${unavailable.join(", ")}`);
@@ -792,8 +800,7 @@ export async function saveConfigurationSubmission(
         mode: "readonly",
         model,
         modelConfiguration: candidate,
-        authStorage: pi.authStorage,
-        modelRegistry: pi.modelRegistry,
+        modelRuntime: pi.modelRuntime,
         // See verifyProviderConnection: "low" is the OpenAI/Azure-safe floor.
         thinkingLevel: "low",
       });
@@ -817,20 +824,22 @@ export async function saveConfigurationSubmission(
   }
 
   for (const credential of credentials) {
-    const refreshed = stagingAuth.get(credential.provider);
+    const refreshed = await stagingCredentials.read(credential.provider);
     if (refreshed) credential.credential = refreshed;
   }
 
   const modelFile = await resolveModelConfigurationFile(cwd, env);
   const stateFile = await resolveStateFile(cwd, env);
   const fileSnapshots = await Promise.all([snapshotFile(modelFile), snapshotFile(stateFile)]);
-  const credentialSnapshots = credentials.map((credential) => ({
-    provider: credential.provider,
-    value: persistentAuth.get(credential.provider),
-  }));
+  const credentialSnapshots = await Promise.all(
+    credentials.map(async (credential) => ({
+      provider: credential.provider,
+      value: await persistentCredentials.read(credential.provider),
+    })),
+  );
   try {
     for (const credential of credentials) {
-      persistentAuth.set(credential.provider, credential.credential);
+      await persistentCredentials.modify(credential.provider, async () => credential.credential);
     }
     const saved = await saveModelConfiguration(cwd, candidate, env);
     await setModelPriority(cwd, modelPriority(saved), env);
@@ -840,8 +849,11 @@ export async function saveConfigurationSubmission(
     const rollbackErrors: string[] = [];
     for (const snapshot of credentialSnapshots) {
       try {
-        if (snapshot.value) persistentAuth.set(snapshot.provider, snapshot.value);
-        else persistentAuth.remove(snapshot.provider);
+        if (snapshot.value) {
+          await persistentCredentials.modify(snapshot.provider, async () => snapshot.value);
+        } else {
+          await persistentCredentials.delete(snapshot.provider);
+        }
       } catch (rollbackError) {
         rollbackErrors.push(
           `credential:${snapshot.provider}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
@@ -940,7 +952,7 @@ export async function saveProjectProfileSubmission(
   });
   assertSandboxModeAvailable(sandboxMode);
   const modelConfiguration = await loadModelConfiguration(cwd, current.config.modelPriority, env);
-  const catalog = createModelCatalog(modelConfiguration, env);
+  const catalog = await createModelCatalog(modelConfiguration, env);
   const all = new Map(
     (catalog.all?.() ?? catalog.available()).map((model) => [modelId(model), model]),
   );
@@ -959,8 +971,16 @@ export async function saveProjectProfileSubmission(
 
 function normalizeSandboxMode(value: unknown, fallback: SandboxMode): SandboxMode {
   if (value === undefined) return fallback;
-  if (value === "strict" || value === "adaptive" || value === "lenient") return value;
-  throw new Error("Sandbox mode must be strict, adaptive, or lenient");
+  if (
+    value === "strict" ||
+    value === "adaptive" ||
+    value === "lenient" ||
+    value === "autopilot" ||
+    value === "full-access"
+  ) {
+    return value;
+  }
+  throw new Error("Sandbox mode must be strict, adaptive, lenient, autopilot, or full-access");
 }
 
 function normalizeDecisionMode(value: unknown, fallback: DecisionMode): DecisionMode {
@@ -996,6 +1016,10 @@ function normalizeHostAssistance(
   const autoApprovalScope = value.autoApprovalScope ?? fallback.autoApprovalScope ?? "context-only";
   const autoApproveDiscoveryGates =
     value.autoApproveDiscoveryGates ?? fallback.autoApproveDiscoveryGates ?? false;
+  const outwardApprovalGranularity =
+    value.outwardApprovalGranularity ?? fallback.outwardApprovalGranularity ?? "each-time";
+  const autoGitWrites = value.autoGitWrites ?? fallback.autoGitWrites ?? false;
+  const autoDelivery = value.autoDelivery ?? fallback.autoDelivery ?? false;
   const allowedContextClasses = ["workspace", "web", "docs", "paper", "connector", "skill"];
   if (
     !Array.isArray(value.contextClasses) ||
@@ -1018,6 +1042,11 @@ function normalizeHostAssistance(
     autoApprovalScope !== "reversible"
   )
     throw new Error("Invalid Host Assistance auto-approval scope");
+  if (
+    outwardApprovalGranularity !== "each-time" &&
+    outwardApprovalGranularity !== "first-then-auto"
+  )
+    throw new Error("Invalid outward approval granularity");
   const maxRequests = normalizeBoundedInteger(
     value.maxRequests,
     fallback.maxRequests,
@@ -1044,6 +1073,9 @@ function normalizeHostAssistance(
     reviewMode,
     autoApprovalScope,
     autoApproveDiscoveryGates,
+    outwardApprovalGranularity,
+    autoGitWrites,
+    autoDelivery,
   };
 }
 
@@ -1154,7 +1186,9 @@ function normalizeHostActions(
 }
 
 function assertSandboxModeAvailable(mode: SandboxMode): void {
-  if (mode === "strict") return;
+  // strict and full-access do not create the OS sandbox backend, so neither
+  // requires Seatbelt/Bubblewrap to be available.
+  if (mode === "strict" || mode === "full-access") return;
   const availability = detectSandboxAvailability();
   if (!availability.available)
     throw new Error(availability.reason ?? "Lenient sandboxing is unavailable");
@@ -1437,7 +1471,7 @@ function authMethodLabel(method: ProviderAuthMethod): string {
 }
 
 function credentialSecret(
-  credential: AuthCredential | undefined,
+  credential: Credential | undefined,
   provider: string,
   authMethod: EndpointDiscoveryRequest["authMethod"],
   headerName: EndpointDiscoveryRequest["headerName"],

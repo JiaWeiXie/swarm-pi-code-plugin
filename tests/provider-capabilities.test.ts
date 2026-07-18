@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 import {
   CUSTOM_ENDPOINT_GUIDANCE,
@@ -18,9 +18,12 @@ import {
 } from "../src/providers/endpoints.js";
 import { parseModelConfiguration } from "../src/state/model-config.js";
 
-test("provider capability registry covers every provider in the pinned Pi catalog", () => {
-  const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
-  const piProviders = [...new Set(registry.getAll().map((model) => model.provider))].sort();
+test("provider capability registry covers every provider in the pinned Pi catalog", async () => {
+  const runtime = await ModelRuntime.create({ modelsPath: null, allowModelNetwork: false });
+  const piProviders = runtime
+    .getProviders()
+    .map((provider) => provider.id)
+    .sort();
 
   assert.deepEqual(unknownProviderIds(piProviders), []);
   assert.deepEqual(providerDefinitionIds(), piProviders);

@@ -61,6 +61,7 @@ export interface RunnerArguments {
   profile?: Record<string, unknown>;
   profileFile?: string;
   allModels?: boolean;
+  refresh?: boolean;
   noOpen?: boolean;
   port?: number;
   configurationSection?: "project";
@@ -155,6 +156,9 @@ export function parseArguments(argv: string[]): RunnerArguments {
         break;
       case "--all":
         parsed.allModels = true;
+        break;
+      case "--refresh":
+        parsed.refresh = true;
         break;
       case "--no-open":
         parsed.noOpen = true;
@@ -316,6 +320,9 @@ export function parseArguments(argv: string[]): RunnerArguments {
   }
   if (parsed.configurationSection && command !== "configure") {
     throw new Error("--section is only supported by configure");
+  }
+  if (parsed.refresh && command !== "models") {
+    throw new Error("--refresh is only supported by models");
   }
   if (
     (command === "ask" ||
