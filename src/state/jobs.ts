@@ -44,6 +44,7 @@ import {
 } from "./state.js";
 import { canonicalStateFile, stateObservers, type StateObserverSource } from "./state-observer.js";
 import type { ModelConfiguration } from "./model-config.js";
+import { appendTelemetryAttempts } from "../telemetry/store.js";
 
 export const JOB_HEARTBEAT_INTERVAL_MS = 15_000;
 export const JOB_STALE_AFTER_MS = 60_000;
@@ -364,6 +365,21 @@ export async function finishJob(
       mode: 0o600,
     });
   await applyResultToState(cwd, jobId, finalResult, finishedAt);
+  if (finalResult.telemetry?.attempts.length) {
+    try {
+      await appendTelemetryAttempts(
+        await resolveStateDir(cwd),
+        {
+          jobId,
+          taskKind: finalResult.kind,
+          role: finalResult.role ?? currentJob?.role ?? "unassigned",
+        },
+        finalResult.telemetry.attempts,
+      );
+    } catch {
+      // Telemetry is diagnostic and must never turn a completed Job into a failed one.
+    }
+  }
 }
 
 function summarizeHostAdjudications(

@@ -5,16 +5,20 @@ import { once } from "node:events";
 import { createFileCredentialStore } from "../pi/credentials.js";
 import { CredentialDraftVault, OAuthSessionManager } from "../providers/credentials.js";
 import {} from "../state/model-config.js";
-import { loadState, prepareConfigurationStorage, } from "../state/state.js";
+import { loadState, prepareConfigurationStorage, resolveStateDir, } from "../state/state.js";
 import { configureBuiltInProvider, createManualCustomProvider, discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, saveConfigurationSubmission, saveProjectProfileSubmission, signOutProvider, stageCustomProviderCredential, verifyProviderConnection, } from "./configuration-service.js";
 import { EndpointDiscoveryError } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
+import { renderTelemetryDashboardPage } from "./dashboard.js";
+import { readTelemetryReport } from "../telemetry/report.js";
 const LOOPBACK_HOST = "127.0.0.1";
 const MAX_BODY_BYTES = 256 * 1024;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 export async function startConfigurationServer(cwd, options = {}) {
     const env = options.env ?? process.env;
-    const storage = await prepareConfigurationStorage(cwd, env, { migrate: true });
+    const storage = await prepareConfigurationStorage(cwd, env, {
+        migrate: options.mode !== "dashboard",
+    });
     const token = randomBytes(32).toString("base64url");
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const credentialVault = new CredentialDraftVault();
@@ -35,6 +39,34 @@ export async function startConfigurationServer(cwd, options = {}) {
             return json(response, 403, { error: "Invalid setup session" });
         resetTimer();
         try {
+            if (request.method === "GET" &&
+                options.mode === "dashboard" &&
+                url.pathname === "/dashboard") {
+                const nonce = randomBytes(18).toString("base64");
+                response.setHeader("Content-Security-Policy", `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`);
+                response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+                response.end(renderTelemetryDashboardPage(nonce));
+                return;
+            }
+            if (request.method === "GET" &&
+                options.mode === "dashboard" &&
+                url.pathname === "/api/telemetry/report") {
+                const daysValue = url.searchParams.get("days");
+                const days = daysValue === null ? undefined : Number(daysValue);
+                if (days !== undefined && (!Number.isSafeInteger(days) || days < 1 || days > 3650)) {
+                    return json(response, 400, { error: "Invalid report range" });
+                }
+                const now = new Date();
+                const from = days === undefined ? undefined : new Date(now.getTime() - days * 86_400_000);
+                const report = await readTelemetryReport(await resolveStateDir(cwd, env), {
+                    ...(from ? { from: from.toISOString() } : {}),
+                    to: now.toISOString(),
+                });
+                json(response, 200, report);
+                return;
+            }
+            if (options.mode === "dashboard")
+                return json(response, 404, { error: "Not found" });
             if (request.method === "GET" && url.pathname === "/") {
                 const view = await loadConfigurationView(cwd, env);
                 const nonce = randomBytes(18).toString("base64");
@@ -164,7 +196,7 @@ export async function startConfigurationServer(cwd, options = {}) {
     if (!address || typeof address === "string")
         throw new Error("Unable to resolve configuration server address");
     origin = `http://${LOOPBACK_HOST}:${address.port}`;
-    const url = `${origin}/?token=${encodeURIComponent(token)}`;
+    const url = `${origin}${options.mode === "dashboard" ? "/dashboard" : "/"}?token=${encodeURIComponent(token)}`;
     resetTimer();
     if (options.openBrowser !== false) {
         try {

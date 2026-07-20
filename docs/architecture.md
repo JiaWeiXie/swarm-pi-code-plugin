@@ -330,20 +330,18 @@ behavior remains compatible with the newer Git-init migration: the latter is
 only attempted while opening Configuration, while ordinary status inspection
 never moves a non-Git user-state directory.
 
-## Telemetry boundary (P0 contract only)
+## Telemetry boundary (local reports and dashboard)
 
 The repository contains versioned, closed local telemetry contracts for bounded
-usage counters, safe provider/model labels, pricing fixtures, cost status,
-collector health, and migration metadata. Strict parsers reject unknown fields,
-prohibited data, unsupported schema versions, invalid timestamps, malformed
-pricing intervals, and ambiguous pricing entries. Fixed-precision cost logic
-uses integer minor units, preserves stale/unknown/local-only states, and keeps
-multiple currencies separate.
+attempt outcomes, duration, usage counters, safe provider/model labels, pricing
+fixtures, cost status, collector health, and migration metadata. Terminal Jobs
+append validated `attempt` events to the existing state directory's
+`telemetry/events.jsonl`; the file store is local, mode `0600`, and never sends
+data over the network. Fixed-precision cost logic preserves
+stale/unknown/local-only states and keeps multiple currencies separate.
 
-This is a contract foundation, not an active collector. The default
-`TelemetryRecorder` is a no-op and has no filesystem, process, socket, network,
-or durable-state side effects. No lifecycle call sites, storage, sidecar,
-queue, IPC, home-directory root, pricing refresh, or dashboard is implemented.
-The earlier sidecar discovery remains `inconclusive`; no performance or billing
-accuracy claim follows from these contracts. Any future materialization or
-delivery remains Host-owned and requires explicit authorization.
+`telemetry report` aggregates bounded summary, model/role/task buckets, and
+newest-first detail records. `dashboard` serves the same report through the
+existing loopback, random-token, CSP-protected configuration server boundary.
+The dashboard is not a provider dashboard or billing surface. No automatic
+pricing refresh, upload, sidecar, IPC, or billing accuracy claim exists.

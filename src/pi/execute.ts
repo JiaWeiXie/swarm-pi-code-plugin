@@ -1,4 +1,10 @@
-import type { TaskKind, WorkerResult } from "../core/contracts.js";
+import type {
+  TaskKind,
+  WorkerResult,
+  WorkerTelemetryAttempt,
+  WorkerTelemetryUsage,
+} from "../core/contracts.js";
+import { classifyProviderModel } from "../telemetry/privacy.js";
 
 interface SessionEvent {
   type: string;
@@ -8,6 +14,14 @@ interface SessionEvent {
   };
   message?: {
     role?: string;
+    provider?: string;
+    model?: string;
+    timestamp?: number;
+    usage?: {
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+    };
     stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted";
     errorMessage?: string;
   };
@@ -32,6 +46,8 @@ export interface ExecuteSessionOptions {
 }
 
 export async function executeSession(options: ExecuteSessionOptions): Promise<WorkerResult> {
+  const startedMs = Date.now();
+  const startedAt = new Date(startedMs).toISOString();
   let output = "";
   let terminalMessage: SessionEvent["message"];
   const unsubscribe = options.session.subscribe((event) => {
@@ -74,14 +90,30 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
     if (outcome.type === "interrupted") {
       const message =
         outcome.status === "timed-out" ? "Pi session timed out." : "Pi session was cancelled.";
-      return result(options.kind, outcome.status, options.model, message);
+      return withTelemetry(
+        result(options.kind, outcome.status, options.model, message),
+        startedMs,
+        startedAt,
+        options.model,
+      );
     }
     if (outcome.type === "error") {
       const message =
         outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-      return result(options.kind, "failed", options.model, message);
+      return withTelemetry(
+        result(options.kind, "failed", options.model, message),
+        startedMs,
+        startedAt,
+        options.model,
+      );
     }
-    return resultFromTerminalMessage(options.kind, options.model, output.trim(), terminalMessage);
+    return withTelemetry(
+      resultFromTerminalMessage(options.kind, options.model, output.trim(), terminalMessage),
+      startedMs,
+      startedAt,
+      options.model,
+      terminalMessage,
+    );
   } finally {
     if (timeout) clearTimeout(timeout);
     removeAbortListener();
@@ -166,4 +198,59 @@ function result(
       commands: [],
     },
   };
+}
+
+function withTelemetry(
+  workerResult: WorkerResult,
+  startedMs: number,
+  startedAt: string,
+  fallbackModel: string,
+  terminalMessage?: SessionEvent["message"],
+): WorkerResult {
+  const finishedMs = Date.now();
+  const finishedAt = new Date(finishedMs).toISOString();
+  const rawProvider = terminalMessage?.provider ?? fallbackModel.split("/", 1)[0] ?? "unknown";
+  const rawModel =
+    terminalMessage?.model ?? (fallbackModel.slice(fallbackModel.indexOf("/") + 1) || "unknown");
+  const classified = classifyProviderModel(rawProvider, rawModel);
+  const usage = usageFromMessage(terminalMessage, classified.provider, classified.model);
+  const attempt: WorkerTelemetryAttempt = {
+    attempt: 1,
+    startedAt,
+    finishedAt,
+    durationMs: Math.max(0, finishedMs - startedMs),
+    outcome: workerResult.status,
+    provider: classified.provider,
+    model: classified.model,
+    ...(usage ? { usage } : {}),
+  };
+  return { ...workerResult, telemetry: { attempts: [attempt] } };
+}
+
+function usageFromMessage(
+  message: SessionEvent["message"] | undefined,
+  provider: string,
+  model: string,
+): WorkerTelemetryUsage | undefined {
+  const usage = message?.usage;
+  if (!usage || typeof usage !== "object") return undefined;
+  const counters = [usage.input, usage.output, usage.cacheRead];
+  if (
+    !counters.some(
+      (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    provider,
+    model,
+    ...(validCounter(usage.input) ? { inputTokens: usage.input } : {}),
+    ...(validCounter(usage.output) ? { outputTokens: usage.output } : {}),
+    ...(validCounter(usage.cacheRead) ? { cachedInputTokens: usage.cacheRead } : {}),
+  };
+}
+
+function validCounter(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }

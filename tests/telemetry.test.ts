@@ -20,6 +20,9 @@ import {
   PrivacyViolation,
   type PricingSnapshot,
   type UsageSnapshot,
+  appendTelemetryAttempts,
+  readTelemetryEvents,
+  readTelemetryReport,
 } from "../src/index.js";
 
 const recordedAt = "2026-07-16T12:00:00.000Z";
@@ -211,6 +214,52 @@ test("no-op recorder has no filesystem or durable-state side effects", () => {
     status: "disabled",
     reason: "not-enabled",
     checkedAt: "1970-01-01T00:00:00.000Z",
+  });
+});
+
+test("attempt telemetry persists bounded lifecycle details and aggregates reports", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-telemetry-store-"));
+  await appendTelemetryAttempts(stateDir, { jobId: "job-1", taskKind: "ask", role: "scout" }, [
+    {
+      attempt: 1,
+      startedAt: "2026-07-16T12:00:00.000Z",
+      finishedAt: "2026-07-16T12:00:01.250Z",
+      durationMs: 1250,
+      outcome: "succeeded",
+      provider: "openai",
+      model: "gpt-5",
+      usage: { provider: "openai", model: "gpt-5", inputTokens: 10, outputTokens: 4 },
+    },
+    {
+      attempt: 2,
+      startedAt: "2026-07-16T12:00:02.000Z",
+      finishedAt: "2026-07-16T12:00:03.000Z",
+      durationMs: 1000,
+      outcome: "failed",
+      provider: "openai",
+      model: "gpt-5",
+    },
+  ]);
+  const stored = await readTelemetryEvents(stateDir);
+  assert.equal(stored.events.length, 2);
+  assert.equal(stored.health.status, "healthy");
+  assert.equal(stored.events[0]?.kind, "attempt");
+  assert.equal(fs.statSync(path.join(stateDir, "telemetry")).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(path.join(stateDir, "telemetry", "events.jsonl")).mode & 0o777, 0o600);
+  assert.doesNotThrow(() => assertNoProhibitedFields(stored.events[0]));
+
+  const report = await readTelemetryReport(stateDir, { limit: 10 });
+  assert.equal(report.summary.attempts, 2);
+  assert.equal(report.summary.succeeded, 1);
+  assert.equal(report.summary.failed, 1);
+  assert.equal(report.summary.inputTokens, 10);
+  assert.equal(report.summary.outputTokens, 4);
+  assert.equal(report.byModel[0]?.key, "openai/gpt-5");
+  assert.equal(report.details.length, 2);
+  assert.deepEqual(report.cost, {
+    status: "unknown",
+    attribution: "unattributed",
+    reason: "missing-pricing",
   });
 });
 

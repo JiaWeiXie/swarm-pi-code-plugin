@@ -20,6 +20,24 @@ export async function main(argv = process.argv.slice(2)) {
             process.stdout.write(`${JSON.stringify(completion, null, args.json ? 2 : 0)}\n`);
             return completion.status === "timed-out" ? 1 : 0;
         }
+        if (args.command === "dashboard") {
+            const { startConfigurationServer } = await import("./web/configuration-server.js");
+            const session = await startConfigurationServer(process.cwd(), {
+                port: args.port,
+                openBrowser: !args.noOpen,
+                mode: "dashboard",
+            });
+            process.stdout.write(args.json
+                ? `${JSON.stringify({ event: "ready", url: session.url })}\n`
+                : `Swarm Pi usage dashboard is available at:\n${session.url}\n\nPress Ctrl-C to close it.\n`);
+            const stop = () => void session.close();
+            process.once("SIGINT", stop);
+            process.once("SIGTERM", stop);
+            await session.completion;
+            process.removeListener("SIGINT", stop);
+            process.removeListener("SIGTERM", stop);
+            return 0;
+        }
         const controller = new AbortController();
         const abort = () => controller.abort();
         const watch = args.command === "jobs" && args.jobsAction === "watch";

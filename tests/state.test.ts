@@ -33,6 +33,7 @@ import {
   writeState,
   StateMigrationActiveJobsError,
 } from "../src/state/state.js";
+import { readTelemetryEvents } from "../src/telemetry/store.js";
 
 test("new configuration defaults to adaptive without changing legacy normalization", () => {
   assert.equal(defaultState().config.sandboxMode, "adaptive");
@@ -457,6 +458,47 @@ test("job lifecycle persists terminal results and acknowledges notifications", a
   const acknowledged = await acknowledgeJob(workspace, handle.id);
   assert.equal(acknowledged.notification, "acknowledged");
   assert.equal((await listJobs(workspace, true)).length, 0);
+});
+
+test("terminal job results feed the local telemetry report", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-job-telemetry-"));
+  const handle = await startJob(workspace, {
+    host: "codex",
+    kind: "ask",
+    role: "scout",
+    prompt: "Inspect",
+    cwd: workspace,
+    executionMode: "supervised",
+    timeoutMs: 30_000,
+  });
+  await finishJob(workspace, handle.id, {
+    kind: "ask",
+    status: "succeeded",
+    success: true,
+    output: "done",
+    model: "test-provider/test-model",
+    role: "scout",
+    changedFiles: [],
+    diffStat: "",
+    verification: { status: "not-run", commands: [] },
+    telemetry: {
+      attempts: [
+        {
+          attempt: 1,
+          startedAt: "2026-07-16T12:00:00.000Z",
+          finishedAt: "2026-07-16T12:00:01.000Z",
+          durationMs: 1000,
+          outcome: "succeeded",
+          provider: "test-provider",
+          model: "test-model",
+          usage: { provider: "test-provider", model: "test-model", inputTokens: 3 },
+        },
+      ],
+    },
+  });
+  const stored = await readTelemetryEvents(await resolveStateDir(workspace));
+  assert.equal(stored.events.length, 1);
+  assert.equal(stored.events[0]?.kind, "attempt");
 });
 
 test("reconciliation converts stale dead workers to orphaned", async () => {

@@ -768,6 +768,29 @@ export interface WorkerResult {
   };
   hostAction?: HostActionReceipt;
   hostAdjudications?: HostAdjudicationSummary[];
+  telemetry?: {
+    attempts: WorkerTelemetryAttempt[];
+  };
+}
+
+export interface WorkerTelemetryUsage {
+  provider: string;
+  model: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedInputTokens?: number;
+}
+
+export interface WorkerTelemetryAttempt {
+  attempt: number;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  outcome: WorkerStatus;
+  provider: string;
+  model: string;
+  role?: RoleId;
+  usage?: WorkerTelemetryUsage;
 }
 
 export interface HostAdjudicationSummary {
@@ -903,6 +926,7 @@ export interface AuditResultSummary {
   };
   artifact?: WorkerResult["artifact"];
   hostAdjudications?: HostAdjudicationSummary[];
+  telemetry?: WorkerResult["telemetry"];
 }
 
 export interface JobAuditExportV1 {

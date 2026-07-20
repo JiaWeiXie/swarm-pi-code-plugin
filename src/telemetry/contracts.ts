@@ -64,6 +64,37 @@ export interface TelemetryUsageEvent {
   migration?: MigrationMetadata;
 }
 
+export type TelemetryOutcome =
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "timed-out"
+  | "orphaned"
+  | "not-implemented";
+
+export interface TelemetryContext {
+  jobId: string;
+  taskKind: string;
+  provider: string;
+  model: string;
+  role?: string;
+  attempt: NonNegativeInteger;
+  startedAt: IsoDate;
+  finishedAt: IsoDate;
+  durationMs: NonNegativeInteger;
+  outcome: TelemetryOutcome;
+}
+
+export interface TelemetryAttemptEvent {
+  schemaVersion: TelemetrySchemaVersion;
+  eventId: string;
+  kind: "attempt";
+  recordedAt: IsoDate;
+  context: TelemetryContext;
+  usage?: UsageSnapshot;
+  migration?: MigrationMetadata;
+}
+
 export interface TelemetryHealthEvent {
   schemaVersion: TelemetrySchemaVersion;
   eventId: string;
@@ -73,7 +104,7 @@ export interface TelemetryHealthEvent {
   migration?: MigrationMetadata;
 }
 
-export type TelemetryEvent = TelemetryUsageEvent | TelemetryHealthEvent;
+export type TelemetryEvent = TelemetryUsageEvent | TelemetryAttemptEvent | TelemetryHealthEvent;
 
 export interface PricingEntry {
   provider: string;
@@ -284,7 +315,7 @@ export function parseCollectorHealth(input: unknown): CollectorHealth {
 export function parseTelemetryEvent(input: unknown): TelemetryEvent {
   const value = exact(
     input,
-    ["schemaVersion", "eventId", "kind", "recordedAt", "usage", "health", "migration"],
+    ["schemaVersion", "eventId", "kind", "recordedAt", "usage", "health", "context", "migration"],
     "event",
   );
   schemaVersion(value.schemaVersion, "event.schemaVersion");
@@ -312,6 +343,53 @@ export function parseTelemetryEvent(input: unknown): TelemetryEvent {
       ...base,
       kind: "health",
       health: parseCollectorHealth(value.health),
+      ...(migration ? { migration } : {}),
+    };
+  }
+  if (value.kind === "attempt") {
+    if (value.health !== undefined) throw new TypeError("event.attempt: health is not allowed");
+    const contextValue = exact(
+      value.context,
+      [
+        "jobId",
+        "taskKind",
+        "provider",
+        "model",
+        "role",
+        "attempt",
+        "startedAt",
+        "finishedAt",
+        "durationMs",
+        "outcome",
+      ],
+      "event.context",
+    );
+    const context: TelemetryContext = {
+      jobId: eventId(contextValue.jobId, "event.context.jobId"),
+      taskKind: safeIdentifier(contextValue.taskKind, "event.context.taskKind"),
+      provider: safeIdentifier(contextValue.provider, "event.context.provider"),
+      model: safeIdentifier(contextValue.model, "event.context.model"),
+      ...(contextValue.role === undefined
+        ? {}
+        : { role: safeIdentifier(contextValue.role, "event.context.role") }),
+      attempt: positiveInteger(contextValue.attempt, "event.context.attempt"),
+      startedAt: isoDate(contextValue.startedAt, "event.context.startedAt"),
+      finishedAt: isoDate(contextValue.finishedAt, "event.context.finishedAt"),
+      durationMs: nonNegativeInteger(contextValue.durationMs, "event.context.durationMs"),
+      outcome: oneOf(
+        contextValue.outcome,
+        ["succeeded", "failed", "cancelled", "timed-out", "orphaned", "not-implemented"],
+        "event.context.outcome",
+      ),
+    };
+    if (Date.parse(context.finishedAt) < Date.parse(context.startedAt)) {
+      throw new TypeError("event.context: finishedAt must not precede startedAt");
+    }
+    return {
+      ...base,
+      kind: "attempt",
+      context,
+      ...(value.usage === undefined ? {} : { usage: parseUsageSnapshot(value.usage) }),
       ...(migration ? { migration } : {}),
     };
   }

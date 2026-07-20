@@ -138,7 +138,7 @@ export function parseCollectorHealth(input) {
     };
 }
 export function parseTelemetryEvent(input) {
-    const value = exact(input, ["schemaVersion", "eventId", "kind", "recordedAt", "usage", "health", "migration"], "event");
+    const value = exact(input, ["schemaVersion", "eventId", "kind", "recordedAt", "usage", "health", "context", "migration"], "event");
     schemaVersion(value.schemaVersion, "event.schemaVersion");
     const base = {
         schemaVersion: TELEMETRY_SCHEMA_VERSION,
@@ -165,6 +165,46 @@ export function parseTelemetryEvent(input) {
             ...base,
             kind: "health",
             health: parseCollectorHealth(value.health),
+            ...(migration ? { migration } : {}),
+        };
+    }
+    if (value.kind === "attempt") {
+        if (value.health !== undefined)
+            throw new TypeError("event.attempt: health is not allowed");
+        const contextValue = exact(value.context, [
+            "jobId",
+            "taskKind",
+            "provider",
+            "model",
+            "role",
+            "attempt",
+            "startedAt",
+            "finishedAt",
+            "durationMs",
+            "outcome",
+        ], "event.context");
+        const context = {
+            jobId: eventId(contextValue.jobId, "event.context.jobId"),
+            taskKind: safeIdentifier(contextValue.taskKind, "event.context.taskKind"),
+            provider: safeIdentifier(contextValue.provider, "event.context.provider"),
+            model: safeIdentifier(contextValue.model, "event.context.model"),
+            ...(contextValue.role === undefined
+                ? {}
+                : { role: safeIdentifier(contextValue.role, "event.context.role") }),
+            attempt: positiveInteger(contextValue.attempt, "event.context.attempt"),
+            startedAt: isoDate(contextValue.startedAt, "event.context.startedAt"),
+            finishedAt: isoDate(contextValue.finishedAt, "event.context.finishedAt"),
+            durationMs: nonNegativeInteger(contextValue.durationMs, "event.context.durationMs"),
+            outcome: oneOf(contextValue.outcome, ["succeeded", "failed", "cancelled", "timed-out", "orphaned", "not-implemented"], "event.context.outcome"),
+        };
+        if (Date.parse(context.finishedAt) < Date.parse(context.startedAt)) {
+            throw new TypeError("event.context: finishedAt must not precede startedAt");
+        }
+        return {
+            ...base,
+            kind: "attempt",
+            context,
+            ...(value.usage === undefined ? {} : { usage: parseUsageSnapshot(value.usage) }),
             ...(migration ? { migration } : {}),
         };
     }

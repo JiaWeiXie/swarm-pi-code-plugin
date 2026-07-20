@@ -28,6 +28,8 @@ import {
 } from "../src/web/configuration-service.js";
 import { startConfigurationServer } from "../src/web/configuration-server.js";
 import { renderConfigurationPage } from "../src/web/ui.js";
+import { appendTelemetryAttempts } from "../src/telemetry/store.js";
+import { renderTelemetryDashboardPage } from "../src/web/dashboard.js";
 
 function fixture() {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-web-config-"));
@@ -953,4 +955,66 @@ test("project-only server saves profile without changing model configuration", a
   assert.equal(completion.configurationStorage.migrationStatus, "none");
   assert.deepEqual((await loadState(workspace)).config.profile?.tasks, ["planning", "analysis"]);
   assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
+});
+
+test("local dashboard serves a token-protected detailed telemetry report", async () => {
+  const { workspace, privateDir, env } = fixture();
+  const dashboardEnv = {
+    ...env,
+    SWARM_PI_CODE_PLUGIN_USER_STATE_DIR: path.join(privateDir, "state"),
+  };
+  await appendTelemetryAttempts(
+    await resolveStateDir(workspace, dashboardEnv),
+    { jobId: "job-dashboard", taskKind: "ask", role: "scout" },
+    [
+      {
+        attempt: 1,
+        startedAt: "2026-07-16T12:00:00.000Z",
+        finishedAt: "2026-07-16T12:00:01.000Z",
+        durationMs: 1000,
+        outcome: "succeeded",
+        provider: "openai",
+        model: "gpt-5",
+        usage: { provider: "openai", model: "gpt-5", inputTokens: 10 },
+      },
+    ],
+  );
+  const server = await startConfigurationServer(workspace, {
+    env: dashboardEnv,
+    mode: "dashboard",
+    openBrowser: false,
+    timeoutMs: 10_000,
+  });
+  const pageUrl = new URL(server.url);
+  assert.equal(pageUrl.pathname, "/dashboard");
+  const page = await fetch(server.url);
+  const html = await page.text();
+  assert.equal(page.status, 200);
+  assert.match(html, /Usage dashboard/);
+  assert.match(html, /Recent attempts/);
+  assert.match(page.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
+  const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
+  assert.doesNotThrow(() => new Function(scripts.at(-1)?.[1] ?? ""));
+  assert.match(renderTelemetryDashboardPage("test-nonce"), /Last 30 days/);
+
+  const forbidden = await fetch(`${pageUrl.origin}/api/telemetry/report`);
+  assert.equal(forbidden.status, 403);
+  const report = await fetch(
+    `${pageUrl.origin}/api/telemetry/report?token=${encodeURIComponent(pageUrl.searchParams.get("token")!)}&days=30`,
+  );
+  const body = (await report.json()) as { summary: { attempts: number; inputTokens: number } };
+  assert.equal(report.status, 200);
+  assert.equal(body.summary.attempts, 1);
+  assert.equal(body.summary.inputTokens, 10);
+  const writeAttempt = await fetch(`${pageUrl.origin}/api/save`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-swarm-token": pageUrl.searchParams.get("token")!,
+    },
+    body: "{}",
+  });
+  assert.equal(writeAttempt.status, 404);
+  await server.close();
+  assert.equal((await server.completion).status, "cancelled");
 });

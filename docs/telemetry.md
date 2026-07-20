@@ -1,47 +1,98 @@
-# Local telemetry P0 contract
+# Local telemetry, reports, and dashboard
 
-This P0 slice defines a safe foundation for a possible future usage dashboard;
-it does not collect, persist, transmit, price, or display telemetry yet.
-`TelemetryRecorder` defaults to a no-op implementation, so no files, sockets,
-processes, network requests, home-directory folders, or durable state are
-created by this slice.
+This slice adds a local-only usage collector on top of the versioned P0
+contracts. Every terminal Job persists bounded `attempt` events in the existing
+state directory; the collector never sends data to a provider, starts a
+sidecar, or creates a second service. `TelemetryRecorder` remains available as
+an inert library default for callers that do not opt into the file store.
 
 ## Data boundary
 
-The versioned contracts contain only bounded usage counters, safe provider and
-model labels, UTC timestamps, pricing fixtures, cost status, collector health,
-and migration metadata. Unknown fields and unsupported schema versions are
-rejected. Prompts, completions, reasoning, source text, paths, URLs/endpoints,
-personal data, secrets, credentials, raw provider configuration, Git metadata,
-and arbitrary free-form text are prohibited.
+The persisted event contains only:
 
-Provider/model values must be safe public identifiers. Unsafe custom values are
-represented as `unknown-custom` and are never persisted as raw input. Local
-models are reported as usage-only; this slice never invents a monetary amount
-for them.
+- an opaque Job/event identifier, task kind, role, provider/model labels, and
+  attempt number;
+- UTC start, finish, and recorded timestamps, duration, and terminal outcome;
+- input, output, and cached-input token counters when the provider reports them.
+
+Strict parsers and privacy validation reject prompts, completions, reasoning,
+source text, paths, URLs/endpoints, personal data, secrets, credentials, raw
+provider configuration, Git metadata, arbitrary text, unknown fields, and
+unsupported schema versions. Unsafe provider/model labels become
+`unknown-custom`; their raw values are never persisted. Local models remain
+usage-only.
+
+## Storage and lifecycle
+
+The file store writes newline-delimited JSON to:
+
+```text
+<existing state directory>/telemetry/events.jsonl
+```
+
+The directory is mode `0700` and the event file is mode `0600`. A terminal Job
+is marked complete before telemetry is appended. A telemetry write or parse
+failure is diagnostic only and cannot turn a completed Job into a failed Job.
+The report marks malformed or unreadable history as degraded. Existing Job
+pruning does not silently delete telemetry history; removing the state directory
+remains an explicit local state-management action.
+
+Each fallback attempt is retained when the runner has a measured session
+boundary. Attempts that fail before a session starts still retain outcome and
+duration, but have no usage counters. The collector is not a billing ledger and
+does not retain prompt or response text.
+
+## Detailed report contract
+
+`telemetry report` returns a versioned JSON object with:
+
+- `summary`: attempts, outcomes, duration, and token totals;
+- `byModel`, `byRole`, and `byTaskKind`: bounded aggregation buckets;
+- `details`: newest-first attempt records, limited to 100 by default and 500 at
+  most;
+- `health`, `range`, and an explicit `cost` state.
+
+Use the CLI without starting a model session:
+
+```bash
+mise exec -- node scripts/pi-runner.mjs telemetry report --json
+mise exec -- node scripts/pi-runner.mjs telemetry report --from 2026-07-01T00:00:00.000Z --limit 50 --json
+```
+
+The report always returns `cost.status: "unknown"` with
+`reason: "missing-pricing"` in this release. Static pricing calculation
+helpers remain available for explicit fixtures, but no pricing source is
+authoritative enough for automatic dashboard amounts. Mixed currencies, stale
+fixtures, and local models therefore cannot be collapsed into a currency total.
+
+## Dashboard
+
+Start the local dashboard with:
+
+```bash
+mise exec -- node scripts/pi-runner.mjs dashboard
+```
+
+The server binds to `127.0.0.1`, uses a random session token, enforces the same
+loopback and CSP boundary as setup, and closes after its normal timeout or an
+explicit Ctrl-C. The dashboard displays summary cards, model/role breakdowns,
+recent attempt details, empty/degraded states, and the unavailable-cost label.
+It is not a provider dashboard, an upload endpoint, a billing console, or a
+replacement for `jobs export --audit`.
 
 ## Cost semantics
 
-Pricing fixtures use integer minor currency units per integer token unit. Each
-dimension is multiplied with `bigint` arithmetic and rounded half-up before the
-dimension amounts are summed. Pricing intervals must be ordered, non-overlapping
-for the same provider/model/dimension, and selected by their effective UTC
-dates. Currency amounts are never combined: mixed currencies remain a visible
-`unsupported-dimension` result with a separate amount per currency.
+The existing pricing fixtures use integer minor currency units and deterministic
+half-up rounding. `calculateCost` preserves `unknown`, `stale`,
+`unsupported-dimension`, and `local-usage-only` states. The dashboard and
+report do not call that helper with invented prices and never claim billing
+accuracy.
 
-Missing usage is `unknown`; incomplete pricing is `unsupported-dimension` or
-`unknown` when no dimension can be priced; expired fixtures are `stale`; local
-models are `local-usage-only`; malformed inputs are `unknown` with an
-`invalid-input` reason. No automatic pricing retrieval or provider API access
-is included.
+## Verification boundary
 
-## Workflow boundary
-
-The prior discovery result for sidecar viability is `inconclusive`, and no
-performance claim is made here. Storage, asynchronous queues, sidecars, IPC,
-writer election, retention, delete/export, dashboard UI, lifecycle call sites,
-automatic pricing refresh, credentials, deployment, materialization, commits,
-and pushes require a later plan and explicit authorization.
-
-The Host must compare Pi output with the repository, actual diff, runtime side
-effects, and fresh verification before accepting any future implementation.
+Tests cover closed event parsing, privacy rejection, JSONL persistence,
+aggregation, fallback/outcome lifecycle capture, terminal Job integration,
+CLI argument validation, dashboard CSP/token checks, and dashboard script
+parsing. The collector does not independently replay provider calls or claim a
+performance benchmark. Host-owned verification must still inspect the diff,
+runtime side effects, and fresh checks before delivery.

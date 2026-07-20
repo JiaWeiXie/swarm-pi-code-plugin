@@ -33,6 +33,7 @@ const ALLOWED_FIELDS = new Set([
   "recordedAt",
   "usage",
   "health",
+  "context",
   "migration",
   "provider",
   "model",
@@ -40,6 +41,14 @@ const ALLOWED_FIELDS = new Set([
   "inputTokens",
   "outputTokens",
   "cachedInputTokens",
+  "jobId",
+  "taskKind",
+  "role",
+  "attempt",
+  "startedAt",
+  "finishedAt",
+  "durationMs",
+  "outcome",
   "status",
   "reason",
   "checkedAt",
@@ -126,6 +135,12 @@ function safeString(value: unknown, key: string, path: string): void {
       if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value))
         throw new PrivacyViolation(path, "unsafe event id");
       break;
+    case "jobId":
+    case "taskKind":
+    case "role":
+      if (!SAFE_IDENTIFIER.test(value))
+        throw new PrivacyViolation(path, "unsafe bounded identifier");
+      break;
     case "recordedAt":
     case "capturedAt":
     case "checkedAt":
@@ -134,6 +149,8 @@ function safeString(value: unknown, key: string, path: string): void {
     case "effectiveFrom":
     case "effectiveTo":
     case "pricingAsOf":
+    case "startedAt":
+    case "finishedAt":
       if (!ISO_DATE.test(value) || Number.isNaN(Date.parse(value)))
         throw new PrivacyViolation(path, "invalid timestamp");
       break;
@@ -147,8 +164,17 @@ function safeString(value: unknown, key: string, path: string): void {
       if (!DECIMAL.test(value)) throw new PrivacyViolation(path, "invalid fixed-precision amount");
       break;
     case "kind":
-      if (value !== "usage" && value !== "health")
+      if (value !== "usage" && value !== "health" && value !== "attempt")
         throw new PrivacyViolation(path, "unsupported event kind");
+      break;
+    case "outcome":
+      if (
+        !["succeeded", "failed", "cancelled", "timed-out", "orphaned", "not-implemented"].includes(
+          value,
+        )
+      ) {
+        throw new PrivacyViolation(path, "unsupported outcome");
+      }
       break;
     case "status":
       if (![...HEALTH_STATUSES, ...COST_STATUSES].includes(value as never)) {
@@ -201,6 +227,8 @@ function walk(value: unknown, path: string, key?: string): void {
         "outputTokens",
         "cachedInputTokens",
         "unitTokens",
+        "attempt",
+        "durationMs",
       ].includes(key)
     ) {
       throw new PrivacyViolation(path, "numeric field is not allowlisted");
@@ -277,6 +305,17 @@ export function redactTelemetryEvent(input: unknown): TelemetryEvent {
       kind: event.kind,
       recordedAt: event.recordedAt,
       usage: { ...event.usage },
+      ...(event.migration ? { migration: { ...event.migration } } : {}),
+    };
+  }
+  if (event.kind === "attempt") {
+    return {
+      schemaVersion: event.schemaVersion,
+      eventId: event.eventId,
+      kind: event.kind,
+      recordedAt: event.recordedAt,
+      context: { ...event.context },
+      ...(event.usage ? { usage: { ...event.usage } } : {}),
       ...(event.migration ? { migration: { ...event.migration } } : {}),
     };
   }

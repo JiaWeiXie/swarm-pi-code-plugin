@@ -6,6 +6,8 @@ const COMMANDS = new Set([
     "resume",
     "models",
     "providers",
+    "telemetry",
+    "dashboard",
     "configure",
     "roles",
     "jobs",
@@ -26,15 +28,17 @@ export function parseArguments(argv) {
     }
     const jobsAction = command === "jobs" ? parseJobsAction(argv[1]) : undefined;
     const rolesAction = command === "roles" ? parseRolesAction(argv[1]) : undefined;
+    const telemetryAction = command === "telemetry" ? parseTelemetryAction(argv[1]) : undefined;
     const parsed = {
         command,
         ...(jobsAction ? { jobsAction } : {}),
         ...(rolesAction ? { rolesAction } : {}),
+        ...(telemetryAction ? { telemetryAction } : {}),
         json: false,
         reconfigure: false,
         reset: false,
     };
-    for (let index = command === "jobs" || command === "roles" ? 2 : 1; index < argv.length; index += 1) {
+    for (let index = command === "jobs" || command === "roles" || command === "telemetry" ? 2 : 1; index < argv.length; index += 1) {
         const argument = argv[index];
         switch (argument) {
             case "--json":
@@ -121,6 +125,15 @@ export function parseArguments(argv) {
             case "--job":
                 parsed.jobId = readValue(argv, ++index, argument);
                 break;
+            case "--from":
+                parsed.from = parseIsoDate(readValue(argv, ++index, argument), argument);
+                break;
+            case "--to":
+                parsed.to = parseIsoDate(readValue(argv, ++index, argument), argument);
+                break;
+            case "--limit":
+                parsed.limit = parseLimit(readValue(argv, ++index, argument), argument);
+                break;
             case "--worker-token":
                 parsed.workerToken = readValue(argv, ++index, argument);
                 break;
@@ -204,6 +217,8 @@ export function parseArguments(argv) {
         command !== "doctor" &&
         command !== "resume" &&
         command !== "jobs" &&
+        command !== "telemetry" &&
+        command !== "dashboard" &&
         command !== "__worker" &&
         !parsed.host) {
         throw new Error(`--host is required for ${command}`);
@@ -250,6 +265,16 @@ export function parseArguments(argv) {
     }
     if (command === "jobs")
         validateJobsArguments(parsed);
+    if (command === "telemetry")
+        validateTelemetryArguments(parsed);
+    if (parsed.from && command !== "telemetry")
+        throw new Error("--from is only supported by telemetry report");
+    if (parsed.to && command !== "telemetry")
+        throw new Error("--to is only supported by telemetry report");
+    if (parsed.limit !== undefined && command !== "telemetry")
+        throw new Error("--limit is only supported by telemetry report");
+    if (parsed.jobId && command !== "jobs" && command !== "telemetry")
+        throw new Error("--job is only supported by jobs or telemetry report");
     if (command === "__worker" && (!parsed.jobId || !parsed.workerToken)) {
         throw new Error("__worker requires --job and --worker-token");
     }
@@ -298,6 +323,17 @@ function parseJobsAction(value) {
     if (value === "materialize")
         return value;
     throw new Error(`Unknown or missing jobs action: ${value ?? "<none>"}`);
+}
+function parseTelemetryAction(value) {
+    if (value === "report")
+        return value;
+    throw new Error(`Unknown or missing telemetry action: ${value ?? "<none>"}`);
+}
+function validateTelemetryArguments(args) {
+    if (args.audit || args.apply || args.olderThanMs !== undefined)
+        throw new Error("jobs-only options are not supported by telemetry report");
+    if (args.from && args.to && Date.parse(args.from) > Date.parse(args.to))
+        throw new Error("--from must not be after --to");
 }
 function parseWorkspaceStrategy(value) {
     if (value === "auto" || value === "isolated-head" || value === "isolated-snapshot")
@@ -424,6 +460,19 @@ function parseRetentionDuration(value, flag) {
         throw new Error(`${flag} exceeds the supported duration range`);
     }
     return duration;
+}
+function parseIsoDate(value, flag) {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value))
+        throw new Error(`${flag} must be an ISO UTC timestamp`);
+    if (Number.isNaN(Date.parse(value)))
+        throw new Error(`${flag} must be an ISO UTC timestamp`);
+    return value;
+}
+function parseLimit(value, flag) {
+    const limit = Number(value);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+        throw new Error(`${flag} must be an integer from 1 to 500`);
+    return limit;
 }
 function parseConfigurationSection(value) {
     if (value === "project")

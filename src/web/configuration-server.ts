@@ -10,6 +10,7 @@ import { type CustomProviderConfiguration, type ProviderProfile } from "../state
 import {
   loadState,
   prepareConfigurationStorage,
+  resolveStateDir,
   type ConfigurationStorage,
 } from "../state/state.js";
 import {
@@ -29,6 +30,8 @@ import {
 } from "./configuration-service.js";
 import { EndpointDiscoveryError, type EndpointDiscoveryRequest } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
+import { renderTelemetryDashboardPage } from "./dashboard.js";
+import { readTelemetryReport } from "../telemetry/report.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const MAX_BODY_BYTES = 256 * 1024;
@@ -49,7 +52,7 @@ export interface ConfigurationServerOptions {
   timeoutMs?: number | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   openUrl?: ((url: string) => Promise<void> | void) | undefined;
-  mode?: "full" | "project" | undefined;
+  mode?: "full" | "project" | "dashboard" | undefined;
   continuationId?: string | undefined;
 }
 
@@ -64,7 +67,9 @@ export async function startConfigurationServer(
   options: ConfigurationServerOptions = {},
 ): Promise<ConfigurationServerSession> {
   const env = options.env ?? process.env;
-  const storage = await prepareConfigurationStorage(cwd, env, { migrate: true });
+  const storage = await prepareConfigurationStorage(cwd, env, {
+    migrate: options.mode !== "dashboard",
+  });
   const token = randomBytes(32).toString("base64url");
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const credentialVault = new CredentialDraftVault();
@@ -90,6 +95,40 @@ export async function startConfigurationServer(
       return json(response, 403, { error: "Invalid setup session" });
     resetTimer();
     try {
+      if (
+        request.method === "GET" &&
+        options.mode === "dashboard" &&
+        url.pathname === "/dashboard"
+      ) {
+        const nonce = randomBytes(18).toString("base64");
+        response.setHeader(
+          "Content-Security-Policy",
+          `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
+        );
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(renderTelemetryDashboardPage(nonce));
+        return;
+      }
+      if (
+        request.method === "GET" &&
+        options.mode === "dashboard" &&
+        url.pathname === "/api/telemetry/report"
+      ) {
+        const daysValue = url.searchParams.get("days");
+        const days = daysValue === null ? undefined : Number(daysValue);
+        if (days !== undefined && (!Number.isSafeInteger(days) || days < 1 || days > 3650)) {
+          return json(response, 400, { error: "Invalid report range" });
+        }
+        const now = new Date();
+        const from = days === undefined ? undefined : new Date(now.getTime() - days * 86_400_000);
+        const report = await readTelemetryReport(await resolveStateDir(cwd, env), {
+          ...(from ? { from: from.toISOString() } : {}),
+          to: now.toISOString(),
+        });
+        json(response, 200, report);
+        return;
+      }
+      if (options.mode === "dashboard") return json(response, 404, { error: "Not found" });
       if (request.method === "GET" && url.pathname === "/") {
         const view = await loadConfigurationView(cwd, env);
         const nonce = randomBytes(18).toString("base64");
@@ -250,7 +289,7 @@ export async function startConfigurationServer(
   if (!address || typeof address === "string")
     throw new Error("Unable to resolve configuration server address");
   origin = `http://${LOOPBACK_HOST}:${address.port}`;
-  const url = `${origin}/?token=${encodeURIComponent(token)}`;
+  const url = `${origin}${options.mode === "dashboard" ? "/dashboard" : "/"}?token=${encodeURIComponent(token)}`;
   resetTimer();
 
   if (options.openBrowser !== false) {

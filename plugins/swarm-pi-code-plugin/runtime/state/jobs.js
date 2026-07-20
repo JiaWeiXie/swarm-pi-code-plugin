@@ -4,6 +4,7 @@ import path from "node:path";
 import { hostContextCharacterLimit } from "../host-assistance/context-allowance.js";
 import { loadState, resolveStateDir, resolveStateFile, updateState, } from "./state.js";
 import { canonicalStateFile, stateObservers } from "./state-observer.js";
+import { appendTelemetryAttempts } from "../telemetry/store.js";
 export const JOB_HEARTBEAT_INTERVAL_MS = 15_000;
 export const JOB_STALE_AFTER_MS = 60_000;
 export async function startJob(cwd, input) {
@@ -192,6 +193,18 @@ export async function finishJob(cwd, jobId, result, diff) {
             mode: 0o600,
         });
     await applyResultToState(cwd, jobId, finalResult, finishedAt);
+    if (finalResult.telemetry?.attempts.length) {
+        try {
+            await appendTelemetryAttempts(await resolveStateDir(cwd), {
+                jobId,
+                taskKind: finalResult.kind,
+                role: finalResult.role ?? currentJob?.role ?? "unassigned",
+            }, finalResult.telemetry.attempts);
+        }
+        catch {
+            // Telemetry is diagnostic and must never turn a completed Job into a failed one.
+        }
+    }
 }
 function summarizeHostAdjudications(job) {
     return [

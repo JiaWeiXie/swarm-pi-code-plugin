@@ -111,18 +111,23 @@ outside the checked-out worktree and is never part of a scaffold snapshot.
 
 ## Telemetry-specific boundary
 
-The P0 telemetry code is a contract and calculation foundation only. The
-default recorder is inert and creates no files, directories, processes, sockets,
-network requests, or durable state. Strict parsing and privacy validation use an
-explicit allowlist and reject prompts, completions, reasoning, source text,
-paths, URLs/endpoints, personal data, secrets, credentials, raw provider
-configuration, Git metadata, and arbitrary free-form text. Usage counters are
-allowlisted by exact field name; an unknown token-bearing field is rejected.
+The local collector appends validated attempt events to the existing state
+directory only. The directory and JSONL file use restrictive permissions; the
+collector does not create a sidecar, queue, IPC channel, network request,
+provider upload, or separate home-directory service. A failed append is
+diagnostic and cannot rewrite a completed Job outcome.
 
-Pricing is static fixture input in this slice. Integer minor-unit arithmetic
-keeps rounding deterministic, stale fixtures remain visibly stale, local models
-remain usage-only, and currencies are never combined. No lifecycle instrumentation,
-sidecar, queue, IPC, home-directory telemetry root, automatic pricing refresh,
-dashboard, upload, or billing accuracy claim exists yet. The prior sidecar
-discovery is `inconclusive`, and a future collector would require a new threat
-review plus explicit user opt-in and Host-owned verification.
+Strict parsing and privacy validation use an explicit allowlist and reject
+prompts, completions, reasoning, source text, paths, URLs/endpoints, personal
+data, secrets, credentials, raw provider configuration, Git metadata, and
+arbitrary free-form text. Usage counters are allowlisted by exact field name;
+unknown token-bearing fields and unsafe custom labels are rejected or replaced
+with `unknown-custom` before persistence.
+
+The dashboard is a read-only view over that local file. It binds to loopback,
+requires a random per-session token, uses CSP, and closes with the existing
+server lifecycle. Report detail is bounded and newest-first. Cost remains
+explicitly unknown without authoritative pricing; integer fixture arithmetic,
+stale pricing, mixed currencies, and local usage-only states are never hidden
+behind a currency total. No billing accuracy, performance, or external upload
+claim follows from this feature.

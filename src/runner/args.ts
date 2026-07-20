@@ -18,6 +18,8 @@ export type RunnerCommand =
   | "resume"
   | "models"
   | "providers"
+  | "telemetry"
+  | "dashboard"
   | "configure"
   | "roles"
   | "jobs"
@@ -44,6 +46,7 @@ export type JobsAction =
   | "prune"
   | "materialize"
   | "export";
+export type TelemetryAction = "report";
 
 export interface RunnerArguments {
   command: RunnerCommand;
@@ -71,6 +74,7 @@ export interface RunnerArguments {
   approvalMode?: ApprovalMode;
   timeoutMs?: number;
   jobsAction?: JobsAction;
+  telemetryAction?: TelemetryAction;
   rolesAction?: "list";
   jobId?: string;
   workerToken?: string;
@@ -98,6 +102,9 @@ export interface RunnerArguments {
   hostAssistance?: HostAssistanceMode;
   hostContextFile?: string;
   discoveryFrom?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
   json: boolean;
 }
 
@@ -108,6 +115,8 @@ const COMMANDS = new Set<RunnerCommand>([
   "resume",
   "models",
   "providers",
+  "telemetry",
+  "dashboard",
   "configure",
   "roles",
   "jobs",
@@ -130,16 +139,18 @@ export function parseArguments(argv: string[]): RunnerArguments {
 
   const jobsAction = command === "jobs" ? parseJobsAction(argv[1]) : undefined;
   const rolesAction = command === "roles" ? parseRolesAction(argv[1]) : undefined;
+  const telemetryAction = command === "telemetry" ? parseTelemetryAction(argv[1]) : undefined;
   const parsed: RunnerArguments = {
     command,
     ...(jobsAction ? { jobsAction } : {}),
     ...(rolesAction ? { rolesAction } : {}),
+    ...(telemetryAction ? { telemetryAction } : {}),
     json: false,
     reconfigure: false,
     reset: false,
   };
   for (
-    let index = command === "jobs" || command === "roles" ? 2 : 1;
+    let index = command === "jobs" || command === "roles" || command === "telemetry" ? 2 : 1;
     index < argv.length;
     index += 1
   ) {
@@ -229,6 +240,15 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--job":
         parsed.jobId = readValue(argv, ++index, argument);
         break;
+      case "--from":
+        parsed.from = parseIsoDate(readValue(argv, ++index, argument), argument);
+        break;
+      case "--to":
+        parsed.to = parseIsoDate(readValue(argv, ++index, argument), argument);
+        break;
+      case "--limit":
+        parsed.limit = parseLimit(readValue(argv, ++index, argument), argument);
+        break;
       case "--worker-token":
         parsed.workerToken = readValue(argv, ++index, argument);
         break;
@@ -313,6 +333,8 @@ export function parseArguments(argv: string[]): RunnerArguments {
     command !== "doctor" &&
     command !== "resume" &&
     command !== "jobs" &&
+    command !== "telemetry" &&
+    command !== "dashboard" &&
     command !== "__worker" &&
     !parsed.host
   ) {
@@ -363,6 +385,15 @@ export function parseArguments(argv: string[]): RunnerArguments {
     throw new Error("Delegation options are only supported by delegated task commands");
   }
   if (command === "jobs") validateJobsArguments(parsed);
+  if (command === "telemetry") validateTelemetryArguments(parsed);
+  if (parsed.from && command !== "telemetry")
+    throw new Error("--from is only supported by telemetry report");
+  if (parsed.to && command !== "telemetry")
+    throw new Error("--to is only supported by telemetry report");
+  if (parsed.limit !== undefined && command !== "telemetry")
+    throw new Error("--limit is only supported by telemetry report");
+  if (parsed.jobId && command !== "jobs" && command !== "telemetry")
+    throw new Error("--job is only supported by jobs or telemetry report");
   if (command === "__worker" && (!parsed.jobId || !parsed.workerToken)) {
     throw new Error("__worker requires --job and --worker-token");
   }
@@ -417,6 +448,18 @@ function parseJobsAction(value: string | undefined): JobsAction {
     return value;
   if (value === "materialize") return value;
   throw new Error(`Unknown or missing jobs action: ${value ?? "<none>"}`);
+}
+
+function parseTelemetryAction(value: string | undefined): TelemetryAction {
+  if (value === "report") return value;
+  throw new Error(`Unknown or missing telemetry action: ${value ?? "<none>"}`);
+}
+
+function validateTelemetryArguments(args: RunnerArguments): void {
+  if (args.audit || args.apply || args.olderThanMs !== undefined)
+    throw new Error("jobs-only options are not supported by telemetry report");
+  if (args.from && args.to && Date.parse(args.from) > Date.parse(args.to))
+    throw new Error("--from must not be after --to");
 }
 
 function parseWorkspaceStrategy(value: string): WorkspaceStrategy {
@@ -555,6 +598,20 @@ function parseRetentionDuration(value: string, flag: string): number {
     throw new Error(`${flag} exceeds the supported duration range`);
   }
   return duration;
+}
+
+function parseIsoDate(value: string, flag: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value))
+    throw new Error(`${flag} must be an ISO UTC timestamp`);
+  if (Number.isNaN(Date.parse(value))) throw new Error(`${flag} must be an ISO UTC timestamp`);
+  return value;
+}
+
+function parseLimit(value: string, flag: string): number {
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+    throw new Error(`${flag} must be an integer from 1 to 500`);
+  return limit;
 }
 
 function parseConfigurationSection(value: string): "project" {

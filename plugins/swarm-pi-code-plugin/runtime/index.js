@@ -29,3 +29,5 @@ export * from "./telemetry/contracts.js";
 export * from "./telemetry/privacy.js";
 export * from "./telemetry/recorder.js";
 export * from "./telemetry/cost.js";
+export * from "./telemetry/store.js";
+export * from "./telemetry/report.js";

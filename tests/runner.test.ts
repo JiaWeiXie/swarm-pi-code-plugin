@@ -58,6 +58,42 @@ test("CLI forwards termination signals to discover delegations", () => {
 
 test("argument parsing requires host and prompt file for ask", () => {
   assert.equal(parseArguments(["roles", "list", "--json"]).rolesAction, "list");
+  assert.deepEqual(
+    parseArguments([
+      "telemetry",
+      "report",
+      "--from",
+      "2026-07-01T00:00:00.000Z",
+      "--to",
+      "2026-07-31T00:00:00.000Z",
+      "--limit",
+      "25",
+      "--json",
+    ]),
+    {
+      command: "telemetry",
+      telemetryAction: "report",
+      from: "2026-07-01T00:00:00.000Z",
+      to: "2026-07-31T00:00:00.000Z",
+      limit: 25,
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+  );
+  assert.equal(parseArguments(["dashboard", "--no-open", "--json"]).command, "dashboard");
+  assert.throws(
+    () =>
+      parseArguments([
+        "telemetry",
+        "report",
+        "--from",
+        "2026-08-01T00:00:00.000Z",
+        "--to",
+        "2026-07-01T00:00:00.000Z",
+      ]),
+    /must not be after/,
+  );
   assert.equal(
     parseArguments([
       "jobs",

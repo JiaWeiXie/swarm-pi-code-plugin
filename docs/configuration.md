@@ -135,6 +135,30 @@ Autopilot sandbox modes and the outward autonomy controls (`autoGitWrites`,
 `05-execution-safety.png` (and, if the review summary shifts, `06-review.png`)
 should be regenerated with `mise run docs-screenshots` before release.
 
+## Local telemetry and dashboard
+
+The runner records privacy-validated terminal Job attempts in the existing
+workspace state directory. The persisted JSONL contains bounded labels,
+provider/model classifications, role and task kind, outcome, duration, and
+provider-reported token counters. Prompts, completions, reasoning, paths,
+credentials, endpoints, Git metadata, and arbitrary text are excluded. Events
+are local-only and are not used for billing; reports show cost as explicitly
+unknown when authoritative pricing is unavailable.
+
+Use the CLI for a bounded JSON report:
+
+```text
+mise exec -- node scripts/pi-runner.mjs telemetry report --json
+```
+
+`--from`, `--to`, `--job`, and `--limit` narrow the report; timestamps are UTC
+ISO 8601 and the limit is capped at 500. Use
+`mise exec -- node scripts/pi-runner.mjs dashboard` to start the loopback,
+token-protected dashboard. It displays summary totals, model and role
+breakdowns, recent attempts, and the explicit unavailable-cost state. The
+dashboard does not expose a network listener beyond loopback or accept raw
+telemetry input.
+
 | Setting | New-project default | Runtime effect |
 | --- | --- | --- |
 | Sandbox | `adaptive` | OS Sandbox plus policy-classified shell/network; Strict, `lenient`, opt-in `autopilot`, and opt-in `full-access` remain selectable |

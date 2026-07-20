@@ -213,17 +213,21 @@ delivery, deployment, messages, transactions, and irreversible or uncertain
 external effects are never implied by invoking a skill and require user review
 or remain denied by policy.
 
-### Telemetry foundation status
+### Telemetry, reports, and dashboard
 
-The current P0 slice defines versioned local contracts, privacy allowlist
-validators, a side-effect-free no-op `TelemetryRecorder`, and fixed-precision
-cost logic for static pricing fixtures. It is not an enabled collector: no
-events are stored or transmitted, no hidden home-directory folder or sidecar
-is created, and no Dashboard, lifecycle instrumentation, pricing refresh, or
-billing integration exists. Local models remain usage-only; stale, unknown,
-unsupported, and multi-currency states stay explicit. The earlier sidecar
-discovery is `inconclusive`, so this code makes no performance or billing
-accuracy claim. See the [telemetry contract reference](docs/telemetry.md).
+The local collector records bounded terminal Job attempts in the existing state
+directory as privacy-validated JSONL. It keeps safe labels, role/task, outcome,
+duration, and provider-reported input/output/cache-read counters; it never
+stores prompts, completions, reasoning, paths, credentials, endpoints, Git
+metadata, or arbitrary text. It does not upload data, start a sidecar, or claim
+billing accuracy. Local models remain usage-only and cost is explicitly unknown
+without authoritative pricing.
+
+Use `mise exec -- node scripts/pi-runner.mjs telemetry report --json` for the
+versioned detailed report, or add `--from`, `--to`, and `--limit` (maximum 500).
+Use `mise exec -- node scripts/pi-runner.mjs dashboard` for the loopback,
+token-protected dashboard with summary cards, model/role breakdowns, and recent
+attempts. See the [telemetry contract and dashboard reference](docs/telemetry.md).
 
 ### First setup
 
@@ -830,9 +834,12 @@ mise run build
 
 ### Plugin versions
 
-Version 0.11.0 adds versioned local telemetry, pricing, and cost contracts
-without enabling collection by default, canonicalizes scoped filesystem aliases,
-and hardens Discovery parser-preflight evidence. Version 0.10.0 makes Adaptive
+Version 0.14.0 adds local lifecycle telemetry persistence, bounded detailed
+reports, and a token-protected loopback dashboard while keeping cost attribution
+explicitly unavailable without authoritative pricing. Version 0.11.0 added
+versioned local telemetry, pricing, and cost contracts without enabling
+collection by default, canonicalized scoped filesystem aliases, and hardened
+Discovery parser-preflight evidence. Version 0.10.0 makes Adaptive
 authorization and Host-first assistance evaluate
 bounded read-only inspections by side-effect risk and reversibility, while
 preserving fail-closed handling for mutation, egress, expansion, and scope

@@ -1,4 +1,7 @@
+import { classifyProviderModel } from "../telemetry/privacy.js";
 export async function executeSession(options) {
+    const startedMs = Date.now();
+    const startedAt = new Date(startedMs).toISOString();
     let output = "";
     let terminalMessage;
     const unsubscribe = options.session.subscribe((event) => {
@@ -33,13 +36,13 @@ export async function executeSession(options) {
         const outcome = await Promise.race([promptOutcome, interruption]);
         if (outcome.type === "interrupted") {
             const message = outcome.status === "timed-out" ? "Pi session timed out." : "Pi session was cancelled.";
-            return result(options.kind, outcome.status, options.model, message);
+            return withTelemetry(result(options.kind, outcome.status, options.model, message), startedMs, startedAt, options.model);
         }
         if (outcome.type === "error") {
             const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-            return result(options.kind, "failed", options.model, message);
+            return withTelemetry(result(options.kind, "failed", options.model, message), startedMs, startedAt, options.model);
         }
-        return resultFromTerminalMessage(options.kind, options.model, output.trim(), terminalMessage);
+        return withTelemetry(resultFromTerminalMessage(options.kind, options.model, output.trim(), terminalMessage), startedMs, startedAt, options.model, terminalMessage);
     }
     finally {
         if (timeout)
@@ -101,4 +104,42 @@ function result(kind, status, model, output) {
             commands: [],
         },
     };
+}
+function withTelemetry(workerResult, startedMs, startedAt, fallbackModel, terminalMessage) {
+    const finishedMs = Date.now();
+    const finishedAt = new Date(finishedMs).toISOString();
+    const rawProvider = terminalMessage?.provider ?? fallbackModel.split("/", 1)[0] ?? "unknown";
+    const rawModel = terminalMessage?.model ?? (fallbackModel.slice(fallbackModel.indexOf("/") + 1) || "unknown");
+    const classified = classifyProviderModel(rawProvider, rawModel);
+    const usage = usageFromMessage(terminalMessage, classified.provider, classified.model);
+    const attempt = {
+        attempt: 1,
+        startedAt,
+        finishedAt,
+        durationMs: Math.max(0, finishedMs - startedMs),
+        outcome: workerResult.status,
+        provider: classified.provider,
+        model: classified.model,
+        ...(usage ? { usage } : {}),
+    };
+    return { ...workerResult, telemetry: { attempts: [attempt] } };
+}
+function usageFromMessage(message, provider, model) {
+    const usage = message?.usage;
+    if (!usage || typeof usage !== "object")
+        return undefined;
+    const counters = [usage.input, usage.output, usage.cacheRead];
+    if (!counters.some((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)) {
+        return undefined;
+    }
+    return {
+        provider,
+        model,
+        ...(validCounter(usage.input) ? { inputTokens: usage.input } : {}),
+        ...(validCounter(usage.output) ? { outputTokens: usage.output } : {}),
+        ...(validCounter(usage.cacheRead) ? { cachedInputTokens: usage.cacheRead } : {}),
+    };
+}
+function validCounter(value) {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }

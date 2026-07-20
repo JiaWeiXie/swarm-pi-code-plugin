@@ -31,6 +31,7 @@ import type {
   HostAssistanceResult,
   HostAssistanceRecord,
   WorkerAssessment,
+  RoleId,
 } from "../core/contracts.js";
 import {
   assertHostActionAllowed,
@@ -100,6 +101,8 @@ import {
   renderProjectPolicy,
 } from "../policy/project-policy.js";
 import { exportJobAudit } from "../audit/export.js";
+import { readTelemetryReport, type TelemetryReport } from "../telemetry/report.js";
+import { classifyProviderModel } from "../telemetry/privacy.js";
 import {
   acknowledgeJob,
   attachJobProcess,
@@ -248,6 +251,7 @@ export type RunnerOutput =
       nextActions: Array<{ action: string; label: string }>;
     }
   | { jobs: PublicJobRecord[] }
+  | TelemetryReport
   | { job: PublicJobRecord; result: WorkerResult | null }
   | { job: PublicJobRecord }
   | {
@@ -369,6 +373,10 @@ export async function runCommand(
   if (args.command === "configure") {
     throw new Error("configure must be started through the CLI web configuration entry point");
   }
+  if (args.command === "dashboard") {
+    throw new Error("dashboard must be started through the CLI web dashboard entry point");
+  }
+  if (args.command === "telemetry") return handleTelemetry(args, cwd);
   if (args.command === "jobs") return handleJobs(args, cwd, dependencies, options.signal);
   if (args.command === "__worker") {
     return runBackgroundJob(
@@ -1128,6 +1136,16 @@ async function handleJobs(
   }
 }
 
+async function handleTelemetry(args: RunnerArguments, cwd: string): Promise<TelemetryReport> {
+  if (args.telemetryAction !== "report") throw new Error("Telemetry report is required");
+  return readTelemetryReport(await resolveStateDir(cwd), {
+    ...(args.from ? { from: args.from } : {}),
+    ...(args.to ? { to: args.to } : {}),
+    ...(args.jobId ? { jobId: args.jobId } : {}),
+    ...(args.limit !== undefined ? { limit: args.limit } : {}),
+  });
+}
+
 async function jobAdjudicationContext(cwd: string, jobId: string) {
   const request = await readJobRequest(cwd, jobId);
   const prompt = await readJobPrompt(cwd, jobId);
@@ -1737,6 +1755,7 @@ async function runStartedJob(options: {
         onApproval,
         requestHostAssistance,
         thinkingLevel: options.policySnapshot.rolePolicy.thinkingLevel,
+        telemetryRole: options.policySnapshot.rolePolicy.role,
         ...(options.signal ? { signal: options.signal } : {}),
       });
       const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
@@ -1792,6 +1811,7 @@ async function runStartedJob(options: {
         onApproval,
         requestHostAssistance,
         thinkingLevel: options.policySnapshot.rolePolicy.thinkingLevel,
+        telemetryRole: options.policySnapshot.rolePolicy.role,
       });
       const final = withMetadata(discovery, options.host, jobId, discovery.attempts ?? 0);
       final.role = options.policySnapshot.rolePolicy.role as never;
@@ -1836,6 +1856,7 @@ async function runStartedJob(options: {
       onApproval,
       requestHostAssistance,
       thinkingLevel: options.policySnapshot.rolePolicy.thinkingLevel,
+      telemetryRole: actualRole,
       ...(options.signal ? { signal: options.signal } : {}),
     });
     let totalRoleAttempts = result.attempts ?? 0;
@@ -1876,6 +1897,7 @@ async function runStartedJob(options: {
           onApproval,
           requestHostAssistance,
           thinkingLevel: options.policySnapshot.rolePolicy.thinkingLevel,
+          telemetryRole: "advisor",
           deadline,
           ...(options.signal ? { signal: options.signal } : {}),
         });
@@ -1938,6 +1960,7 @@ async function runStartedJob(options: {
             onApproval,
             requestHostAssistance,
             thinkingLevel: policy.thinkingLevel,
+            telemetryRole: actualRole,
             ...(options.signal ? { signal: options.signal } : {}),
           });
           totalRoleAttempts += result.attempts ?? 0;
@@ -2430,15 +2453,26 @@ async function runWithFallback(options: {
     signal?: AbortSignal,
   ) => Promise<HostAssistanceResult>;
   perspective?: string;
+  telemetryRole?: RoleId;
   deadline: number;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
   let last = failure(options.kind, "No model attempt completed.");
+  const telemetryAttempts: NonNullable<WorkerResult["telemetry"]>["attempts"] = [];
   for (let index = 0; index < options.candidates.length; index += 1) {
     const remainingMs = options.deadline - Date.now();
-    if (remainingMs <= 0) return statusResult(options.kind, "timed-out", "Pi job timed out.");
+    if (remainingMs <= 0) {
+      return {
+        ...statusResult(options.kind, "timed-out", "Pi job timed out."),
+        ...(telemetryAttempts.length > 0
+          ? { attempts: telemetryAttempts.length, telemetry: { attempts: telemetryAttempts } }
+          : {}),
+      };
+    }
     const model = options.candidates[index]!;
     const sessionId = randomUUID();
+    const attemptStartedMs = Date.now();
+    const attemptStartedAt = new Date(attemptStartedMs).toISOString();
     try {
       const session = await options.dependencies.createSession({
         cwd: options.cwd,
@@ -2487,12 +2521,34 @@ async function runWithFallback(options: {
       );
     }
     const attempts = index + 1;
-    last = { ...last, attempts, fallbackUsed: attempts > 1 };
+    const attemptFinishedAt = new Date().toISOString();
+    const measured = last.telemetry?.attempts[0];
+    const classified = classifyProviderModel(
+      measured?.provider ?? model.provider,
+      measured?.model ?? model.id,
+    );
+    telemetryAttempts.push({
+      attempt: attempts,
+      startedAt: measured?.startedAt ?? attemptStartedAt,
+      finishedAt: measured?.finishedAt ?? attemptFinishedAt,
+      durationMs: measured?.durationMs ?? Math.max(0, Date.now() - attemptStartedMs),
+      outcome: last.status,
+      provider: classified.provider,
+      model: classified.model,
+      ...(options.telemetryRole ? { role: options.telemetryRole } : {}),
+      ...(measured?.usage ? { usage: measured.usage } : {}),
+    });
+    last = {
+      ...last,
+      attempts,
+      fallbackUsed: attempts > 1,
+      telemetry: { attempts: [...telemetryAttempts] },
+    };
     if (last.success) return last;
     if (last.status === "cancelled" || last.status === "timed-out") return last;
     if (options.mode === "implement" && !(await inspectWorktree(options.cwd)).clean) return last;
   }
-  return last;
+  return { ...last, telemetry: { attempts: telemetryAttempts } };
 }
 
 async function runHostActionChild(options: {
@@ -2726,6 +2782,7 @@ async function runDiscoveryWorkflow(options: {
     correlation: Omit<HostAssistanceCorrelation, "jobId" | "generation">,
     signal?: AbortSignal,
   ) => Promise<HostAssistanceResult>;
+  telemetryRole?: RoleId;
   deadline: number;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
@@ -2764,6 +2821,7 @@ async function runDiscoveryWorkflow(options: {
   let lastModel: string | null = null;
   let overallStatus: WorkerResult["status"] = "succeeded";
   let experimentConclusion: import("../core/contracts.js").ExperimentConclusion | undefined;
+  const telemetryAttempts: NonNullable<WorkerResult["telemetry"]>["attempts"] = [];
 
   for (const { stage, instruction } of stages) {
     const priorReports =
@@ -2881,6 +2939,7 @@ async function runDiscoveryWorkflow(options: {
                 perspective: `discovery:${stage}`,
               }
             : {}),
+          telemetryRole: options.telemetryRole ?? "analyst",
           deadline: options.deadline,
           ...(options.signal ? { signal: options.signal } : {}),
         }));
@@ -2923,6 +2982,7 @@ async function runDiscoveryWorkflow(options: {
     if (stage === "experiment" && validated?.artifact.stage === "experiment") {
       experimentConclusion = validated.artifact.conclusion;
     }
+    if (!child && result.telemetry) telemetryAttempts.push(...result.telemetry.attempts);
     totalAttempts += result.attempts ?? 0;
     fallbackUsed ||= Boolean(result.fallbackUsed);
     if (result.model) lastModel = result.model;
@@ -3033,6 +3093,7 @@ async function runDiscoveryWorkflow(options: {
                 perspective: `discovery:advisor:${index + 1}`,
               }
             : {}),
+          telemetryRole: "advisor",
           deadline: options.deadline,
           ...(options.signal ? { signal: options.signal } : {}),
         });
@@ -3054,6 +3115,7 @@ async function runDiscoveryWorkflow(options: {
         }
       }
       totalAttempts += advisorResult.attempts ?? 0;
+      if (advisorResult.telemetry) telemetryAttempts.push(...advisorResult.telemetry.attempts);
       fallbackUsed ||= Boolean(advisorResult.fallbackUsed);
       if (advisorResult.model) lastModel = advisorResult.model;
     }
@@ -3109,6 +3171,7 @@ async function runDiscoveryWorkflow(options: {
       stages: reports,
       ...(experimentConclusion ? { experimentConclusion } : {}),
     },
+    ...(telemetryAttempts.length > 0 ? { telemetry: { attempts: telemetryAttempts } } : {}),
   };
 }
 
@@ -3585,6 +3648,7 @@ async function runOrchestration(options: {
     correlation: Omit<HostAssistanceCorrelation, "jobId" | "generation">,
     signal?: AbortSignal,
   ) => Promise<HostAssistanceResult>;
+  telemetryRole?: RoleId;
   deadline: number;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
@@ -3621,6 +3685,7 @@ async function runOrchestration(options: {
         ...(options.requestHostAssistance
           ? { requestHostAssistance: options.requestHostAssistance, perspective }
           : {}),
+        telemetryRole: advisor ? "advisor" : (options.telemetryRole ?? "project-architect"),
         deadline: options.deadline,
         ...(options.signal ? { signal: options.signal } : {}),
         prompt: buildWorkerPrompt({
@@ -3645,6 +3710,7 @@ async function runOrchestration(options: {
       : results.some((result) => result.status === "timed-out")
         ? "timed-out"
         : "failed";
+  const telemetryAttempts = results.flatMap((result) => result.telemetry?.attempts ?? []);
   return {
     kind: "orchestrate",
     status,
@@ -3659,6 +3725,7 @@ async function runOrchestration(options: {
     attempts: results.reduce((total, result) => total + (result.attempts ?? 0), 0),
     fallbackUsed: results.some((result) => result.fallbackUsed),
     error: success ? null : "One or more orchestration workers failed.",
+    ...(telemetryAttempts.length > 0 ? { telemetry: { attempts: telemetryAttempts } } : {}),
   };
 }
 
