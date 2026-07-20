@@ -42,8 +42,10 @@ export async function appendTelemetryEvent(stateDir, input) {
     const event = redactTelemetryEvent(input);
     const file = eventFile(stateDir);
     await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await fs.chmod(path.dirname(file), 0o700);
     const handle = await fs.open(file, "a", 0o600);
     try {
+        await fs.chmod(file, 0o600);
         await handle.writeFile(`${JSON.stringify(event)}\n`, "utf8");
     }
     finally {
