@@ -413,6 +413,14 @@ const DEFINITIONS: ProviderDefinition[] = [
   apiKeyProvider("minimax-cn", "MiniMax China", "anthropic-messages", {
     wireProtocol: "anthropic-messages",
   }),
+  apiKeyProvider("qwen-token-plan", "Qwen Token Plan", "openai-completions", {
+    category: "subscription",
+    wireProtocol: "openai-chat-completions",
+  }),
+  apiKeyProvider("qwen-token-plan-cn", "Qwen Token Plan China", "openai-completions", {
+    category: "subscription",
+    wireProtocol: "openai-chat-completions",
+  }),
   apiKeyProvider("vercel-ai-gateway", "Vercel AI Gateway", "anthropic-messages", {
     wireProtocol: "anthropic-messages",
   }),

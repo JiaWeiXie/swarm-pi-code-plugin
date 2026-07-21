@@ -4,6 +4,7 @@ export async function executeSession(options) {
     const startedAt = new Date(startedMs).toISOString();
     let output = "";
     let terminalMessage;
+    let automaticRetries = 0;
     const unsubscribe = options.session.subscribe((event) => {
         if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
             output += event.assistantMessageEvent.delta ?? "";
@@ -11,6 +12,8 @@ export async function executeSession(options) {
         if (event.type === "message_end" && event.message?.role === "assistant") {
             terminalMessage = event.message;
         }
+        if (event.type === "auto_retry_start")
+            automaticRetries += 1;
     });
     let timeout;
     let removeAbortListener = () => { };
@@ -34,15 +37,16 @@ export async function executeSession(options) {
             }
         });
         const outcome = await Promise.race([promptOutcome, interruption]);
+        const sessionStats = readSessionStats(options.session);
         if (outcome.type === "interrupted") {
             const message = outcome.status === "timed-out" ? "Pi session timed out." : "Pi session was cancelled.";
-            return withTelemetry(result(options.kind, outcome.status, options.model, message), startedMs, startedAt, options.model);
+            return withTelemetry(result(options.kind, outcome.status, options.model, message), startedMs, startedAt, options.model, undefined, sessionStats, automaticRetries);
         }
         if (outcome.type === "error") {
             const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-            return withTelemetry(result(options.kind, "failed", options.model, message), startedMs, startedAt, options.model);
+            return withTelemetry(result(options.kind, "failed", options.model, message), startedMs, startedAt, options.model, undefined, sessionStats, automaticRetries);
         }
-        return withTelemetry(resultFromTerminalMessage(options.kind, options.model, output.trim(), terminalMessage), startedMs, startedAt, options.model, terminalMessage);
+        return withTelemetry(resultFromTerminalMessage(options.kind, options.model, output.trim(), terminalMessage), startedMs, startedAt, options.model, terminalMessage, sessionStats, automaticRetries);
     }
     finally {
         if (timeout)
@@ -105,15 +109,17 @@ function result(kind, status, model, output) {
         },
     };
 }
-function withTelemetry(workerResult, startedMs, startedAt, fallbackModel, terminalMessage) {
+function withTelemetry(workerResult, startedMs, startedAt, fallbackModel, terminalMessage, sessionStats, automaticRetries = 0) {
     const finishedMs = Date.now();
     const finishedAt = new Date(finishedMs).toISOString();
     const rawProvider = terminalMessage?.provider ?? fallbackModel.split("/", 1)[0] ?? "unknown";
     const rawModel = terminalMessage?.model ?? (fallbackModel.slice(fallbackModel.indexOf("/") + 1) || "unknown");
     const classified = classifyProviderModel(rawProvider, rawModel);
-    const usage = usageFromMessage(terminalMessage, classified.provider, classified.model);
+    const usage = usageFromStats(sessionStats, classified.provider, classified.model) ??
+        usageFromMessage(terminalMessage, classified.provider, classified.model);
     const attempt = {
         attempt: 1,
+        ...(automaticRetries > 0 ? { automaticRetries } : {}),
         startedAt,
         finishedAt,
         durationMs: Math.max(0, finishedMs - startedMs),
@@ -123,6 +129,30 @@ function withTelemetry(workerResult, startedMs, startedAt, fallbackModel, termin
         ...(usage ? { usage } : {}),
     };
     return { ...workerResult, telemetry: { attempts: [attempt] } };
+}
+function readSessionStats(session) {
+    try {
+        return session.getSessionStats?.();
+    }
+    catch {
+        return undefined;
+    }
+}
+function usageFromStats(stats, provider, model) {
+    const usage = stats?.tokens;
+    if (!usage)
+        return undefined;
+    const counters = [usage.input, usage.output, usage.cacheRead];
+    if (!counters.some((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)) {
+        return undefined;
+    }
+    return {
+        provider,
+        model,
+        ...(validCounter(usage.input) ? { inputTokens: usage.input } : {}),
+        ...(validCounter(usage.output) ? { outputTokens: usage.output } : {}),
+        ...(validCounter(usage.cacheRead) ? { cachedInputTokens: usage.cacheRead } : {}),
+    };
 }
 function usageFromMessage(message, provider, model) {
     const usage = message?.usage;

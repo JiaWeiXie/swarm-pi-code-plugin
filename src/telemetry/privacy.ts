@@ -45,6 +45,7 @@ const ALLOWED_FIELDS = new Set([
   "taskKind",
   "role",
   "attempt",
+  "automaticRetries",
   "startedAt",
   "finishedAt",
   "durationMs",
@@ -228,6 +229,7 @@ function walk(value: unknown, path: string, key?: string): void {
         "cachedInputTokens",
         "unitTokens",
         "attempt",
+        "automaticRetries",
         "durationMs",
       ].includes(key)
     ) {

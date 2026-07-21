@@ -222,6 +222,7 @@ test("attempt telemetry persists bounded lifecycle details and aggregates report
   await appendTelemetryAttempts(stateDir, { jobId: "job-1", taskKind: "ask", role: "scout" }, [
     {
       attempt: 1,
+      automaticRetries: 2,
       startedAt: "2026-07-16T12:00:00.000Z",
       finishedAt: "2026-07-16T12:00:01.250Z",
       durationMs: 1250,
@@ -250,6 +251,7 @@ test("attempt telemetry persists bounded lifecycle details and aggregates report
 
   const report = await readTelemetryReport(stateDir, { limit: 10 });
   assert.equal(report.summary.attempts, 2);
+  assert.equal(report.summary.automaticRetries, 2);
   assert.equal(report.summary.succeeded, 1);
   assert.equal(report.summary.failed, 1);
   assert.equal(report.summary.inputTokens, 10);

@@ -217,7 +217,8 @@ or remain denied by policy.
 
 The local collector records bounded terminal Job attempts in the existing state
 directory as privacy-validated JSONL. It keeps safe labels, role/task, outcome,
-duration, and provider-reported input/output/cache-read counters; it never
+duration, provider-reported input/output/cache-read counters, and Pi automatic
+retry counts; it never
 stores prompts, completions, reasoning, paths, credentials, endpoints, Git
 metadata, or arbitrary text. It does not upload data, start a sidecar, or claim
 billing accuracy. Local models remain usage-only and cost is explicitly unknown
@@ -269,10 +270,11 @@ catalog do not establish them.
 
 ### Provider connections
 
-The setup form is driven by the Pi v0.80.10 provider catalog. OpenAI uses the
+The setup form is driven by the Pi v0.81.1 provider catalog. OpenAI uses the
 Responses adapter, Anthropic uses Messages, and mixed providers retain Pi's
 per-model adapter. Cloud providers show only their required project, region,
-resource, account, or deployment fields.
+resource, account, or deployment fields. The catalog includes Qwen Token Plan
+and Qwen Token Plan China as OpenAI-compatible API-key providers.
 
 Normal plugin startup uses the local catalog snapshot and does not refresh
 remote model metadata or credentials implicitly. Run `models --refresh` when a
@@ -834,7 +836,9 @@ mise run build
 
 ### Plugin versions
 
-Version 0.14.0 adds local lifecycle telemetry persistence, bounded detailed
+Version 0.15.0 updates the pinned Pi SDK to 0.81.1, adds Qwen Token Plan provider
+capabilities, records cumulative Pi session usage, and captures automatic retry
+counts. Version 0.14.0 adds local lifecycle telemetry persistence, bounded detailed
 reports, and a token-protected loopback dashboard while keeping cost attribution
 explicitly unavailable without authoritative pricing. Version 0.11.0 added
 versioned local telemetry, pricing, and cost contracts without enabling
@@ -937,7 +941,7 @@ validating the packaged plugin.
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
 - [Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.80.10`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.81.1`
 - [Node.js](https://nodejs.org/)
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)

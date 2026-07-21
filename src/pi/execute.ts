@@ -8,6 +8,7 @@ import { classifyProviderModel } from "../telemetry/privacy.js";
 
 interface SessionEvent {
   type: string;
+  attempt?: number;
   assistantMessageEvent?: {
     type: string;
     delta?: string;
@@ -27,9 +28,18 @@ interface SessionEvent {
   };
 }
 
+interface SessionStats {
+  tokens?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+  };
+}
+
 export interface RunnableSession {
   prompt(prompt: string): Promise<void>;
   subscribe(listener: (event: SessionEvent) => void): () => void;
+  getSessionStats?(): SessionStats;
   abort?(): Promise<void>;
   waitForIdle?(): Promise<void>;
   readonly thinkingLevel?: string;
@@ -50,6 +60,7 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
   const startedAt = new Date(startedMs).toISOString();
   let output = "";
   let terminalMessage: SessionEvent["message"];
+  let automaticRetries = 0;
   const unsubscribe = options.session.subscribe((event) => {
     if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
       output += event.assistantMessageEvent.delta ?? "";
@@ -57,6 +68,7 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
     if (event.type === "message_end" && event.message?.role === "assistant") {
       terminalMessage = event.message;
     }
+    if (event.type === "auto_retry_start") automaticRetries += 1;
   });
 
   let timeout: NodeJS.Timeout | undefined;
@@ -87,6 +99,7 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
       },
     );
     const outcome = await Promise.race([promptOutcome, interruption]);
+    const sessionStats = readSessionStats(options.session);
     if (outcome.type === "interrupted") {
       const message =
         outcome.status === "timed-out" ? "Pi session timed out." : "Pi session was cancelled.";
@@ -95,6 +108,9 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
         startedMs,
         startedAt,
         options.model,
+        undefined,
+        sessionStats,
+        automaticRetries,
       );
     }
     if (outcome.type === "error") {
@@ -105,6 +121,9 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
         startedMs,
         startedAt,
         options.model,
+        undefined,
+        sessionStats,
+        automaticRetries,
       );
     }
     return withTelemetry(
@@ -113,6 +132,8 @@ export async function executeSession(options: ExecuteSessionOptions): Promise<Wo
       startedAt,
       options.model,
       terminalMessage,
+      sessionStats,
+      automaticRetries,
     );
   } finally {
     if (timeout) clearTimeout(timeout);
@@ -206,6 +227,8 @@ function withTelemetry(
   startedAt: string,
   fallbackModel: string,
   terminalMessage?: SessionEvent["message"],
+  sessionStats?: SessionStats,
+  automaticRetries = 0,
 ): WorkerResult {
   const finishedMs = Date.now();
   const finishedAt = new Date(finishedMs).toISOString();
@@ -213,9 +236,12 @@ function withTelemetry(
   const rawModel =
     terminalMessage?.model ?? (fallbackModel.slice(fallbackModel.indexOf("/") + 1) || "unknown");
   const classified = classifyProviderModel(rawProvider, rawModel);
-  const usage = usageFromMessage(terminalMessage, classified.provider, classified.model);
+  const usage =
+    usageFromStats(sessionStats, classified.provider, classified.model) ??
+    usageFromMessage(terminalMessage, classified.provider, classified.model);
   const attempt: WorkerTelemetryAttempt = {
     attempt: 1,
+    ...(automaticRetries > 0 ? { automaticRetries } : {}),
     startedAt,
     finishedAt,
     durationMs: Math.max(0, finishedMs - startedMs),
@@ -225,6 +251,38 @@ function withTelemetry(
     ...(usage ? { usage } : {}),
   };
   return { ...workerResult, telemetry: { attempts: [attempt] } };
+}
+
+function readSessionStats(session: RunnableSession): SessionStats | undefined {
+  try {
+    return session.getSessionStats?.();
+  } catch {
+    return undefined;
+  }
+}
+
+function usageFromStats(
+  stats: SessionStats | undefined,
+  provider: string,
+  model: string,
+): WorkerTelemetryUsage | undefined {
+  const usage = stats?.tokens;
+  if (!usage) return undefined;
+  const counters = [usage.input, usage.output, usage.cacheRead];
+  if (
+    !counters.some(
+      (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    provider,
+    model,
+    ...(validCounter(usage.input) ? { inputTokens: usage.input } : {}),
+    ...(validCounter(usage.output) ? { outputTokens: usage.output } : {}),
+    ...(validCounter(usage.cacheRead) ? { cachedInputTokens: usage.cacheRead } : {}),
+  };
 }
 
 function usageFromMessage(

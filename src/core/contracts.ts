@@ -783,6 +783,8 @@ export interface WorkerTelemetryUsage {
 
 export interface WorkerTelemetryAttempt {
   attempt: number;
+  /** Number of Pi 0.81+ automatic provider retries during this attempt. */
+  automaticRetries?: number;
   startedAt: string;
   finishedAt: string;
   durationMs: number;

@@ -187,7 +187,7 @@ telemetry input.
 - model source and runtime adapter support.
 
 Coverage tests compare the Registry with every provider exposed by the Pi
-v0.80.10 model catalog. A newly added Pi provider fails CI until it is classified; the
+v0.81.1 model catalog. A newly added Pi provider fails CI until it is classified; the
 UI never guesses that an unknown provider uses a simple API-key form.
 
 The plugin initializes `ModelRuntime` from the configured auth and model files
@@ -203,13 +203,15 @@ Built-in examples include:
 | Anthropic | Anthropic Messages | API key or Pi OAuth | optional beta header |
 | GitHub Copilot | managed per model | Pi OAuth | none |
 | Radius | Pi dynamic messages | Pi OAuth or API key | gateway catalog refreshed explicitly |
+| Qwen Token Plan | OpenAI Chat Completions | API key | regional token-plan endpoint |
+| Qwen Token Plan China | OpenAI Chat Completions | API key | China token-plan endpoint |
 | Azure OpenAI | Azure Responses | API key | endpoint/resource, API version, deployment map |
 | Amazon Bedrock | Bedrock Converse | ambient identity | AWS profile and region |
 | Google Vertex AI | Vertex runtime | ambient identity or API key | project and location |
 | Cloudflare | managed or Chat-compatible | API key | account and optional gateway IDs |
 
 Azure Microsoft Entra identity is shown only as a capability notice because the
-Pi v0.80.10 runtime cannot execute it. It is never marked ready.
+Pi v0.81.1 runtime cannot execute it. It is never marked ready.
 
 ## Wire Protocols
 
@@ -437,7 +439,7 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 
 ## Acceptance Criteria
 
-- Every Pi v0.80.10 provider is explicitly classified by the Registry.
+- Every Pi v0.81.1 provider is explicitly classified by the Registry.
 - ChatGPT subscription and OpenAI API-key connections remain separate.
 - Browser responses, localStorage, state, model config, and jobs contain no
   credential values.

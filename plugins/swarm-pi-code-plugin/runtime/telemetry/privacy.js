@@ -26,6 +26,7 @@ const ALLOWED_FIELDS = new Set([
     "taskKind",
     "role",
     "attempt",
+    "automaticRetries",
     "startedAt",
     "finishedAt",
     "durationMs",
@@ -197,6 +198,7 @@ function walk(value, path, key) {
                 "cachedInputTokens",
                 "unitTokens",
                 "attempt",
+                "automaticRetries",
                 "durationMs",
             ].includes(key)) {
             throw new PrivacyViolation(path, "numeric field is not allowlisted");

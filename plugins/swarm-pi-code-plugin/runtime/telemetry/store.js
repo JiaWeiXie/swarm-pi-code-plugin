@@ -84,6 +84,9 @@ export async function appendTelemetryAttempts(stateDir, context, attempts) {
                 model: classified.model,
                 ...((attempt.role ?? context.role) ? { role: attempt.role ?? context.role } : {}),
                 attempt: attempt.attempt,
+                ...(attempt.automaticRetries === undefined
+                    ? {}
+                    : { automaticRetries: attempt.automaticRetries }),
                 startedAt: attempt.startedAt,
                 finishedAt: attempt.finishedAt,
                 durationMs: attempt.durationMs,

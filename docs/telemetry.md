@@ -11,7 +11,7 @@ an inert library default for callers that do not opt into the file store.
 The persisted event contains only:
 
 - an opaque Job/event identifier, task kind, role, provider/model labels, and
-  attempt number;
+  attempt number and Pi automatic retry count;
 - UTC start, finish, and recorded timestamps, duration, and terminal outcome;
 - input, output, and cached-input token counters when the provider reports them.
 
@@ -46,7 +46,7 @@ does not retain prompt or response text.
 
 `telemetry report` returns a versioned JSON object with:
 
-- `summary`: attempts, outcomes, duration, and token totals;
+- `summary`: attempts, outcomes, duration, token totals, and automatic retry totals;
 - `byModel`, `byRole`, and `byTaskKind`: bounded aggregation buckets;
 - `details`: newest-first attempt records, limited to 100 by default and 500 at
   most;

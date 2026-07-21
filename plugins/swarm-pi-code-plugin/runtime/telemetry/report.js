@@ -7,6 +7,7 @@ function emptyBucket(key) {
     return {
         key,
         attempts: 0,
+        automaticRetries: 0,
         succeeded: 0,
         failed: 0,
         cancelled: 0,
@@ -19,6 +20,7 @@ function emptyBucket(key) {
 }
 function addEvent(bucket, event) {
     bucket.attempts += 1;
+    bucket.automaticRetries += event.context.automaticRetries ?? 0;
     if (event.context.outcome === "succeeded")
         bucket.succeeded += 1;
     else if (event.context.outcome === "cancelled")

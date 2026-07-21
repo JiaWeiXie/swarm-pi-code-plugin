@@ -200,7 +200,7 @@ Git 初始化是 Host 的前置流程，不是 Web UI 的設定項目。Configur
 
 ### 模型供應商連線
 
-設定表單由 Pi v0.80.10 provider catalog 驅動。OpenAI API 固定使用 Responses adapter，Anthropic 使用 Messages；混合型 provider 則保留 Pi 的 per-model adapter。Cloud provider 只會顯示實際需要的 project、region、resource、account 或 deployment 欄位。
+設定表單由 Pi v0.81.1 provider catalog 驅動。OpenAI API 固定使用 Responses adapter，Anthropic 使用 Messages；混合型 provider 則保留 Pi 的 per-model adapter。Cloud provider 只會顯示實際需要的 project、region、resource、account 或 deployment 欄位。Catalog 包含 Qwen Token Plan 與 Qwen Token Plan China 的 OpenAI-compatible API Key provider。
 
 Plugin 啟動時使用本機 catalog snapshot，不會隱含刷新遠端模型 metadata 或憑證。需要最新清單時，請明確執行：
 
@@ -487,7 +487,9 @@ mise run build
 
 ### Plugin 版號
 
-0.14.0 加入本機 lifecycle telemetry persistence、有界詳細報告與 token 保護的
+0.15.0 將固定的 Pi SDK 升級至 0.81.1，加入 Qwen Token Plan provider capability，
+記錄累積的 Pi session usage，並保留自動重試次數。0.14.0 加入本機 lifecycle telemetry persistence、
+有界詳細報告與 token 保護的
 loopback 儀表板；沒有權威 pricing 時，cost attribution 仍明確不可用。0.11.0
 加入版本化的本機 telemetry、pricing 與 cost contracts，但預設不啟用資料收集；同時
 canonicalize 受限檔案系統 alias，並強化 Discovery parser-preflight evidence。0.10.0
@@ -567,7 +569,7 @@ codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.80.10`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.81.1`
 - [Node.js](https://nodejs.org/)
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)

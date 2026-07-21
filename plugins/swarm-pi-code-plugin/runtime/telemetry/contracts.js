@@ -178,6 +178,7 @@ export function parseTelemetryEvent(input) {
             "model",
             "role",
             "attempt",
+            "automaticRetries",
             "startedAt",
             "finishedAt",
             "durationMs",
@@ -192,6 +193,11 @@ export function parseTelemetryEvent(input) {
                 ? {}
                 : { role: safeIdentifier(contextValue.role, "event.context.role") }),
             attempt: positiveInteger(contextValue.attempt, "event.context.attempt"),
+            ...(contextValue.automaticRetries === undefined
+                ? {}
+                : {
+                    automaticRetries: nonNegativeInteger(contextValue.automaticRetries, "event.context.automaticRetries"),
+                }),
             startedAt: isoDate(contextValue.startedAt, "event.context.startedAt"),
             finishedAt: isoDate(contextValue.finishedAt, "event.context.finishedAt"),
             durationMs: nonNegativeInteger(contextValue.durationMs, "event.context.durationMs"),

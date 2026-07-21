@@ -365,6 +365,9 @@ test("session execution collects streamed output and always disposes", async () 
         }
       }
       for (const listener of listeners) {
+        listener({ type: "auto_retry_start", attempt: 1 });
+      }
+      for (const listener of listeners) {
         listener({
           type: "message_end",
           message: { role: "assistant", stopReason: "stop" },
@@ -373,6 +376,9 @@ test("session execution collects streamed output and always disposes", async () 
     },
     dispose() {
       disposed = true;
+    },
+    getSessionStats() {
+      return { tokens: { input: 9, output: 3, cacheRead: 2 } };
     },
   };
 
@@ -385,6 +391,14 @@ test("session execution collects streamed output and always disposes", async () 
 
   assert.equal(result.status, "succeeded");
   assert.equal(result.output, "Inspection complete.");
+  assert.equal(result.telemetry?.attempts[0]?.automaticRetries, 1);
+  assert.deepEqual(result.telemetry?.attempts[0]?.usage, {
+    provider: "test-provider",
+    model: "test-model",
+    inputTokens: 9,
+    outputTokens: 3,
+    cachedInputTokens: 2,
+  });
   assert.equal(disposed, true);
 });
 

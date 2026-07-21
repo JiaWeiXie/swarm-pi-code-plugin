@@ -19,6 +19,7 @@ export interface TelemetryReportBucket {
   provider?: string;
   model?: string;
   attempts: number;
+  automaticRetries: number;
   succeeded: number;
   failed: number;
   cancelled: number;
@@ -62,6 +63,7 @@ function emptyBucket(key: string): TelemetryReportBucket {
   return {
     key,
     attempts: 0,
+    automaticRetries: 0,
     succeeded: 0,
     failed: 0,
     cancelled: 0,
@@ -75,6 +77,7 @@ function emptyBucket(key: string): TelemetryReportBucket {
 
 function addEvent(bucket: TelemetryReportBucket, event: TelemetryAttemptEvent): void {
   bucket.attempts += 1;
+  bucket.automaticRetries += event.context.automaticRetries ?? 0;
   if (event.context.outcome === "succeeded") bucket.succeeded += 1;
   else if (event.context.outcome === "cancelled") bucket.cancelled += 1;
   else if (event.context.outcome === "timed-out") bucket.timedOut += 1;
