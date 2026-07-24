@@ -4,7 +4,7 @@ description: Route read-only repository questions, review, planning, and multi-p
 tools: Bash, Read, Write, AskUserQuestion
 ---
 
-Read `../references/host-protocol.md`, then classify the request and use the matching bundled skill:
+Classify the request and route it to the matching bundled skill. Do not preload `host-protocol.md`; the selected skill loads the compact control loop and only its necessary addendum:
 
 - Repository question or explanation: `swarm-pi-ask`.
 - Working-tree or branch review: `swarm-pi-review`.

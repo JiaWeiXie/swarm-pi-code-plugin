@@ -23,6 +23,7 @@ import { createPiEnvironment } from "./environment.js";
 import { createScopedFilesystemTools, createScopedMutationTools } from "./scoped-tools.js";
 import { toolsForMode } from "./tool-profiles.js";
 import { createHostAssistanceTool } from "./host-assistance-tool.js";
+import { createPrewalkController, type PrewalkController } from "./prewalk.js";
 
 export interface CreateWorkerSessionOptions {
   cwd: string;
@@ -45,9 +46,16 @@ export interface CreateWorkerSessionOptions {
     signal?: AbortSignal,
   ) => Promise<HostAssistanceResult>;
   modelRuntime?: ModelRuntime;
+  prewalk?: {
+    guideModel: string;
+    executorModel: string;
+    executorModelObject: unknown;
+    executorThinkingLevel: ThinkingLevel;
+  };
 }
 
 export async function createWorkerSession(options: CreateWorkerSessionOptions) {
+  const prewalk = options.prewalk ? createPrewalkController(options.prewalk) : undefined;
   const environment = options.modelRuntime
     ? { modelRuntime: options.modelRuntime }
     : await createPiEnvironment(options.modelConfiguration);
@@ -70,10 +78,15 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
           mode: options.mode,
           boundProjectPolicy: options.boundProjectPolicy,
           ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+          ...(prewalk ? { onWorkspaceMutation: () => prewalk.onWorkspaceMutation() } : {}),
         })
       : options.mode === "implement"
-        ? createScopedMutationTools(options.cwd)
+        ? createScopedMutationTools(
+            options.cwd,
+            prewalk ? () => prewalk.onWorkspaceMutation() : undefined,
+          )
         : []),
+    ...(prewalk ? [prewalk.tool as never] : []),
     ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
     ...(options.requestHostAssistance
       ? [createHostAssistanceTool(options.requestHostAssistance)]
@@ -89,7 +102,7 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
   // built-in is ever exposed while the scoped tools stay active.
   const allowedToolNames = workerToolAllowlist(options.mode, customTools);
 
-  return createAgentSession({
+  const session = await createAgentSession({
     cwd: options.cwd,
     modelRuntime,
     sessionManager: SessionManager.inMemory(),
@@ -100,6 +113,10 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
     ...(options.model ? { model: options.model } : {}),
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel as never } : {}),
   });
+  if (prewalk) prewalk.attach(session);
+  return Object.assign(session, prewalk ? { prewalk } : {}) as typeof session & {
+    prewalk?: PrewalkController;
+  };
 }
 
 export function workerToolAllowlist(

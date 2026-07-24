@@ -195,6 +195,12 @@ export function parseArguments(argv) {
             case "--review-profile":
                 parsed.reviewProfile = parseReviewProfile(readValue(argv, ++index, argument));
                 break;
+            case "--implementation-profile":
+                parsed.implementationProfile = parseImplementationProfile(readValue(argv, ++index, argument));
+                break;
+            case "--orchestration-profile":
+                parsed.orchestrationProfile = parseOrchestrationProfile(readValue(argv, ++index, argument));
+                break;
             case "--set-model-priority":
                 parsed.modelPriority = parseStringArray(readValue(argv, ++index, argument), argument);
                 break;
@@ -256,6 +262,10 @@ export function parseArguments(argv) {
         throw new Error("--smoke-test is only supported by doctor");
     if (parsed.reviewProfile && command !== "review")
         throw new Error("--review-profile is only supported by review");
+    if (parsed.implementationProfile && command !== "implement")
+        throw new Error("--implementation-profile is only supported by implement");
+    if (parsed.orchestrationProfile && command !== "orchestrate")
+        throw new Error("--orchestration-profile is only supported by orchestrate");
     if ((parsed.executionMode ||
         parsed.timeoutMs ||
         parsed.role ||
@@ -299,6 +309,16 @@ function parseDecisionMode(value) {
     if (value === "cost" || value === "balance" || value === "power")
         return value;
     throw new Error(`Invalid decision mode: ${value}`);
+}
+function parseImplementationProfile(value) {
+    if (value === "direct" || value === "prewalk")
+        return value;
+    throw new Error(`Invalid implementation profile: ${value}`);
+}
+function parseOrchestrationProfile(value) {
+    if (value === "independent" || value === "shared-recon")
+        return value;
+    throw new Error(`Invalid orchestration profile: ${value}`);
 }
 function parseHostAssistanceMode(value) {
     if (value === "inherit" || value === "on" || value === "off")

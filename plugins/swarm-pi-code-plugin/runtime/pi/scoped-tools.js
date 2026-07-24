@@ -273,7 +273,14 @@ export function createScopedFilesystemTools(options) {
             },
         },
     });
-    return [read, grep, find, ls, write, edit];
+    return [
+        read,
+        grep,
+        find,
+        ls,
+        withMutationHook(write, options.onWorkspaceMutation),
+        withMutationHook(edit, options.onWorkspaceMutation),
+    ];
 }
 function withSearchPolicy(definition, assertAllowed, onPolicyViolation, boundProjectPolicy) {
     const tool = definition;
@@ -328,7 +335,7 @@ function isUnsafeSearchSelector(selector) {
     return (/(?:^|[,{(|])\s*(?:[\\/]|[A-Za-z]:)/.test(selector) ||
         /(?:^|[\\/{(|])\.\.(?:[\\/]|$)/.test(selector));
 }
-export function createScopedMutationTools(cwd) {
+export function createScopedMutationTools(cwd, onWorkspaceMutation) {
     const write = createWriteToolDefinition(cwd, {
         operations: {
             async mkdir(directory) {
@@ -352,7 +359,23 @@ export function createScopedMutationTools(cwd) {
             },
         },
     });
-    return [write, edit];
+    return [
+        withMutationHook(write, onWorkspaceMutation),
+        withMutationHook(edit, onWorkspaceMutation),
+    ];
+}
+function withMutationHook(definition, onWorkspaceMutation) {
+    if (!onWorkspaceMutation)
+        return definition;
+    const tool = definition;
+    return {
+        ...tool,
+        async execute(...args) {
+            const result = await tool.execute(...args);
+            await onWorkspaceMutation();
+            return result;
+        },
+    };
 }
 function assertInside(root, candidate) {
     const relative = path.relative(root, candidate);

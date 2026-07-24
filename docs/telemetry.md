@@ -13,7 +13,11 @@ The persisted event contains only:
 - an opaque Job/event identifier, task kind, role, provider/model labels, and
   attempt number and Pi automatic retry count;
 - UTC start, finish, and recorded timestamps, duration, and terminal outcome;
-- input, output, and cached-input token counters when the provider reports them.
+- input, output, cached-input, and cache-write token counters when the provider reports them.
+
+Prewalk records only aggregate phase and handoff metadata. Telemetry never
+stores prompts, completions, paths, hashes, TODO text, tool-result text, or
+repository content; savings are established only by the benchmark.
 
 Strict parsers and privacy validation reject prompts, completions, reasoning,
 source text, paths, URLs/endpoints, personal data, secrets, credentials, raw

@@ -5,7 +5,7 @@ description: Delegate a decision-ready implementation, migration, or architectur
 
 # Plan With Pi
 
-Read the [cross-host control protocol](../../references/host-protocol.md) and use its Skill Control Loop.
+Read the [compact Skill Control Loop](../../references/skill-control-loop.md). The full cross-host control protocol is loaded only for typed approval or durable-job handling.
 
 1. Inspect enough repository context to write a concrete brief with scope, alternatives, constraints, acceptance criteria, and known user decisions. Route evidence-poor requirements to `discover` first.
 2. Run `$RUNNER plan --host "$HOST" --role planner --prompt-file "$PROMPT_FILE" --execution-mode "$EXECUTION_MODE" --approval-mode "$APPROVAL_MODE" --json`, adding `--discovery-from <job-id>` only for a verified final-gated DiscoveryResult.

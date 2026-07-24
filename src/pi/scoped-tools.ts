@@ -240,6 +240,7 @@ export interface CreateScopedFilesystemToolsOptions {
   mode: "readonly" | "implement";
   boundProjectPolicy: BoundProjectPolicy;
   onPolicyViolation?: (error: ProjectPolicyError) => void | Promise<void>;
+  onWorkspaceMutation?: () => Promise<void>;
 }
 
 /**
@@ -339,9 +340,14 @@ export function createScopedFilesystemTools(
       },
     },
   });
-  return [read, grep, find, ls, write, edit] as unknown as NonNullable<
-    CreateAgentSessionOptions["customTools"]
-  >;
+  return [
+    read,
+    grep,
+    find,
+    ls,
+    withMutationHook(write, options.onWorkspaceMutation),
+    withMutationHook(edit, options.onWorkspaceMutation),
+  ] as unknown as NonNullable<CreateAgentSessionOptions["customTools"]>;
 }
 
 type PolicyAssertion = (
@@ -420,6 +426,7 @@ function isUnsafeSearchSelector(selector: string): boolean {
 
 export function createScopedMutationTools(
   cwd: string,
+  onWorkspaceMutation?: () => Promise<void>,
 ): NonNullable<CreateAgentSessionOptions["customTools"]> {
   const write = createWriteToolDefinition(cwd, {
     operations: {
@@ -444,7 +451,23 @@ export function createScopedMutationTools(
       },
     },
   });
-  return [write, edit] as unknown as NonNullable<CreateAgentSessionOptions["customTools"]>;
+  return [
+    withMutationHook(write, onWorkspaceMutation),
+    withMutationHook(edit, onWorkspaceMutation),
+  ] as unknown as NonNullable<CreateAgentSessionOptions["customTools"]>;
+}
+
+function withMutationHook(definition: unknown, onWorkspaceMutation?: () => Promise<void>): unknown {
+  if (!onWorkspaceMutation) return definition;
+  const tool = definition as ExecutableTool;
+  return {
+    ...tool,
+    async execute(...args: unknown[]) {
+      const result = await tool.execute(...args);
+      await onWorkspaceMutation();
+      return result;
+    },
+  };
 }
 
 function assertInside(root: string, candidate: string): void {

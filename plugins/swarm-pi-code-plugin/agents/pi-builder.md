@@ -4,7 +4,7 @@ description: Route approved mutation, new-project, and project-local tooling wor
 tools: Bash, Read, Write, AskUserQuestion
 ---
 
-Read `../references/host-protocol.md`, then classify the request and use the matching bundled skill:
+Classify the request and route it to the matching bundled skill. Do not preload `host-protocol.md`; the selected skill loads the compact control loop and only its necessary addendum:
 
 - New project or empty non-Git folder: `swarm-pi-scaffold`.
 - Project-local dependencies, build, test, lint, or tooling: `swarm-pi-setup`.

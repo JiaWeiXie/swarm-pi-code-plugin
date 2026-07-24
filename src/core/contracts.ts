@@ -715,6 +715,8 @@ export interface WorkerRequest {
   hostContextFile?: string;
   discoveryFrom?: string;
   reviewProfile?: "standard" | "lean";
+  implementationProfile?: "direct" | "prewalk";
+  orchestrationProfile?: "independent" | "shared-recon";
 }
 
 export interface WorkerResult {
@@ -799,6 +801,14 @@ export interface WorkerResult {
   telemetry?: {
     attempts: WorkerTelemetryAttempt[];
   };
+  prewalk?: {
+    status: "not-started" | "switched" | "switch-failed" | "incomplete";
+    guideModel: string;
+    executorModel: string;
+    handoffAt?: string;
+    todoCount: number;
+    switchFailure?: "same-model" | "missing-todos" | "missing-mutation" | "switch-error";
+  };
 }
 
 export interface WorkerTelemetryUsage {
@@ -807,6 +817,7 @@ export interface WorkerTelemetryUsage {
   inputTokens?: number;
   outputTokens?: number;
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
 }
 
 export interface WorkerTelemetryAttempt {
@@ -820,6 +831,7 @@ export interface WorkerTelemetryAttempt {
   provider: string;
   model: string;
   role?: RoleId;
+  phase?: "direct" | "guide" | "executor" | "recon" | "perspective";
   usage?: WorkerTelemetryUsage;
 }
 

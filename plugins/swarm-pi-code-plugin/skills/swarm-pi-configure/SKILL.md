@@ -5,7 +5,7 @@ description: Open the full guided local setup for Pi providers, credentials, mod
 
 # Configure Swarm Pi Code Plugin
 
-Read the [cross-host control protocol](../../references/host-protocol.md), including its Skill Control Loop and State storage write boundary.
+Read the [compact Skill Control Loop](../../references/skill-control-loop.md) and the [Configuration Addendum](../../references/host-protocol-configuration.md). Load the full [cross-host control protocol](../../references/host-protocol.md) for the State storage write boundary.
 
 Route arguments before opening the browser:
 

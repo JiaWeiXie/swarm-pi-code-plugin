@@ -1,6 +1,6 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "private": true,
   "type": "module",
   "description": "Dual-host Claude Code and Codex plugin backed by the embedded Pi coding-agent SDK",
@@ -34,6 +34,7 @@
     "version:check:installed": "node scripts/plugin-version.mjs check --installed",
     "version:bump": "node scripts/plugin-version.mjs bump --reinstall",
     "check:runtime-parity": "node scripts/check-runtime-parity.mjs",
+    "benchmark:prewalk": "node scripts/benchmark-prewalk.mjs",
     "check": "npm run version:check && npm run typecheck && npm run lint && npm run lint:tooling && npm run fmt:check && npm test && npm run docs:screenshots:validate && npm run check:runtime-parity"
   },
   "dependencies": {

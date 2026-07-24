@@ -27,6 +27,8 @@ export type RunnerCommand =
   | TaskKind;
 export type ReviewScope = "auto" | "working-tree" | "branch";
 export type ReviewProfile = "standard" | "lean";
+export type ImplementationProfile = "direct" | "prewalk";
+export type OrchestrationProfile = "independent" | "shared-recon";
 export type JobsAction =
   | "list"
   | "status"
@@ -59,6 +61,8 @@ export interface RunnerArguments {
   base?: string;
   scope?: ReviewScope;
   reviewProfile?: ReviewProfile;
+  implementationProfile?: ImplementationProfile;
+  orchestrationProfile?: OrchestrationProfile;
   reconfigure: boolean;
   reset: boolean;
   modelPriority?: string[];
@@ -311,6 +315,14 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--review-profile":
         parsed.reviewProfile = parseReviewProfile(readValue(argv, ++index, argument));
         break;
+      case "--implementation-profile":
+        parsed.implementationProfile = parseImplementationProfile(
+          readValue(argv, ++index, argument),
+        );
+        break;
+      case "--orchestration-profile":
+        parsed.orchestrationProfile = parseOrchestrationProfile(readValue(argv, ++index, argument));
+        break;
       case "--set-model-priority":
         parsed.modelPriority = parseStringArray(readValue(argv, ++index, argument), argument);
         break;
@@ -377,6 +389,10 @@ export function parseArguments(argv: string[]): RunnerArguments {
     throw new Error("--smoke-test is only supported by doctor");
   if (parsed.reviewProfile && command !== "review")
     throw new Error("--review-profile is only supported by review");
+  if (parsed.implementationProfile && command !== "implement")
+    throw new Error("--implementation-profile is only supported by implement");
+  if (parsed.orchestrationProfile && command !== "orchestrate")
+    throw new Error("--orchestration-profile is only supported by orchestrate");
   if (
     (parsed.executionMode ||
       parsed.timeoutMs ||
@@ -424,6 +440,16 @@ function isTaskCommand(command: RunnerCommand): command is TaskKind {
 function parseDecisionMode(value: string): DecisionMode {
   if (value === "cost" || value === "balance" || value === "power") return value;
   throw new Error(`Invalid decision mode: ${value}`);
+}
+
+function parseImplementationProfile(value: string): ImplementationProfile {
+  if (value === "direct" || value === "prewalk") return value;
+  throw new Error(`Invalid implementation profile: ${value}`);
+}
+
+function parseOrchestrationProfile(value: string): OrchestrationProfile {
+  if (value === "independent" || value === "shared-recon") return value;
+  throw new Error(`Invalid orchestration profile: ${value}`);
 }
 
 function parseHostAssistanceMode(value: string): HostAssistanceMode {

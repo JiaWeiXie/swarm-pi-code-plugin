@@ -142,7 +142,7 @@ function usageFromStats(stats, provider, model) {
     const usage = stats?.tokens;
     if (!usage)
         return undefined;
-    const counters = [usage.input, usage.output, usage.cacheRead];
+    const counters = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
     if (!counters.some((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)) {
         return undefined;
     }
@@ -152,13 +152,14 @@ function usageFromStats(stats, provider, model) {
         ...(validCounter(usage.input) ? { inputTokens: usage.input } : {}),
         ...(validCounter(usage.output) ? { outputTokens: usage.output } : {}),
         ...(validCounter(usage.cacheRead) ? { cachedInputTokens: usage.cacheRead } : {}),
+        ...(validCounter(usage.cacheWrite) ? { cacheWriteTokens: usage.cacheWrite } : {}),
     };
 }
 function usageFromMessage(message, provider, model) {
     const usage = message?.usage;
     if (!usage || typeof usage !== "object")
         return undefined;
-    const counters = [usage.input, usage.output, usage.cacheRead];
+    const counters = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
     if (!counters.some((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)) {
         return undefined;
     }
@@ -168,6 +169,7 @@ function usageFromMessage(message, provider, model) {
         ...(validCounter(usage.input) ? { inputTokens: usage.input } : {}),
         ...(validCounter(usage.output) ? { outputTokens: usage.output } : {}),
         ...(validCounter(usage.cacheRead) ? { cachedInputTokens: usage.cacheRead } : {}),
+        ...(validCounter(usage.cacheWrite) ? { cacheWriteTokens: usage.cacheWrite } : {}),
     };
 }
 function validCounter(value) {

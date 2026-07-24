@@ -9,11 +9,16 @@
 export const TELEMETRY_SCHEMA_VERSION = 1 as const;
 export type TelemetrySchemaVersion = typeof TELEMETRY_SCHEMA_VERSION;
 
-export type UsageDimension = "inputTokens" | "outputTokens" | "cachedInputTokens";
+export type UsageDimension =
+  | "inputTokens"
+  | "outputTokens"
+  | "cachedInputTokens"
+  | "cacheWriteTokens";
 export const USAGE_DIMENSIONS: readonly UsageDimension[] = [
   "inputTokens",
   "outputTokens",
   "cachedInputTokens",
+  "cacheWriteTokens",
 ];
 
 export type Currency = "USD" | "EUR" | "GBP" | "JPY" | "TWD";
@@ -37,6 +42,7 @@ export interface UsageSnapshot {
   inputTokens?: NonNegativeInteger;
   outputTokens?: NonNegativeInteger;
   cachedInputTokens?: NonNegativeInteger;
+  cacheWriteTokens?: NonNegativeInteger;
 }
 
 export type CollectorHealthStatus = "healthy" | "degraded" | "disabled" | "error";
@@ -274,6 +280,7 @@ export function parseUsageSnapshot(input: unknown): UsageSnapshot {
       "inputTokens",
       "outputTokens",
       "cachedInputTokens",
+      "cacheWriteTokens",
     ],
     "usage",
   );

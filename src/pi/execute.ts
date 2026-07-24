@@ -22,6 +22,7 @@ interface SessionEvent {
       input?: number;
       output?: number;
       cacheRead?: number;
+      cacheWrite?: number;
     };
     stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted";
     errorMessage?: string;
@@ -33,6 +34,7 @@ interface SessionStats {
     input?: number;
     output?: number;
     cacheRead?: number;
+    cacheWrite?: number;
   };
 }
 
@@ -268,7 +270,7 @@ function usageFromStats(
 ): WorkerTelemetryUsage | undefined {
   const usage = stats?.tokens;
   if (!usage) return undefined;
-  const counters = [usage.input, usage.output, usage.cacheRead];
+  const counters = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
   if (
     !counters.some(
       (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
@@ -282,6 +284,7 @@ function usageFromStats(
     ...(validCounter(usage.input) ? { inputTokens: usage.input } : {}),
     ...(validCounter(usage.output) ? { outputTokens: usage.output } : {}),
     ...(validCounter(usage.cacheRead) ? { cachedInputTokens: usage.cacheRead } : {}),
+    ...(validCounter(usage.cacheWrite) ? { cacheWriteTokens: usage.cacheWrite } : {}),
   };
 }
 
@@ -292,7 +295,7 @@ function usageFromMessage(
 ): WorkerTelemetryUsage | undefined {
   const usage = message?.usage;
   if (!usage || typeof usage !== "object") return undefined;
-  const counters = [usage.input, usage.output, usage.cacheRead];
+  const counters = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite];
   if (
     !counters.some(
       (value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
@@ -306,6 +309,7 @@ function usageFromMessage(
     ...(validCounter(usage.input) ? { inputTokens: usage.input } : {}),
     ...(validCounter(usage.output) ? { outputTokens: usage.output } : {}),
     ...(validCounter(usage.cacheRead) ? { cachedInputTokens: usage.cacheRead } : {}),
+    ...(validCounter(usage.cacheWrite) ? { cacheWriteTokens: usage.cacheWrite } : {}),
   };
 }
 

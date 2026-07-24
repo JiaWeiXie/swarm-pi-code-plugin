@@ -73,6 +73,8 @@ export interface JobStart {
   hostContextFile?: string;
   discoveryFrom?: string;
   reviewProfile?: "standard" | "lean";
+  implementationProfile?: "direct" | "prewalk";
+  orchestrationProfile?: "independent" | "shared-recon";
   modelConfiguration?: ModelConfiguration;
 }
 
@@ -101,6 +103,8 @@ export interface JobRequest {
   hostContextFile?: string;
   discoveryFrom?: string;
   reviewProfile?: "standard" | "lean";
+  implementationProfile?: "direct" | "prewalk";
+  orchestrationProfile?: "independent" | "shared-recon";
   modelConfiguration?: ModelConfiguration;
   providerSnapshotHash?: string;
   workerToken: string;
@@ -202,6 +206,8 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       : {}),
     ...(input.discoveryFrom ? { discoveryFrom: input.discoveryFrom } : {}),
     ...(input.reviewProfile ? { reviewProfile: input.reviewProfile } : {}),
+    ...(input.implementationProfile ? { implementationProfile: input.implementationProfile } : {}),
+    ...(input.orchestrationProfile ? { orchestrationProfile: input.orchestrationProfile } : {}),
     ...(input.modelConfiguration
       ? { modelConfiguration: structuredClone(input.modelConfiguration) }
       : {}),

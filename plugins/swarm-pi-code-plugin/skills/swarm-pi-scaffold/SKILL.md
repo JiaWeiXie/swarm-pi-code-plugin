@@ -5,7 +5,7 @@ description: Design and create a new project through a reviewed Pi ScaffoldSpec,
 
 # Scaffold A Project With Pi
 
-Read the [cross-host control protocol](../../references/host-protocol.md) and use its Skill Control Loop.
+Read the [compact Skill Control Loop](../../references/skill-control-loop.md). The full cross-host control protocol is loaded only for typed approval or durable-job handling.
 
 1. Run `$RUNNER plan --host "$HOST" --role project-architect --prompt-file "$PROMPT_FILE" --execution-mode "$EXECUTION_MODE" --approval-mode "$APPROVAL_MODE" --json` to draft a version 1 `ScaffoldSpec`. Use the control loop for every non-terminal result.
 2. Require request, project name, target mode, runtime, package manager, structure, dependencies, lifecycle-script policy, done criteria, and a resource-aware verification plan. Inspect indirect commands, keep expensive stages sequential, and present the complete spec before mutation.

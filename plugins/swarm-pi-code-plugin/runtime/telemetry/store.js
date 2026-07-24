@@ -70,6 +70,9 @@ export async function appendTelemetryAttempts(stateDir, context, attempts) {
                 ...(attempt.usage.cachedInputTokens === undefined
                     ? {}
                     : { cachedInputTokens: attempt.usage.cachedInputTokens }),
+                ...(attempt.usage.cacheWriteTokens === undefined
+                    ? {}
+                    : { cacheWriteTokens: attempt.usage.cacheWriteTokens }),
             }
             : undefined;
         const event = {

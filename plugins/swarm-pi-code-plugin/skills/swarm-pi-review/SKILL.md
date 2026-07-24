@@ -5,7 +5,7 @@ description: Delegate a read-only Git working-tree or branch review to Pi from C
 
 # Review With Pi
 
-Read the [cross-host control protocol](../../references/host-protocol.md) and use its Skill Control Loop.
+Read the [compact Skill Control Loop](../../references/skill-control-loop.md). The full cross-host control protocol is loaded only for typed approval or durable-job handling.
 
 1. Select `--scope working-tree` for local changes or `--scope branch --base <ref>` for a branch. Use `auto` only when the intended diff is unambiguous.
 2. Set `$PROFILE=lean` for simplify, over-engineering, deletion, reuse, stdlib, native-platform, YAGNI, clarify, or shrink requests; otherwise set `$PROFILE=standard`.

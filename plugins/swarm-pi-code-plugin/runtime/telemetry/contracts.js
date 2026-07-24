@@ -10,6 +10,7 @@ export const USAGE_DIMENSIONS = [
     "inputTokens",
     "outputTokens",
     "cachedInputTokens",
+    "cacheWriteTokens",
 ];
 export const CURRENCIES = ["USD", "EUR", "GBP", "JPY", "TWD"];
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
@@ -106,6 +107,7 @@ export function parseUsageSnapshot(input) {
         "inputTokens",
         "outputTokens",
         "cachedInputTokens",
+        "cacheWriteTokens",
     ], "usage");
     schemaVersion(value.schemaVersion, "usage.schemaVersion");
     const usage = {

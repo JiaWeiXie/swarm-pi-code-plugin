@@ -206,7 +206,11 @@ Static Host context is copied into the durable prompt. Live Host context is
 stored as typed assistance records with hashes and consumed once. Discovery
 persists schema-validated stage artifacts and supports the narrow
 `plan --discovery-from` handoff. There is no general cross-Job evidence memory
-or cross-Job model-session reuse.
+or cross-Job model-session reuse. The opt-in `implement --implementation-profile prewalk`
+exception remains inside one in-memory implementation session: a guide explores,
+records 1–8 TODOs, and completes the first successful edit/write before Pi switches
+to a distinct executor model. Tool/message history stays in memory and a failed switch
+does not create another session to re-read the repository.
 
 `model.json` is the canonical provider and model file. Provider profiles hold
 only non-secret adapter, endpoint, readiness, and controlled-header metadata.

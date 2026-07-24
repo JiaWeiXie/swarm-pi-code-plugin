@@ -5,7 +5,7 @@ description: Run Pi's fixed, evidence-backed research, experiment, and convergen
 
 # Discover With Pi
 
-Read the [cross-host control protocol](../../references/host-protocol.md) and use its Skill Control Loop.
+Read the [compact Skill Control Loop](../../references/skill-control-loop.md) and the [Discovery Addendum](../../references/host-protocol-discovery.md). The full cross-host control protocol is loaded only for typed approval or durable-job handling.
 
 1. Write a self-contained discovery brief with unknowns, constraints, evidence acceptance criteria, freshness requirements, user gates, and a resource-aware experiment plan. Keep expensive setup, run, test, verify, cleanup, and replay commands sequential.
 2. Run `$RUNNER discover --host "$HOST" --role analyst --prompt-file "$PROMPT_FILE" --execution-mode supervised --approval-mode "$APPROVAL_MODE" --json`.

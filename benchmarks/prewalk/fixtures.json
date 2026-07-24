@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "fixtures": ["e3a9729", "4c5f7d9", "58fc986", "2d8af99", "8315c72", "389980f"],
+  "arms": ["frontier-direct", "frontier-to-cheap-prewalk", "cheap-direct"],
+  "repeats": 2
+}

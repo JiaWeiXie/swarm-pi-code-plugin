@@ -4,7 +4,9 @@ import { createPiEnvironment } from "./environment.js";
 import { createScopedFilesystemTools, createScopedMutationTools } from "./scoped-tools.js";
 import { toolsForMode } from "./tool-profiles.js";
 import { createHostAssistanceTool } from "./host-assistance-tool.js";
+import { createPrewalkController } from "./prewalk.js";
 export async function createWorkerSession(options) {
+    const prewalk = options.prewalk ? createPrewalkController(options.prewalk) : undefined;
     const environment = options.modelRuntime
         ? { modelRuntime: options.modelRuntime }
         : await createPiEnvironment(options.modelConfiguration);
@@ -26,10 +28,12 @@ export async function createWorkerSession(options) {
                 mode: options.mode,
                 boundProjectPolicy: options.boundProjectPolicy,
                 ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+                ...(prewalk ? { onWorkspaceMutation: () => prewalk.onWorkspaceMutation() } : {}),
             })
             : options.mode === "implement"
-                ? createScopedMutationTools(options.cwd)
+                ? createScopedMutationTools(options.cwd, prewalk ? () => prewalk.onWorkspaceMutation() : undefined)
                 : []),
+        ...(prewalk ? [prewalk.tool] : []),
         ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
         ...(options.requestHostAssistance
             ? [createHostAssistanceTool(options.requestHostAssistance)]
@@ -43,7 +47,7 @@ export async function createWorkerSession(options) {
     // policy-scoped custom tools override the built-ins by name, so no unscoped
     // built-in is ever exposed while the scoped tools stay active.
     const allowedToolNames = workerToolAllowlist(options.mode, customTools);
-    return createAgentSession({
+    const session = await createAgentSession({
         cwd: options.cwd,
         modelRuntime,
         sessionManager: SessionManager.inMemory(),
@@ -54,6 +58,9 @@ export async function createWorkerSession(options) {
         ...(options.model ? { model: options.model } : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
     });
+    if (prewalk)
+        prewalk.attach(session);
+    return Object.assign(session, prewalk ? { prewalk } : {});
 }
 export function workerToolAllowlist(mode, customTools) {
     const customToolNames = customTools

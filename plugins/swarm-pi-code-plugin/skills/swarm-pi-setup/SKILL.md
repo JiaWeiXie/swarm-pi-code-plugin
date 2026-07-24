@@ -5,7 +5,7 @@ description: Configure project-local dependencies, build, test, lint, and develo
 
 # Configure A Development Environment With Pi
 
-Read the [cross-host control protocol](../../references/host-protocol.md) and use its Skill Control Loop.
+Read the [compact Skill Control Loop](../../references/skill-control-loop.md). The full cross-host control protocol is loaded only for typed approval or durable-job handling.
 
 1. Write the exact project-local setup request, allowed package manager, lifecycle-script policy, prohibited global actions, and a resource-aware verification plan to a temporary prompt file. Inspect indirect scripts and keep install, build, test, and verification stages sequential.
 2. Run `$RUNNER setup --host "$HOST" --role environment-engineer --prompt-file "$PROMPT_FILE" --execution-mode supervised --approval-mode "$APPROVAL_MODE" --workspace-strategy auto --json`.

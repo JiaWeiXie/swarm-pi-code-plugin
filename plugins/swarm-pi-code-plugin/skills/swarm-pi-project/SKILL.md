@@ -5,7 +5,7 @@ description: Reopen only Pi's project role routing, execution safety, scope, Hos
 
 # Configure Swarm Pi Project Setup
 
-Read the [cross-host control protocol](../../references/host-protocol.md), including its Skill Control Loop and State storage write boundary.
+Read the [compact Skill Control Loop](../../references/skill-control-loop.md). Load the full [cross-host control protocol](../../references/host-protocol.md) for the State storage write boundary.
 
 1. Run `$RUNNER status --json`. If `workspace.git` is false, ask whether to run only `git init` at the exact reported root. On approval, verify no non-terminal Jobs, run only that command, and require a Git-backed status; never add, commit, configure identity, or modify project files. On decline, make no Git change. Stop and preserve both paths when storage migration is conflicted or blocked.
 2. Start `$RUNNER configure --host "$HOST" --section project`; keep it active and relay its loopback URL when needed. If saving reports storage `EPERM`, preserve the draft and use the State storage write boundary; do not modify project state files manually.

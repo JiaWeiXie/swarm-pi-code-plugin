@@ -5,11 +5,11 @@ description: Delegate an explicitly authorized, scoped change, fix, or refactor 
 
 # Implement With Pi
 
-Read the [cross-host control protocol](../../references/host-protocol.md) and use its Skill Control Loop.
+Read the [compact Skill Control Loop](../../references/skill-control-loop.md). Load the full [cross-host control protocol](../../references/host-protocol.md) only for approvals, Host Assistance, durable jobs, artifacts, or delivery.
 
 1. Confirm explicit mutation intent. Preserve user changes; never stash, discard, commit, or hide them. Route non-Git new-project work to scaffold.
-2. Write scope, acceptance criteria, prohibited actions, and a resource-aware verification plan to a temporary prompt file. Inspect indirect scripts and run expensive build or test stages sequentially with only verified concurrency controls.
-3. Run `$RUNNER implement --host "$HOST" --role executor --prompt-file "$PROMPT_FILE" --execution-mode supervised --approval-mode "$APPROVAL_MODE" --json`.
+2. Add only missing scope, acceptance criteria, prohibited actions, and a resource-aware verification plan to a temporary prompt file. Inspect indirect scripts and run expensive build or test stages sequentially with only verified concurrency controls.
+3. Run `$RUNNER implement --host "$HOST" --role executor --prompt-file "$PROMPT_FILE" --execution-mode supervised --approval-mode "$APPROVAL_MODE" --json`; with explicit user choice, append `--implementation-profile prewalk` to preserve exploration, TODOs, and the first edit through an in-session handoff.
 4. For every non-terminal result, use the control loop. Allow only an exact, in-scope, reversible action covered by the original mutation intent; Strict mode, deletion, Git metadata, workspace escape, and delivery require the user.
 5. Use background only for an explicitly requested, project-enabled `mechanical-executor`. Do not mutate the same worktree while Pi runs.
 6. Inspect the actual diff, changed files, `runtimeSideEffects`, verification, and artifact. For exit code `5`, present `isolated-head` and `isolated-snapshot`; never choose for the user. A `workspace-unborn-head` response is fail-fast and must route to scaffold or approved adoption before resume.

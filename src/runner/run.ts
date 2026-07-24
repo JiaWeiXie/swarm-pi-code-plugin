@@ -203,6 +203,12 @@ export interface RunnerDependencies {
       request: HostAssistanceRequest,
       signal?: AbortSignal,
     ) => Promise<HostAssistanceResult>;
+    prewalk?: {
+      guideModel: string;
+      executorModel: string;
+      executorModelObject: PiModel;
+      executorThinkingLevel: ThinkingLevel;
+    };
   }): Promise<RunnableSession>;
   createClassifier?(options: {
     cwd: string;
@@ -535,6 +541,16 @@ export async function runCommand(
     args.command === "review"
       ? (options.requestOverride?.reviewProfile ?? args.reviewProfile ?? "standard")
       : undefined;
+  const implementationProfile =
+    args.command === "implement"
+      ? (options.requestOverride?.implementationProfile ?? args.implementationProfile ?? "direct")
+      : undefined;
+  const orchestrationProfile =
+    args.command === "orchestrate"
+      ? (options.requestOverride?.orchestrationProfile ??
+        args.orchestrationProfile ??
+        "independent")
+      : undefined;
   const sandboxMode = persistedSnapshot?.sandboxMode ?? state.config.sandboxMode ?? "strict";
   const roleId = args.role ?? defaultRoleForTask(args.command);
   let rolePolicy = persistedSnapshot
@@ -655,6 +671,14 @@ export async function runCommand(
     requested: args.model,
     priority: rolePolicy.models.length ? rolePolicy.models : modelPriority(modelConfiguration),
   }).slice(0, Math.min(rolePolicy.maxAttempts, decisionAttemptLimit(policySnapshot)));
+  if (implementationProfile === "prewalk") {
+    if (roleId !== "executor")
+      throw new Error("--implementation-profile prewalk requires the executor role.");
+    if (candidates.length < 2 || modelId(candidates[0]!) === modelId(candidates[1]!))
+      throw new Error(
+        "Prewalk admission failed: a distinct authenticated executor model is required.",
+      );
+  }
   const delegationSpec =
     options.requestOverride?.delegationSpec ??
     (args.specFile && args.command !== "scaffold"
@@ -704,6 +728,8 @@ export async function runCommand(
     ...(args.hostContextFile ? { hostContextFile: args.hostContextFile } : {}),
     ...(discoveryFrom ? { discoveryFrom } : {}),
     ...(reviewProfile ? { reviewProfile } : {}),
+    ...(implementationProfile ? { implementationProfile } : {}),
+    ...(orchestrationProfile ? { orchestrationProfile } : {}),
   };
   const setupBlocked =
     !dependencies &&
@@ -803,6 +829,8 @@ export async function runCommand(
     ...(args.hostContextFile ? { hostContextFile: args.hostContextFile } : {}),
     ...(discoveryFrom ? { discoveryFrom } : {}),
     ...(reviewProfile ? { reviewProfile } : {}),
+    ...(implementationProfile ? { implementationProfile } : {}),
+    ...(orchestrationProfile ? { orchestrationProfile } : {}),
     modelConfiguration,
   });
   let executionCwd = cwd;
@@ -1310,6 +1338,10 @@ function requestArguments(request: JobRequest | WorkerRequest): RunnerArguments 
     ...(request.adoptExisting ? { adoptExisting: true } : {}),
     ...(request.discoveryFrom ? { discoveryFrom: request.discoveryFrom } : {}),
     ...(request.reviewProfile ? { reviewProfile: request.reviewProfile } : {}),
+    ...(request.implementationProfile
+      ? { implementationProfile: request.implementationProfile }
+      : {}),
+    ...(request.orchestrationProfile ? { orchestrationProfile: request.orchestrationProfile } : {}),
     reconfigure: false,
     reset: false,
     json: true,
@@ -1764,6 +1796,9 @@ async function runStartedJob(options: {
         requestHostAssistance,
         thinkingLevel: options.policySnapshot.rolePolicy.thinkingLevel,
         telemetryRole: options.policySnapshot.rolePolicy.role,
+        ...(options.args.orchestrationProfile
+          ? { orchestrationProfile: options.args.orchestrationProfile }
+          : {}),
         ...(options.signal ? { signal: options.signal } : {}),
       });
       const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
@@ -1893,10 +1928,13 @@ async function runStartedJob(options: {
           }
         : {}),
     });
+    const prewalkGuide = options.args.implementationProfile === "prewalk";
     let result = await runWithFallback({
       kind,
       cwd: options.cwd,
-      prompt,
+      prompt: prewalkGuide
+        ? `${prompt}\n\n[PREWALK_GUIDE]\nBefore the first workspace edit or write: explore the repository, call update_todo with 1-8 concrete items and verification conditions, then make the first safe mutation. The controller will hand off in the same session after that mutation; do not describe this control instruction.\n[/PREWALK_GUIDE]`
+        : prompt,
       mode: isMutationTask(kind) ? "implement" : "readonly",
       candidates: options.candidates,
       dependencies: options.dependencies,
@@ -1909,6 +1947,7 @@ async function runStartedJob(options: {
       requestHostAssistance,
       thinkingLevel: options.policySnapshot.rolePolicy.thinkingLevel,
       telemetryRole: actualRole,
+      ...(prewalkGuide ? { implementationProfile: "prewalk" as const } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     });
     let totalRoleAttempts = result.attempts ?? 0;
@@ -2506,6 +2545,8 @@ async function runWithFallback(options: {
   ) => Promise<HostAssistanceResult>;
   perspective?: string;
   telemetryRole?: RoleId;
+  orchestrationProfile?: "independent" | "shared-recon";
+  implementationProfile?: "direct" | "prewalk";
   deadline: number;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
@@ -2522,6 +2563,16 @@ async function runWithFallback(options: {
       };
     }
     const model = options.candidates[index]!;
+    const executorModel =
+      options.implementationProfile === "prewalk" && index === 0
+        ? options.candidates[1]
+        : undefined;
+    if (options.implementationProfile === "prewalk" && !executorModel) {
+      return failure(
+        options.kind,
+        "Prewalk admission failed: no distinct executor model is available.",
+      );
+    }
     const sessionId = randomUUID();
     const attemptStartedMs = Date.now();
     const attemptStartedAt = new Date(attemptStartedMs).toISOString();
@@ -2536,6 +2587,16 @@ async function runWithFallback(options: {
         ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
         ...(options.onApproval ? { onApproval: options.onApproval } : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+        ...(executorModel
+          ? {
+              prewalk: {
+                guideModel: modelId(model),
+                executorModel: modelId(executorModel),
+                executorModelObject: executorModel,
+                executorThinkingLevel: options.thinkingLevel ?? "low",
+              },
+            }
+          : {}),
         ...(options.requestHostAssistance
           ? {
               requestHostAssistance: (request, signal) =>
@@ -2565,6 +2626,15 @@ async function runWithFallback(options: {
         ...(options.thinkingLevel ? { requestedThinkingLevel: options.thinkingLevel } : {}),
         ...(effectiveThinkingLevel ? { effectiveThinkingLevel } : {}),
       };
+      const prewalk = (
+        session as RunnableSession & {
+          prewalk?: { metadata: WorkerResult["prewalk"]; finalize(): void };
+        }
+      ).prewalk;
+      if (prewalk) {
+        prewalk.finalize();
+        if (prewalk.metadata) last.prewalk = prewalk.metadata;
+      }
     } catch (error) {
       last = failure(
         options.kind,
@@ -2588,6 +2658,7 @@ async function runWithFallback(options: {
       provider: classified.provider,
       model: classified.model,
       ...(options.telemetryRole ? { role: options.telemetryRole } : {}),
+      ...(executorModel ? { phase: "guide" as const } : { phase: "direct" as const }),
       ...(measured?.usage ? { usage: measured.usage } : {}),
     });
     last = {
@@ -2597,6 +2668,7 @@ async function runWithFallback(options: {
       telemetry: { attempts: [...telemetryAttempts] },
     };
     if (last.success) return last;
+    if (options.implementationProfile === "prewalk") return last;
     if (last.status === "cancelled" || last.status === "timed-out") return last;
     if (options.mode === "implement" && !(await inspectWorktree(options.cwd)).clean) return last;
   }
@@ -2835,6 +2907,7 @@ async function runDiscoveryWorkflow(options: {
     signal?: AbortSignal,
   ) => Promise<HostAssistanceResult>;
   telemetryRole?: RoleId;
+  orchestrationProfile?: "independent" | "shared-recon";
   deadline: number;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
@@ -4283,6 +4356,7 @@ async function runOrchestration(options: {
     signal?: AbortSignal,
   ) => Promise<HostAssistanceResult>;
   telemetryRole?: RoleId;
+  orchestrationProfile?: "independent" | "shared-recon";
   deadline: number;
   signal?: AbortSignal;
 }): Promise<WorkerResult> {
@@ -4300,6 +4374,33 @@ async function runOrchestration(options: {
       : 0;
   for (let index = 0; index < advisorCount; index += 1) {
     perspectives.push(`Advisor consultation ${index + 1} (bounded, context-only)`);
+  }
+  let sharedRecon = "";
+  if (options.orchestrationProfile === "shared-recon") {
+    const recon = await runWithFallback({
+      kind: "orchestrate",
+      cwd: options.cwd,
+      mode: "readonly",
+      candidates: options.candidates,
+      dependencies: options.dependencies,
+      deadline: options.deadline,
+      ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+      ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+      ...(options.sandboxRunner ? { sandboxRunner: options.sandboxRunner } : {}),
+      ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
+      ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+      ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+      telemetryRole: "review-coordinator",
+      prompt: buildWorkerPrompt({
+        host: options.host,
+        kind: "orchestrate",
+        prompt: `${options.prompt}\n\nPerform bounded reconnaissance. Return at most 8 evidence or unknown items, with no prose outside that list.`,
+        projectGoal: options.projectGoal,
+        renderedProjectPolicy: options.renderedProjectPolicy,
+      }),
+    });
+    if (!recon.success) return recon;
+    sharedRecon = recon.output.slice(0, 12_000);
   }
   const results = await Promise.all(
     perspectives.map(async (perspective) => {
@@ -4325,7 +4426,9 @@ async function runOrchestration(options: {
         prompt: buildWorkerPrompt({
           host: options.host,
           kind: "orchestrate",
-          prompt: options.prompt,
+          prompt: sharedRecon
+            ? `${options.prompt}\n\n[SHARED_RECON_EVIDENCE]\n${sharedRecon}\n[/SHARED_RECON_EVIDENCE]`
+            : options.prompt,
           projectGoal: options.projectGoal,
           renderedProjectPolicy: options.renderedProjectPolicy,
           perspective,

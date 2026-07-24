@@ -5,7 +5,7 @@ description: Delegate one focused repository question, explanation, or evidence 
 
 # Ask Pi
 
-Read the [cross-host control protocol](../../references/host-protocol.md) and use its Skill Control Loop.
+Read the [compact Skill Control Loop](../../references/skill-control-loop.md). The full cross-host control protocol is loaded only for typed approval or durable-job handling.
 
 1. Write one self-contained question with repository scope, required evidence, freshness constraints, and the uncertainty to resolve.
 2. Run `$RUNNER ask --host "$HOST" --role scout --prompt-file "$PROMPT_FILE" --execution-mode "$EXECUTION_MODE" --approval-mode "$APPROVAL_MODE" --json`.
