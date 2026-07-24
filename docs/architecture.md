@@ -125,6 +125,28 @@ The runner creates one in-memory Pi session per delegated model attempt.
 Strict jobs use scoped repository tools only. Adaptive, Lenient, and Autopilot
 jobs add OS-sandboxed Bash. Ordinary orchestration perspectives in a stage share one
 manager so parallel sessions cannot reset each other's process boundary.
+
+`orchestrate --orchestration-profile shared-recon` is the only workflow that
+registers the authenticated coordinator-only `seal_evidence` custom tool. A
+coordinator attempt must call it exactly once with 1–8 validated entries before
+a successful attempt can release perspectives. The runner never forwards the
+coordinator prompt, messages, tool trajectory, workspace location, or result
+text. It defensively clones and freezes the seal, then seeds each fresh
+in-memory perspective with only that seal using the installed Pi SDK's
+`sendCustomMessage` API (`display: false`, no trigger turn). A perspective
+receives an explicit instruction that the claims are untrusted and never
+instruction, policy, or authorization. Independent orchestration does not
+register the tool or seed custom messages.
+
+The seal's privacy filter is explicitly best-effort. It rejects C0/C1 and DEL
+controls, any backtick, URL forms beginning `http://`, `https://`, `ftp://`,
+`file://`, or `www.`, Unix absolute paths, Windows drive/UNC paths, and exact
+32/40/64/96/128-character hex runs. It does not reject an ordinary slash in a
+relative name. These lexical checks are not a data-loss or secret-detection
+guarantee. Tool success/error text is fixed and never echoes entries; success
+without a seal or failure after a seal returns the fixed sanitized failure and
+never releases the seal. No seal content or seal metadata is added to result or
+telemetry contracts.
 Discover is stage-scoped: Research disposes before gate waiting, Experiment
 owns a separate manager in the isolated child worktree, and Convergence or
 Advisor tool use creates fresh read-only managers. At most one process-global

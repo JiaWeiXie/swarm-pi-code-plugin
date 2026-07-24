@@ -17,16 +17,22 @@ The persisted event contains only:
 
 Prewalk records only aggregate phase and handoff metadata. Phases identify
 direct execution, prewalk guidance, shared reconnaissance, or an orchestration
-perspective; they never contain prompt or repository text. Telemetry never
-stores prompts, completions, paths, hashes, TODO text, tool-result text, or
-repository content; savings are established only by the benchmark.
+perspective; they never contain prompt or repository text. Shared-recon seal
+content is not a telemetry field: no entries, entry counts, paths, hashes,
+prompts, or raw tool text are recorded. Telemetry never stores prompts,
+completions, paths, hashes, TODO text, tool-result text, or repository content;
+savings are established only by the benchmark.
 
 Strict parsers and privacy validation reject prompts, completions, reasoning,
 source text, paths, URLs/endpoints, personal data, secrets, credentials, raw
 provider configuration, Git metadata, arbitrary text, unknown fields, and
-unsupported schema versions. Unsafe provider/model labels become
-`unknown-custom`; their raw values are never persisted. Local models remain
-usage-only.
+unsupported schema versions. The separate shared-recon seal is explicitly
+best-effort rather than a secret detector: its exact lexical rules reject C0/C1
+and DEL controls, backticks, `http(s)://`, `ftp://`, `file://`, `www.` URLs,
+Unix absolute paths, Windows drive/UNC paths, and 32/40/64/96/128-character
+hex digests; ordinary relative slashes are allowed. Unsafe provider/model
+labels become `unknown-custom`; their raw values are never persisted. Local
+models remain usage-only.
 
 ## Storage and lifecycle
 

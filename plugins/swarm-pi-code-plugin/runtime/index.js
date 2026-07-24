@@ -11,6 +11,7 @@ export * from "./git/scaffold.js";
 export * from "./onboarding/readiness.js";
 export * from "./onboarding/continuations.js";
 export * from "./orchestration/roles.js";
+export * from "./orchestration/sealed-evidence.js";
 export * from "./policy/engine.js";
 export * from "./policy/classifier.js";
 export * from "./policy/project-policy.js";

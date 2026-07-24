@@ -9,6 +9,10 @@ import type { HostAdjudicationReceipt } from "../src/core/contracts.js";
 import { executeSession, type RunnableSession } from "../src/pi/execute.js";
 import { isDelegatedCommand } from "../src/cli.js";
 import { createPolicySnapshot, resolveRolePolicy } from "../src/orchestration/roles.js";
+import {
+  createSealEvidenceTool,
+  SEALED_EVIDENCE_FAILURE,
+} from "../src/orchestration/sealed-evidence.js";
 import { compileEffectiveProjectPolicy, ProjectPolicyError } from "../src/policy/project-policy.js";
 import {
   describeModels,
@@ -1530,8 +1534,28 @@ test("shared reconnaissance aggregates coordinator attempts and telemetry", asyn
   const dependencies: RunnerDependencies = {
     catalog: { available: () => [fakeModel, fallbackModel] },
     readFile: async () => "Evaluate this design",
-    createSession: async ({ model }) => {
+    createSession: async ({ model, sealEvidenceController }) => {
       sessions.push(modelId(model));
+      if (sealEvidenceController) {
+        const tool = createSealEvidenceTool(sealEvidenceController);
+        if (model === fallbackModel) {
+          await tool.execute(
+            "seal",
+            {
+              entries: [
+                {
+                  kind: "evidence",
+                  summary: "The bounded coordinator fixture completed.",
+                  basis: "workspace",
+                },
+              ],
+            },
+            undefined,
+            undefined,
+            {} as never,
+          );
+        }
+      }
       return {
         subscribe(listener) {
           if (model === fakeModel) {
@@ -1600,6 +1624,69 @@ test("shared reconnaissance aggregates coordinator attempts and telemetry", asyn
     ["recon", "recon", "perspective", "perspective", "perspective", "perspective"],
   );
   assert.equal(telemetry?.attempts.filter((attempt) => attempt.outcome === "succeeded").length, 3);
+});
+
+test("shared reconnaissance never releases a missing or failed seal", async () => {
+  for (const sealCoordinator of [false, true]) {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-shared-recon-gate-"));
+    let sessions = 0;
+    const dependencies: RunnerDependencies = {
+      catalog: { available: () => [fakeModel] },
+      readFile: async () => "Evaluate this design",
+      createSession: async ({ sealEvidenceController }) => {
+        sessions += 1;
+        if (sealCoordinator && sealEvidenceController) {
+          await createSealEvidenceTool(sealEvidenceController).execute(
+            "seal",
+            {
+              entries: [
+                {
+                  kind: "evidence",
+                  summary: "The coordinator completed before a provider failure.",
+                  basis: "workspace",
+                },
+              ],
+            },
+            undefined,
+            undefined,
+            {} as never,
+          );
+        }
+        return {
+          subscribe(listener) {
+            listener({
+              type: "message_end",
+              message: {
+                role: "assistant",
+                stopReason: sealCoordinator ? "error" : "stop",
+                ...(sealCoordinator ? { errorMessage: "raw coordinator failure" } : {}),
+              },
+            });
+            return () => {};
+          },
+          async prompt() {},
+          dispose() {},
+        };
+      },
+    };
+    const result = await runCommand(
+      {
+        command: "orchestrate",
+        host: "codex",
+        promptFile: "prompt.md",
+        orchestrationProfile: "shared-recon",
+        reconfigure: false,
+        reset: false,
+        json: true,
+      },
+      workspace,
+      dependencies,
+    );
+    assert.equal("success" in result && result.success, false);
+    assert.equal("output" in result && result.output, SEALED_EVIDENCE_FAILURE);
+    assert.equal("output" in result && result.output.includes("raw coordinator failure"), false);
+    assert.equal(sessions, 1);
+  }
 });
 
 test("shared reconnaissance propagates cancellation to its coordinator session", async () => {

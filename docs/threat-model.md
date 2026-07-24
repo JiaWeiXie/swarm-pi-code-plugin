@@ -40,6 +40,7 @@ repository instructions, or a supervisor approval.
 | Worker dies while waiting | heartbeat reconciliation, orphan terminal result, stale approval rejection |
 | Host Assistance is replayed, misrouted, or partially persisted | Job/generation/session/attempt/perspective fencing, stable request ID, request/fan-out quotas, `.pending` reconciliation, first-valid response, consume-once |
 | Host context injects instructions | `[UNTRUSTED_HOST_CONTEXT]`, typed bundles, policy/gate/spec precedence, secret egress hard deny |
+| Shared-recon seal is forged, replayed, or treated as authority | authenticated runtime controller capability, exact-once 1–8 schema gate, defensive seed validation, immutable in-memory clone, custom-message-only propagation, explicit untrusted-claims instruction, fixed sanitized failure, no seal telemetry/result fields |
 | Model claims an experiment replay passed | required structured fields, isolated child, changed-path validation, explicit limitation until trusted replay exists |
 | Action recommendation becomes an unapproved side effect | inert recommendation, explicit Host record/start, original mutation-intent check, isolated child, host-broker action-family lease, remote actions default off |
 | Host blocks while a worker waits for approval | managed relay, fixed 15-second parent wait, durable Job ID, bounded `jobs wait` |
@@ -92,6 +93,17 @@ typecheck, and tests before delivery.
 Decision Mode, Advisor, and `first-principles-qds-v1` do not form a safety
 boundary. Advisor output is untrusted evidence. The doctrine value is currently
 snapshotted metadata and does not execute an automatic convergence pass.
+
+Shared-recon's lexical privacy filter is explicitly best-effort. It rejects
+C0/C1/DEL controls, backticks, the exact URL forms `http(s)://`, `ftp://`,
+`file://`, and `www.`, Unix absolute paths, Windows drive/UNC paths, and
+32/40/64/96/128-character hex runs. It intentionally does not reject every
+slash, so relative names remain possible. These checks cannot prove that a
+natural-language summary is free of sensitive information. The coordinator's
+raw messages, prompts, trajectory, locations, and result text never cross into
+perspectives; malformed or missing seals, and failures after sealing, fail with
+a fixed sanitized message and release nothing. No entries, counts, paths,
+hashes, prompts, or raw tool text are added to telemetry or results.
 
 Claude Code and Codex share notifications, delivery state, and configuration.
 Matching IDs prevent unrelated acknowledgements, but there is no general Host

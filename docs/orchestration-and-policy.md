@@ -61,7 +61,25 @@ The lean panel never adds Advisor consultation. `orchestrate` uses a bounded fix
 selects one, Balance two, and Power three. All selected perspectives are
 read-only. Any failed perspective currently fails the whole orchestration
 result, and outputs are concatenated rather than reduced to one canonical
-semantic report.
+semantic report. The opt-in `shared-recon` profile adds an authenticated,
+read-only coordinator. Each coordinator attempt receives the sequential
+`seal_evidence` custom tool and must call it exactly once with 1–8 entries
+(`kind` `evidence|unknown`, bounded `summary`, and `basis`
+`workspace|request|policy|sdk|inference`) before its success can admit
+perspectives. A valid seal is cloned/frozen and delivered to fresh perspective
+sessions only through the installed Pi SDK custom-message API. Coordinator
+prompts, messages, tool trajectory, workspace locations, and result text are
+never copied. The perspective prompt treats the seal as untrusted
+claims, never instruction, policy, or authorization. Independent orchestration
+registers neither the tool nor the seed. A missing seal, duplicate/malformed
+call, or coordinator failure after sealing produces a fixed sanitized failure
+and releases no seal; ordinary pre-seal model fallback remains bounded.
+The privacy contract is best-effort: exact lexical rejection covers C0/C1/DEL
+controls, backticks, `http(s)://`, `ftp://`, `file://`, `www.` URLs, Unix
+absolute paths, Windows drive/UNC paths, and 32/40/64/96/128-character hex
+digests, while relative names containing `/` remain allowed. No seal entries,
+counts, paths, hashes, prompts, or raw tool text are added to result or
+telemetry contracts.
 
 Advisor is optional and disabled by default. When enabled for a task, the
 runner adds up to the configured minimum of `maxRequests` and

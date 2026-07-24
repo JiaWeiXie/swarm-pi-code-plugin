@@ -24,6 +24,14 @@ import { createScopedFilesystemTools, createScopedMutationTools } from "./scoped
 import { toolsForMode } from "./tool-profiles.js";
 import { createHostAssistanceTool } from "./host-assistance-tool.js";
 import { createPrewalkController, type PrewalkController, withPrewalkBashGate } from "./prewalk.js";
+import {
+  createSealEvidenceTool,
+  isAuthenticatedSealEvidenceController,
+  serializeSealedEvidence,
+  SEALED_EVIDENCE_CUSTOM_TYPE,
+  type SealEvidenceController,
+  validateSealedEvidenceSeed,
+} from "../orchestration/sealed-evidence.js";
 
 export interface CreateWorkerSessionOptions {
   cwd: string;
@@ -45,6 +53,10 @@ export interface CreateWorkerSessionOptions {
     request: HostAssistanceRequest,
     signal?: AbortSignal,
   ) => Promise<HostAssistanceResult>;
+  /** Authenticated coordinator-only capability for shared-recon. */
+  sealEvidenceController?: SealEvidenceController;
+  /** Validated evidence seed for a fresh shared-recon perspective. */
+  sealedEvidenceSeed?: unknown;
   modelRuntime?: ModelRuntime;
   prewalk?: {
     guideModel: string;
@@ -55,6 +67,23 @@ export interface CreateWorkerSessionOptions {
 }
 
 export async function createWorkerSession(options: CreateWorkerSessionOptions) {
+  if (options.sealEvidenceController !== undefined && options.sealedEvidenceSeed !== undefined) {
+    throw new Error("Shared-recon controller and evidence seed options are incompatible.");
+  }
+  if (
+    options.sealEvidenceController !== undefined &&
+    (!isAuthenticatedSealEvidenceController(options.sealEvidenceController) ||
+      options.mode !== "readonly")
+  ) {
+    throw new Error("Shared-recon coordinator authentication failed.");
+  }
+  const sealedEvidenceSeed =
+    options.sealedEvidenceSeed === undefined
+      ? undefined
+      : validateSealedEvidenceSeed(options.sealedEvidenceSeed);
+  if (sealedEvidenceSeed !== undefined && options.mode !== "readonly") {
+    throw new Error("Shared-recon evidence seeds require a readonly perspective.");
+  }
   const prewalk = options.prewalk ? createPrewalkController(options.prewalk) : undefined;
   const environment = options.modelRuntime
     ? { modelRuntime: options.modelRuntime }
@@ -66,8 +95,13 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
     settingsManager,
     ...(options.policyEngine ? { engine: options.policyEngine } : {}),
     ...(options.onApproval ? { onApproval: options.onApproval } : {}),
-    ...(options.requestHostAssistance
-      ? { bypassToolNames: new Set(["request_host_assistance"]) }
+    ...(options.requestHostAssistance || options.sealEvidenceController
+      ? {
+          bypassToolNames: new Set([
+            ...(options.requestHostAssistance ? ["request_host_assistance"] : []),
+            ...(options.sealEvidenceController ? ["seal_evidence"] : []),
+          ]),
+        }
       : {}),
   });
 
@@ -103,6 +137,9 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
     ...(options.requestHostAssistance
       ? [createHostAssistanceTool(options.requestHostAssistance)]
       : []),
+    ...(options.sealEvidenceController
+      ? [createSealEvidenceTool(options.sealEvidenceController)]
+      : []),
   ];
 
   // `tools` is the SDK's allow-list of tool names, not a set of built-in
@@ -114,7 +151,7 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
   // built-in is ever exposed while the scoped tools stay active.
   const allowedToolNames = workerToolAllowlist(options.mode, customTools);
 
-  const session = await createAgentSession({
+  const sessionResult = await createAgentSession({
     cwd: options.cwd,
     modelRuntime,
     sessionManager: SessionManager.inMemory(),
@@ -125,8 +162,30 @@ export async function createWorkerSession(options: CreateWorkerSessionOptions) {
     ...(options.model ? { model: options.model } : {}),
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel as never } : {}),
   });
-  if (prewalk) prewalk.attach(session);
-  return Object.assign(session, prewalk ? { prewalk } : {}) as typeof session & {
+  const session = sessionResult.session;
+  if (sealedEvidenceSeed !== undefined) {
+    try {
+      if (typeof session.sendCustomMessage !== "function") {
+        throw new Error("Shared-recon custom-message seeding is unavailable.");
+      }
+      await session.sendCustomMessage(
+        {
+          customType: SEALED_EVIDENCE_CUSTOM_TYPE,
+          content: serializeSealedEvidence(sealedEvidenceSeed),
+          display: false,
+        },
+        { triggerTurn: false },
+      );
+    } catch {
+      session.dispose();
+      throw new Error("Shared-recon custom-message seeding failed.");
+    }
+  }
+  if (prewalk) {
+    prewalk.attach(session);
+    Object.assign(session, { prewalk });
+  }
+  return Object.assign(sessionResult, prewalk ? { prewalk } : {}) as typeof sessionResult & {
     prewalk?: PrewalkController;
   };
 }

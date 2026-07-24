@@ -30,6 +30,7 @@ import { inspectReadiness } from "../onboarding/readiness.js";
 import { spawnBackgroundWorker } from "./background.js";
 import { buildWorkerPrompt } from "./prompts.js";
 import { assertPolicySnapshotValid, assertRoleCompatible, createPolicySnapshot, defaultRoleForTask, defaultHostAssistancePolicy, listDefaultRoles, isWorkerRole, normalizeAdaptivePolicy, resolveRolePolicy, } from "../orchestration/roles.js";
+import { createSealEvidenceController, getSealEvidenceAttempt, validateSealedEvidenceSeed, SEALED_EVIDENCE_FAILURE, } from "../orchestration/sealed-evidence.js";
 const approvalQueues = new Map();
 export async function defaultDependencies(modelConfiguration, options = {}) {
     return {
@@ -1855,6 +1856,19 @@ function initStatus(state, priority, detected, args, reset, configurationStorage
     };
 }
 async function runWithFallback(options) {
+    if (options.sealedEvidenceSeed !== undefined && options.sealEvidenceControllerFactory) {
+        return failure(options.kind, SEALED_EVIDENCE_FAILURE);
+    }
+    let sealedEvidenceSeed;
+    try {
+        sealedEvidenceSeed =
+            options.sealedEvidenceSeed === undefined
+                ? undefined
+                : validateSealedEvidenceSeed(options.sealedEvidenceSeed);
+    }
+    catch {
+        return failure(options.kind, SEALED_EVIDENCE_FAILURE);
+    }
     let last = failure(options.kind, "No model attempt completed.");
     const telemetryAttempts = [];
     for (let index = 0; index < options.candidates.length; index += 1) {
@@ -1877,6 +1891,8 @@ async function runWithFallback(options) {
         const sessionId = randomUUID();
         const attemptStartedMs = Date.now();
         const attemptStartedAt = new Date(attemptStartedMs).toISOString();
+        const sealEvidenceController = options.sealEvidenceControllerFactory?.();
+        let sealedEvidenceBoundaryFailure = false;
         try {
             const session = await options.dependencies.createSession({
                 cwd: options.cwd,
@@ -1907,6 +1923,8 @@ async function runWithFallback(options) {
                         }, signal),
                     }
                     : {}),
+                ...(sealEvidenceController ? { sealEvidenceController } : {}),
+                ...(sealedEvidenceSeed !== undefined ? { sealedEvidenceSeed } : {}),
             });
             const effectiveThinkingLevel = session.thinkingLevel;
             last = await executeSession({
@@ -1935,6 +1953,16 @@ async function runWithFallback(options) {
                             error: "Prewalk must complete its TODO-gated workspace mutation and model handoff.",
                         };
                     }
+                }
+            }
+            if (sealEvidenceController && last.status !== "cancelled") {
+                const sealedAttempt = getSealEvidenceAttempt(sealEvidenceController);
+                if (last.success && sealedAttempt.calls === 1 && sealedAttempt.seal) {
+                    options.onSealedEvidence?.(sealedAttempt.seal);
+                }
+                else if (last.success || sealedAttempt.calls > 0) {
+                    last = failure(options.kind, SEALED_EVIDENCE_FAILURE, modelId(model));
+                    sealedEvidenceBoundaryFailure = true;
                 }
             }
         }
@@ -1968,6 +1996,8 @@ async function runWithFallback(options) {
             telemetry: { attempts: [...telemetryAttempts] },
         };
         if (last.success)
+            return last;
+        if (sealedEvidenceBoundaryFailure)
             return last;
         if (options.implementationProfile === "prewalk")
             return last;
@@ -3286,7 +3316,7 @@ async function runOrchestration(options) {
     for (let index = 0; index < advisorCount; index += 1) {
         perspectives.push(`Advisor consultation ${index + 1} (bounded, context-only)`);
     }
-    let sharedRecon = "";
+    let sharedRecon;
     let coordinatorAttempts = 0;
     let coordinatorFallbackUsed = false;
     const coordinatorTelemetry = [];
@@ -3306,21 +3336,25 @@ async function runOrchestration(options) {
             ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
             telemetryRole: "review-coordinator",
             telemetryPhase: "recon",
+            sealEvidenceControllerFactory: createSealEvidenceController,
+            onSealedEvidence: (seal) => {
+                sharedRecon = seal;
+            },
             ...(options.signal ? { signal: options.signal } : {}),
             prompt: buildWorkerPrompt({
                 host: options.host,
                 kind: "orchestrate",
-                prompt: `${options.prompt}\n\nPerform bounded reconnaissance. Return at most 8 evidence or unknown items, with no prose outside that list.`,
+                prompt: `${options.prompt}\n\nPerform bounded reconnaissance, then call seal_evidence exactly once with 1-8 evidence or unknown items. Do not return raw reconnaissance prose as a substitute for the seal.`,
                 projectGoal: options.projectGoal,
                 renderedProjectPolicy: options.renderedProjectPolicy,
+                sealEvidenceCoordinator: true,
             }),
         });
-        if (!recon.success)
+        if (!recon.success || !sharedRecon)
             return recon;
         coordinatorAttempts = recon.attempts ?? 0;
         coordinatorFallbackUsed = recon.fallbackUsed ?? false;
         coordinatorTelemetry.push(...(recon.telemetry?.attempts ?? []));
-        sharedRecon = recon.output.slice(0, 12_000);
     }
     const results = await Promise.all(perspectives.map(async (perspective) => {
         const advisor = perspective.startsWith("Advisor consultation");
@@ -3343,17 +3377,17 @@ async function runOrchestration(options) {
             telemetryPhase: "perspective",
             deadline: options.deadline,
             ...(options.signal ? { signal: options.signal } : {}),
+            ...(sharedRecon ? { sealedEvidenceSeed: sharedRecon } : {}),
             prompt: buildWorkerPrompt({
                 host: options.host,
                 kind: "orchestrate",
-                prompt: sharedRecon
-                    ? `${options.prompt}\n\n[SHARED_RECON_EVIDENCE]\n${sharedRecon}\n[/SHARED_RECON_EVIDENCE]`
-                    : options.prompt,
+                prompt: options.prompt,
                 projectGoal: options.projectGoal,
                 renderedProjectPolicy: options.renderedProjectPolicy,
                 perspective,
                 ...(options.decisionMode ? { decisionMode: options.decisionMode } : {}),
                 ...(advisor ? { advisorEnabled: true } : {}),
+                ...(sharedRecon ? { sealedEvidence: true } : {}),
             }),
         });
         return advisor ? { ...result, role: "advisor" } : result;

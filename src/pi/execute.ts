@@ -40,6 +40,14 @@ interface SessionStats {
 
 export interface RunnableSession {
   prompt(prompt: string): Promise<void>;
+  sendCustomMessage?: (
+    message: {
+      customType: string;
+      content: string;
+      display: boolean;
+    },
+    options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
+  ) => Promise<void>;
   subscribe(listener: (event: SessionEvent) => void): () => void;
   getSessionStats?(): SessionStats;
   abort?(): Promise<void>;
