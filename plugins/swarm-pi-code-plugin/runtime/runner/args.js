@@ -273,7 +273,7 @@ export function parseArguments(argv) {
         throw new Error("--to is only supported by telemetry report");
     if (parsed.limit !== undefined && command !== "telemetry")
         throw new Error("--limit is only supported by telemetry report");
-    if (parsed.jobId && command !== "jobs" && command !== "telemetry")
+    if (parsed.jobId && command !== "jobs" && command !== "telemetry" && command !== "__worker")
         throw new Error("--job is only supported by jobs or telemetry report");
     if (command === "__worker" && (!parsed.jobId || !parsed.workerToken)) {
         throw new Error("__worker requires --job and --worker-token");

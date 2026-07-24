@@ -109,6 +109,29 @@ test("argument parsing requires host and prompt file for ask", () => {
     "job",
   );
   assert.deepEqual(
+    parseArguments(["__worker", "--job", "job-1", "--worker-token", "worker-token", "--json"]),
+    {
+      command: "__worker",
+      jobId: "job-1",
+      workerToken: "worker-token",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+  );
+  assert.throws(
+    () => parseArguments(["__worker", "--worker-token", "worker-token"]),
+    /__worker requires --job and --worker-token/,
+  );
+  assert.throws(
+    () => parseArguments(["__worker", "--job", "job-1"]),
+    /__worker requires --job and --worker-token/,
+  );
+  assert.throws(
+    () => parseArguments(["status", "--job", "job-1"]),
+    /only supported by jobs or telemetry/,
+  );
+  assert.deepEqual(
     parseArguments([
       "ask",
       "--host",

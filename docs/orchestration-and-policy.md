@@ -312,6 +312,11 @@ execution. `jobs watch --emit ndjson` replays allowlisted events for recovery,
 but it never writes a receipt, approves, denies, responds, issues a lease, or
 acknowledges a notification.
 
+The relay launches its private `__worker` command with both a job ID and worker
+token. Argument validation permits that job ID only for `__worker`, then rejects
+an incomplete worker invocation; public commands retain their normal `--job`
+restrictions.
+
 The same managed relay is enabled when effective Host Assistance is active.
 `jobs wait` may return `host-assistance-required` or
 `human-decision-required`. Responses are fenced by Job, generation, session,

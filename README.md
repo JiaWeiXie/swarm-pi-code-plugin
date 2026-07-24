@@ -785,6 +785,10 @@ reconciled to `orphaned`; a worker stopped after cancellation is reconciled to
 delegation. A recovered approval still requires the user to see the risk and
 choose approve or deny; replay is never consent.
 
+The internal `__worker` command is reserved for the runner's managed relay. Its
+`--job` and `--worker-token` arguments are validated together; do not invoke it
+manually.
+
 ### A linked worktree cannot see the configuration
 
 State is stored inside Git's common directory, so linked worktrees normally
@@ -844,7 +848,9 @@ mise run build
 
 ### Plugin versions
 
-Version 0.15.0 updates the pinned Pi SDK to 0.81.1, adds Qwen Token Plan provider
+Version 0.15.3 keeps the managed-relay worker parser in the TypeScript source,
+adds regression coverage for its required job and worker-token pair, and
+regenerates the packaged runtime. Version 0.15.0 updates the pinned Pi SDK to 0.81.1, adds Qwen Token Plan provider
 capabilities, records cumulative Pi session usage, and captures automatic retry
 counts. Version 0.14.0 adds local lifecycle telemetry persistence, bounded detailed
 reports, and a token-protected loopback dashboard while keeping cost attribution
