@@ -1524,6 +1524,132 @@ test("orchestrate runs Balance-mode readonly perspectives and records artifacts"
   assert.equal(fs.existsSync(path.join(jobDir, "result.json")), true);
 });
 
+test("shared reconnaissance aggregates coordinator attempts and telemetry", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-shared-recon-telemetry-"));
+  const sessions: string[] = [];
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel, fallbackModel] },
+    readFile: async () => "Evaluate this design",
+    createSession: async ({ model }) => {
+      sessions.push(modelId(model));
+      return {
+        subscribe(listener) {
+          if (model === fakeModel) {
+            listener({
+              type: "message_end",
+              message: {
+                role: "assistant",
+                stopReason: "error",
+                errorMessage: "synthetic primary failure",
+              },
+            });
+          } else {
+            listener({
+              type: "message_update",
+              assistantMessageEvent: { type: "text_delta", delta: "fallback result" },
+            });
+            listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+          }
+          return () => {};
+        },
+        async prompt() {},
+        getSessionStats() {
+          return { tokens: { input: 3, output: 2 } };
+        },
+        dispose() {},
+      };
+    },
+  };
+  await runCommand(
+    {
+      command: "init",
+      reconfigure: false,
+      reset: false,
+      modelPriority: ["test-provider/test-model", "test-provider/fallback-model"],
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+  const result = await runCommand(
+    {
+      command: "orchestrate",
+      host: "codex",
+      promptFile: "prompt.md",
+      orchestrationProfile: "shared-recon",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal(sessions.length, 6);
+  assert.equal("success" in result && result.success, true);
+  assert.equal("attempts" in result && result.attempts, 6);
+  assert.equal("fallbackUsed" in result && result.fallbackUsed, true);
+  const telemetry = "telemetry" in result ? result.telemetry : undefined;
+  assert.equal(telemetry?.attempts.length, 6);
+  assert.deepEqual(
+    telemetry?.attempts.slice(0, 2).map((attempt) => attempt.role),
+    ["review-coordinator", "review-coordinator"],
+  );
+  assert.deepEqual(
+    telemetry?.attempts.map((attempt) => attempt.phase),
+    ["recon", "recon", "perspective", "perspective", "perspective", "perspective"],
+  );
+  assert.equal(telemetry?.attempts.filter((attempt) => attempt.outcome === "succeeded").length, 3);
+});
+
+test("shared reconnaissance propagates cancellation to its coordinator session", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-shared-recon-signal-"));
+  const cancellation = new AbortController();
+  let sessions = 0;
+  let aborts = 0;
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "Evaluate this design",
+    createSession: async () => {
+      sessions += 1;
+      return {
+        subscribe() {
+          return () => {};
+        },
+        async prompt() {
+          await new Promise<void>(() => {});
+        },
+        async abort() {
+          aborts += 1;
+        },
+        async waitForIdle() {},
+        dispose() {},
+      };
+    },
+  };
+  const resultPromise = runCommand(
+    {
+      command: "orchestrate",
+      host: "codex",
+      promptFile: "prompt.md",
+      orchestrationProfile: "shared-recon",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+    { signal: cancellation.signal },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  cancellation.abort();
+  const result = await resultPromise;
+
+  assert.equal("status" in result && result.status, "cancelled");
+  assert.equal(sessions, 1);
+  assert.equal(aborts, 1);
+});
+
 test("discover runs fixed stages, propagates prior evidence, and parses experiment conclusion", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-discover-"));
   let sessions = 0;

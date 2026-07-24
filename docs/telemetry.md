@@ -15,7 +15,9 @@ The persisted event contains only:
 - UTC start, finish, and recorded timestamps, duration, and terminal outcome;
 - input, output, cached-input, and cache-write token counters when the provider reports them.
 
-Prewalk records only aggregate phase and handoff metadata. Telemetry never
+Prewalk records only aggregate phase and handoff metadata. Phases identify
+direct execution, prewalk guidance, shared reconnaissance, or an orchestration
+perspective; they never contain prompt or repository text. Telemetry never
 stores prompts, completions, paths, hashes, TODO text, tool-result text, or
 repository content; savings are established only by the benchmark.
 

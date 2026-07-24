@@ -278,8 +278,8 @@ export function createScopedFilesystemTools(options) {
         grep,
         find,
         ls,
-        withMutationHook(write, options.onWorkspaceMutation),
-        withMutationHook(edit, options.onWorkspaceMutation),
+        withMutationHook(write, options.onWorkspaceMutation, options.beforeWorkspaceMutation),
+        withMutationHook(edit, options.onWorkspaceMutation, options.beforeWorkspaceMutation),
     ];
 }
 function withSearchPolicy(definition, assertAllowed, onPolicyViolation, boundProjectPolicy) {
@@ -335,7 +335,7 @@ function isUnsafeSearchSelector(selector) {
     return (/(?:^|[,{(|])\s*(?:[\\/]|[A-Za-z]:)/.test(selector) ||
         /(?:^|[\\/{(|])\.\.(?:[\\/]|$)/.test(selector));
 }
-export function createScopedMutationTools(cwd, onWorkspaceMutation) {
+export function createScopedMutationTools(cwd, onWorkspaceMutation, beforeWorkspaceMutation) {
     const write = createWriteToolDefinition(cwd, {
         operations: {
             async mkdir(directory) {
@@ -360,19 +360,20 @@ export function createScopedMutationTools(cwd, onWorkspaceMutation) {
         },
     });
     return [
-        withMutationHook(write, onWorkspaceMutation),
-        withMutationHook(edit, onWorkspaceMutation),
+        withMutationHook(write, onWorkspaceMutation, beforeWorkspaceMutation),
+        withMutationHook(edit, onWorkspaceMutation, beforeWorkspaceMutation),
     ];
 }
-function withMutationHook(definition, onWorkspaceMutation) {
-    if (!onWorkspaceMutation)
+function withMutationHook(definition, onWorkspaceMutation, beforeWorkspaceMutation) {
+    if (!onWorkspaceMutation && !beforeWorkspaceMutation)
         return definition;
     const tool = definition;
     return {
         ...tool,
         async execute(...args) {
+            await beforeWorkspaceMutation?.();
             const result = await tool.execute(...args);
-            await onWorkspaceMutation();
+            await onWorkspaceMutation?.();
             return result;
         },
     };

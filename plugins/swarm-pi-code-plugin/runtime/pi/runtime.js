@@ -4,7 +4,7 @@ import { createPiEnvironment } from "./environment.js";
 import { createScopedFilesystemTools, createScopedMutationTools } from "./scoped-tools.js";
 import { toolsForMode } from "./tool-profiles.js";
 import { createHostAssistanceTool } from "./host-assistance-tool.js";
-import { createPrewalkController } from "./prewalk.js";
+import { createPrewalkController, withPrewalkBashGate } from "./prewalk.js";
 export async function createWorkerSession(options) {
     const prewalk = options.prewalk ? createPrewalkController(options.prewalk) : undefined;
     const environment = options.modelRuntime
@@ -28,13 +28,24 @@ export async function createWorkerSession(options) {
                 mode: options.mode,
                 boundProjectPolicy: options.boundProjectPolicy,
                 ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
-                ...(prewalk ? { onWorkspaceMutation: () => prewalk.onWorkspaceMutation() } : {}),
+                ...(prewalk
+                    ? {
+                        beforeWorkspaceMutation: () => prewalk.beforeWorkspaceMutation(),
+                        onWorkspaceMutation: () => prewalk.onWorkspaceMutation(),
+                    }
+                    : {}),
             })
             : options.mode === "implement"
-                ? createScopedMutationTools(options.cwd, prewalk ? () => prewalk.onWorkspaceMutation() : undefined)
+                ? createScopedMutationTools(options.cwd, prewalk ? () => prewalk.onWorkspaceMutation() : undefined, prewalk ? () => prewalk.beforeWorkspaceMutation() : undefined)
                 : []),
         ...(prewalk ? [prewalk.tool] : []),
-        ...(options.sandboxRunner ? [options.sandboxRunner.createBashTool()] : []),
+        ...(options.sandboxRunner
+            ? [
+                (prewalk
+                    ? withPrewalkBashGate(options.sandboxRunner.createBashTool(), prewalk)
+                    : options.sandboxRunner.createBashTool()),
+            ]
+            : []),
         ...(options.requestHostAssistance
             ? [createHostAssistanceTool(options.requestHostAssistance)]
             : []),

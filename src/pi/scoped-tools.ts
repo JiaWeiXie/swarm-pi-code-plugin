@@ -240,6 +240,7 @@ export interface CreateScopedFilesystemToolsOptions {
   mode: "readonly" | "implement";
   boundProjectPolicy: BoundProjectPolicy;
   onPolicyViolation?: (error: ProjectPolicyError) => void | Promise<void>;
+  beforeWorkspaceMutation?: () => void | Promise<void>;
   onWorkspaceMutation?: () => Promise<void>;
 }
 
@@ -345,8 +346,8 @@ export function createScopedFilesystemTools(
     grep,
     find,
     ls,
-    withMutationHook(write, options.onWorkspaceMutation),
-    withMutationHook(edit, options.onWorkspaceMutation),
+    withMutationHook(write, options.onWorkspaceMutation, options.beforeWorkspaceMutation),
+    withMutationHook(edit, options.onWorkspaceMutation, options.beforeWorkspaceMutation),
   ] as unknown as NonNullable<CreateAgentSessionOptions["customTools"]>;
 }
 
@@ -427,6 +428,7 @@ function isUnsafeSearchSelector(selector: string): boolean {
 export function createScopedMutationTools(
   cwd: string,
   onWorkspaceMutation?: () => Promise<void>,
+  beforeWorkspaceMutation?: () => void | Promise<void>,
 ): NonNullable<CreateAgentSessionOptions["customTools"]> {
   const write = createWriteToolDefinition(cwd, {
     operations: {
@@ -452,19 +454,24 @@ export function createScopedMutationTools(
     },
   });
   return [
-    withMutationHook(write, onWorkspaceMutation),
-    withMutationHook(edit, onWorkspaceMutation),
+    withMutationHook(write, onWorkspaceMutation, beforeWorkspaceMutation),
+    withMutationHook(edit, onWorkspaceMutation, beforeWorkspaceMutation),
   ] as unknown as NonNullable<CreateAgentSessionOptions["customTools"]>;
 }
 
-function withMutationHook(definition: unknown, onWorkspaceMutation?: () => Promise<void>): unknown {
-  if (!onWorkspaceMutation) return definition;
+function withMutationHook(
+  definition: unknown,
+  onWorkspaceMutation?: () => Promise<void>,
+  beforeWorkspaceMutation?: () => void | Promise<void>,
+): unknown {
+  if (!onWorkspaceMutation && !beforeWorkspaceMutation) return definition;
   const tool = definition as ExecutableTool;
   return {
     ...tool,
     async execute(...args: unknown[]) {
+      await beforeWorkspaceMutation?.();
       const result = await tool.execute(...args);
-      await onWorkspaceMutation();
+      await onWorkspaceMutation?.();
       return result;
     },
   };

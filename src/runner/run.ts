@@ -2545,6 +2545,7 @@ async function runWithFallback(options: {
   ) => Promise<HostAssistanceResult>;
   perspective?: string;
   telemetryRole?: RoleId;
+  telemetryPhase?: NonNullable<WorkerResult["telemetry"]>["attempts"][number]["phase"];
   orchestrationProfile?: "independent" | "shared-recon";
   implementationProfile?: "direct" | "prewalk";
   deadline: number;
@@ -2633,7 +2634,17 @@ async function runWithFallback(options: {
       ).prewalk;
       if (prewalk) {
         prewalk.finalize();
-        if (prewalk.metadata) last.prewalk = prewalk.metadata;
+        if (prewalk.metadata) {
+          last.prewalk = prewalk.metadata;
+          if (last.success && prewalk.metadata.status !== "switched") {
+            last = {
+              ...last,
+              status: "failed",
+              success: false,
+              error: "Prewalk must complete its TODO-gated workspace mutation and model handoff.",
+            };
+          }
+        }
       }
     } catch (error) {
       last = failure(
@@ -2658,7 +2669,11 @@ async function runWithFallback(options: {
       provider: classified.provider,
       model: classified.model,
       ...(options.telemetryRole ? { role: options.telemetryRole } : {}),
-      ...(executorModel ? { phase: "guide" as const } : { phase: "direct" as const }),
+      ...(options.telemetryPhase
+        ? { phase: options.telemetryPhase }
+        : executorModel
+          ? { phase: "guide" as const }
+          : { phase: "direct" as const }),
       ...(measured?.usage ? { usage: measured.usage } : {}),
     });
     last = {
@@ -4376,6 +4391,9 @@ async function runOrchestration(options: {
     perspectives.push(`Advisor consultation ${index + 1} (bounded, context-only)`);
   }
   let sharedRecon = "";
+  let coordinatorAttempts = 0;
+  let coordinatorFallbackUsed = false;
+  const coordinatorTelemetry: NonNullable<WorkerResult["telemetry"]>["attempts"] = [];
   if (options.orchestrationProfile === "shared-recon") {
     const recon = await runWithFallback({
       kind: "orchestrate",
@@ -4391,6 +4409,8 @@ async function runOrchestration(options: {
       ...(options.onApproval ? { onApproval: options.onApproval } : {}),
       ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
       telemetryRole: "review-coordinator",
+      telemetryPhase: "recon",
+      ...(options.signal ? { signal: options.signal } : {}),
       prompt: buildWorkerPrompt({
         host: options.host,
         kind: "orchestrate",
@@ -4400,6 +4420,9 @@ async function runOrchestration(options: {
       }),
     });
     if (!recon.success) return recon;
+    coordinatorAttempts = recon.attempts ?? 0;
+    coordinatorFallbackUsed = recon.fallbackUsed ?? false;
+    coordinatorTelemetry.push(...(recon.telemetry?.attempts ?? []));
     sharedRecon = recon.output.slice(0, 12_000);
   }
   const results = await Promise.all(
@@ -4421,6 +4444,7 @@ async function runOrchestration(options: {
           ? { requestHostAssistance: options.requestHostAssistance, perspective }
           : {}),
         telemetryRole: advisor ? "advisor" : (options.telemetryRole ?? "project-architect"),
+        telemetryPhase: "perspective",
         deadline: options.deadline,
         ...(options.signal ? { signal: options.signal } : {}),
         prompt: buildWorkerPrompt({
@@ -4447,7 +4471,10 @@ async function runOrchestration(options: {
       : results.some((result) => result.status === "timed-out")
         ? "timed-out"
         : "failed";
-  const telemetryAttempts = results.flatMap((result) => result.telemetry?.attempts ?? []);
+  const telemetryAttempts = [
+    ...coordinatorTelemetry,
+    ...results.flatMap((result) => result.telemetry?.attempts ?? []),
+  ];
   return {
     kind: "orchestrate",
     status,
@@ -4459,8 +4486,9 @@ async function runOrchestration(options: {
     changedFiles: [],
     diffStat: "",
     verification: { status: "not-run", commands: [] },
-    attempts: results.reduce((total, result) => total + (result.attempts ?? 0), 0),
-    fallbackUsed: results.some((result) => result.fallbackUsed),
+    attempts:
+      coordinatorAttempts + results.reduce((total, result) => total + (result.attempts ?? 0), 0),
+    fallbackUsed: coordinatorFallbackUsed || results.some((result) => result.fallbackUsed),
     error: success ? null : "One or more orchestration workers failed.",
     ...(telemetryAttempts.length > 0 ? { telemetry: { attempts: telemetryAttempts } } : {}),
   };

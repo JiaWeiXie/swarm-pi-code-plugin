@@ -13,6 +13,8 @@ export interface PrewalkController {
     switchFailure?: "same-model" | "missing-todos" | "missing-mutation" | "switch-error";
   };
   attach(session: unknown): void;
+  assertBashAllowed(): void;
+  beforeWorkspaceMutation(): Promise<void>;
   onWorkspaceMutation(): Promise<void>;
   finalize(): void;
 }
@@ -77,13 +79,20 @@ export function createPrewalkController(options: {
     attach(candidate) {
       session = candidate as SwitchableSession;
     },
+    assertBashAllowed() {
+      if (!switched) {
+        throw new Error(
+          "Prewalk guide phase does not allow Bash before the first TODO-gated workspace mutation and same-session executor handoff.",
+        );
+      }
+    },
+    async beforeWorkspaceMutation() {
+      if (switched) return;
+      assertTodoGate();
+    },
     async onWorkspaceMutation() {
       if (switched) return;
-      if (todos.length < 1 || todos.length > 8) {
-        metadata.status = "switch-failed";
-        metadata.switchFailure = "missing-todos";
-        throw new Error("Prewalk requires 1-8 TODO items before its first workspace mutation.");
-      }
+      assertTodoGate();
       if (!session?.setModel) {
         metadata.status = "switch-failed";
         metadata.switchFailure = "switch-error";
@@ -107,6 +116,28 @@ export function createPrewalkController(options: {
         metadata.status = "incomplete";
         metadata.switchFailure = todos.length ? "missing-mutation" : "missing-todos";
       }
+    },
+  };
+
+  function assertTodoGate(): void {
+    if (todos.length < 1 || todos.length > 8) {
+      metadata.status = "switch-failed";
+      metadata.switchFailure = "missing-todos";
+      throw new Error("Prewalk requires 1-8 TODO items before its first workspace mutation.");
+    }
+  }
+}
+
+export function withPrewalkBashGate(
+  definition: unknown,
+  controller: Pick<PrewalkController, "assertBashAllowed">,
+): unknown {
+  const tool = definition as { name?: unknown; execute: (...args: unknown[]) => unknown };
+  return {
+    ...tool,
+    async execute(...args: unknown[]) {
+      controller.assertBashAllowed();
+      return tool.execute(...args);
     },
   };
 }
