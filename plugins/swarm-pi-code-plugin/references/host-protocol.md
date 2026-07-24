@@ -18,6 +18,33 @@ Read this reference before running any Swarm Pi workflow.
 
 Treat readiness as task-specific. `capabilities.readonly` governs research and planning; `capabilities.mutation` governs file changes; `capabilities.delivery` governs materialization. Never describe the workspace as fully ready when the requested capability is degraded or blocked. A `git-unborn` workspace can be researched but must be scaffolded or adopted before implementation.
 
+## Skill Control Loop
+
+Every skill uses this common loop; keep its own instructions only for task-specific
+decisions:
+
+1. Resolve `$HOST` and `$RUNNER`, then run `status --json` and review pending
+   notifications before starting work.
+2. Keep the original request and any prompt/spec in a temporary file outside the
+   repository. Start the matching runner command with the requested policy.
+3. On an approval, Host Assistance request, Human Decision, or `wait-timed-out`,
+   retain the Job ID and use bounded `jobs wait --wait-timeout-ms 15000` calls.
+   Read the complete durable request and adjudication context; trusted runtime
+   effects are authoritative and Worker prose is advisory.
+4. Validate terminal claims against the repository, show the terminal result
+   before acknowledging it, and delete temporary prompt/spec files.
+
+### State storage write boundary
+
+Pi persists Jobs and non-secret settings under `.git/swarm-pi-code-plugin/`. A
+Host sandbox can permit loopback or read commands while denying those writes. If
+any runner command reports `EPERM` there (including `jobs/` or `recovery/`),
+preserve the request, draft, and existing state; do not create state files or a
+journal manually. Restart the same local runner command outside the Host's
+outer sandbox only with the Host user's approval. For `configure`, provide the
+new loopback URL and retry the save. This Host launch boundary is separate from
+Pi's configured Sandbox mode.
+
 If a task returns `setup-required`, retain the continuation ID and original request. Open `$RUNNER configure --host "$HOST" --continuation <id>`, then run `$RUNNER resume --continuation <id> --json` once after a successful save. Cancellation and timeout preserve the continuation; do not ask the user to restate the task.
 
 ## Select Execution

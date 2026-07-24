@@ -5,11 +5,11 @@ description: Run Pi's fixed, evidence-backed research, experiment, and convergen
 
 # Discover With Pi
 
-Read and follow the [cross-host control protocol](../../references/host-protocol.md), including pending-notification review, temporary prompt handling, bounded waits, adjudication, terminal acknowledgement, and cleanup.
+Read the [cross-host control protocol](../../references/host-protocol.md) and use its Skill Control Loop.
 
 1. Write a self-contained discovery brief with unknowns, constraints, evidence acceptance criteria, freshness requirements, user gates, and a resource-aware experiment plan. Keep expensive setup, run, test, verify, cleanup, and replay commands sequential.
 2. Run `$RUNNER discover --host "$HOST" --role analyst --prompt-file "$PROMPT_FILE" --execution-mode supervised --approval-mode "$APPROVAL_MODE" --json`.
-3. Retain the Job ID after an approval, gate, Host Assistance request, or `wait-timed-out`; continue bounded `$RUNNER jobs wait --job <id> --wait-timeout-ms 15000 --json` calls. Inspect the complete request, trusted runtime `effectAssessment`, and immutable Job policy. Treat runtime effects as authoritative and Worker prose as advisory. Apply Host-first review only within the snapshotted scope and exact receipt ceiling; otherwise ask the user.
+3. For every approval, gate, Host Assistance request, or timeout, use the control loop. Apply Host-first review only within the snapshotted scope and exact receipt ceiling; otherwise ask the user.
 4. Enforce the three schema-validated gates: research/evidence plan, experiment micro-SDLC, and definition/convergence. Require hypothesis, baseline/control, locked dependencies, fixture, seed or data hash, exact sequential commands, metrics, tolerance, evidence, tests, cleanup, and reported clean replay. The control plane validates the report but does not independently replay every command.
 5. Accept only `supported`, `refuted`, or `inconclusive`. Keep every experiment artifact `deliverable:false`; after the final Human Decision gate, pass the DiscoveryResult to `$RUNNER plan ... --discovery-from <job-id>`.
 

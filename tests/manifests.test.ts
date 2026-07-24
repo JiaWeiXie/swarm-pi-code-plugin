@@ -124,21 +124,24 @@ test("plugin package contains both host adapters and a self-contained runner", (
     assert.match(source, /sequential/i, `missing sequential execution guidance: ${skill}`);
   }
 
-  for (const skill of ["ask", "review", "plan", "implement", "orchestrate"]) {
+  for (const skill of [
+    "ask",
+    "configure",
+    "discover",
+    "implement",
+    "orchestrate",
+    "plan",
+    "project",
+    "review",
+    "scaffold",
+    "setup",
+  ]) {
     const source = fs.readFileSync(
       path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
       "utf8",
     );
     assert.match(source, /cross-host control protocol/i);
-    assert.match(source, /--execution-mode/);
-  }
-  for (const skill of ["scaffold", "setup"]) {
-    const source = fs.readFileSync(
-      path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
-      "utf8",
-    );
-    assert.match(source, /cross-host control protocol/i);
-    assert.match(source, /--execution-mode/);
+    assert.match(source, /Skill Control Loop/);
   }
   // The wrapper commands were removed: each capability is a single short-named
   // skill, invoked in Claude Code as /swarm-pi-code-plugin:swarm-pi-<name>.
@@ -150,6 +153,8 @@ test("plugin package contains both host adapters and a self-contained runner", (
   const protocolPath = path.join(pluginRoot, "references/host-protocol.md");
   assert.equal(fs.existsSync(protocolPath), true);
   const protocol = fs.readFileSync(protocolPath, "utf8");
+  assert.match(protocol, /## Skill Control Loop/);
+  assert.match(protocol, /State storage write boundary/);
   assert.match(protocol, /capabilities\.mutation/);
   assert.match(protocol, /EvidencePack/);
   assert.match(protocol, /wait-timeout-ms 15000/);
@@ -176,15 +181,15 @@ test("plugin package contains both host adapters and a self-contained runner", (
       path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
       "utf8",
     );
-    assert.match(source, /WorkerAssessment/);
     assert.match(source, /reversible/i);
+    assert.match(source, /Skill Control Loop/);
   }
   for (const skill of ["ask", "review", "plan", "orchestrate"]) {
     const source = fs.readFileSync(
       path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
       "utf8",
     );
-    assert.match(source, /adjudication context/i);
+    assert.match(source, /Skill Control Loop/);
     assert.match(source, /active Host/i);
   }
   const discover = fs.readFileSync(
@@ -206,6 +211,8 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(configure, /\$RUNNER configure --host "\$HOST"/);
   assert.match(configure, /model\.json/);
   assert.match(configure, /Never request an API key/i);
+  assert.match(configure, /outer sandbox/i);
+  assert.match(configure, /State storage write boundary/);
   assert.doesNotMatch(configure, /Ask for a replacement project goal/i);
 
   const project = fs.readFileSync(

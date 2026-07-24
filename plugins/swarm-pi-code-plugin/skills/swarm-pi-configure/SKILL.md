@@ -5,7 +5,7 @@ description: Open the full guided local setup for Pi providers, credentials, mod
 
 # Configure Swarm Pi Code Plugin
 
-Read and follow the [cross-host control protocol](../../references/host-protocol.md).
+Read the [cross-host control protocol](../../references/host-protocol.md), including its Skill Control Loop and State storage write boundary.
 
 Route arguments before opening the browser:
 
@@ -14,7 +14,7 @@ Route arguments before opening the browser:
 - Otherwise continue with guided setup. Pass `--no-open` only when supplied exactly; treat `--reconfigure` as editing current values without deleting Job history.
 
 1. Run `$RUNNER status --json`. If `workspace.git` is false, ask whether to run only `git init` at the exact reported root. On approval, verify no non-terminal Jobs, run only that command, and require a Git-backed status; never add, commit, configure identity, or modify project files. Keep `--reset` and exact `--json` non-interactive. Stop and preserve both paths on migration conflict or active-job block.
-2. Start `$RUNNER configure --host "$HOST"`, adding `--continuation <id>` only when recovering a saved request.
+2. Start `$RUNNER configure --host "$HOST"`, adding `--continuation <id>` only when recovering a saved request. If the browser can load but save reports `EPERM` under `.git/swarm-pi-code-plugin/`, follow the write-boundary recovery exactly: preserve the draft, relaunch with Host approval outside the outer sandbox, and give the user the new loopback URL. Do not change Pi Sandbox mode or edit stored files to work around it.
 3. Keep setup active through provider fields, protocol selection, subscription OAuth, models, roles, Sandbox and approval policy (including the five Sandbox modes, among them the opt-in `full-access` and `autopilot` modes), Decision Mode, Host Assistance, Discovery gates, context budget, Advisor, doctrine metadata, Host Actions, workspace, and review. Never request an API key or OAuth code in the Host conversation.
 4. Treat ChatGPT Plus/Pro as the separate `openai-codex` subscription connection. Treat model discovery and **Verify API** as distinct; a loaded model list is not proof of verification.
 5. After save, run `$RUNNER doctor --smoke-test --json`, `$RUNNER roles list --json`, and `$RUNNER status --json`. Report readiness, `configurationStorage.directory`, `modelConfigurationFile`, `stateFile`, and migration status; resume a continuation once.

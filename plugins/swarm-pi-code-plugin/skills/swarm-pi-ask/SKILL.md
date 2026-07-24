@@ -5,11 +5,11 @@ description: Delegate one focused repository question, explanation, or evidence 
 
 # Ask Pi
 
-Read and follow the [cross-host control protocol](../../references/host-protocol.md), including pending-notification review, temporary prompt handling, bounded waits, adjudication context, terminal acknowledgement, and cleanup.
+Read the [cross-host control protocol](../../references/host-protocol.md) and use its Skill Control Loop.
 
 1. Write one self-contained question with repository scope, required evidence, freshness constraints, and the uncertainty to resolve.
 2. Run `$RUNNER ask --host "$HOST" --role scout --prompt-file "$PROMPT_FILE" --execution-mode "$EXECUTION_MODE" --approval-mode "$APPROVAL_MODE" --json`.
-3. Retain the Job ID after `approval-required`, Host Assistance, or `wait-timed-out`; keep the relay alive with bounded `$RUNNER jobs wait --job <id> --wait-timeout-ms 15000 --json` calls. Inspect the full WorkerAssessment, trusted runtime `effectAssessment`, and adjudication context. Treat runtime effects as authoritative and Worker prose as advisory. An active Host may resolve only eligible public read-only context within the immutable snapshot; otherwise ask the user.
+3. For every non-terminal result, use the control loop. An active Host may resolve only eligible public read-only context within the immutable snapshot; otherwise ask the user.
 4. Validate the answer against repository evidence, identify unsupported claims, and report uncertainty or failure plainly.
 
 Keep this workflow read-only. Do not turn the answer into a plan, review, or file change without routing to the matching workflow.
