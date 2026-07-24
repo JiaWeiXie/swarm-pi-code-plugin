@@ -247,6 +247,7 @@ function summarizeRequest(
     ...(request.workspaceStrategy ? { workspaceStrategy: request.workspaceStrategy } : {}),
     ...(request.target ? { target: request.target } : {}),
     ...(request.adoptExisting ? { adoptExisting: true } : {}),
+    ...(request.reviewProfile ? { reviewProfile: request.reviewProfile } : {}),
     ...(request.providerSnapshotHash ? { providerSnapshotHash: request.providerSnapshotHash } : {}),
     createdAt: request.createdAt,
   };
@@ -320,6 +321,7 @@ function summarizeResult(
       : {}),
     ...(result.artifact ? { artifact: result.artifact } : {}),
     ...(result.hostAdjudications ? { hostAdjudications: result.hostAdjudications } : {}),
+    ...(result.review ? { review: result.review } : {}),
   };
   return redactValue(value, roots, counter) as AuditResultSummary;
 }

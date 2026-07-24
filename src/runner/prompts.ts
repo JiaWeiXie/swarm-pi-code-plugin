@@ -8,7 +8,7 @@ const HOST_CONTEXT: Record<Host, string> = {
 const TASK_CONTEXT: Record<TaskKind, string> = {
   ask: "Answer the question from repository evidence. Cite file paths and line numbers when useful.",
   review:
-    "Review for concrete bugs, security issues, regressions, and missing tests. Lead with findings.",
+    "Follow the selected review profile in the request. Standard reviews find concrete bugs, security issues, regressions, and missing tests; lean reviews are read-only, behavior-preserving simplification audits. Lead with findings.",
   plan: "Produce an implementation-ready plan grounded in the current repository.",
   implement:
     "Implement the requested change directly. Do not commit, push, or modify files outside the worktree.",
@@ -22,7 +22,7 @@ const TASK_CONTEXT: Record<TaskKind, string> = {
     "Coordinate schema-gated research, an isolated reproducible experiment child, and evidence-backed convergence; keep experiment artifacts non-materializing and require both Human Decision gates.",
 };
 
-export const WORKER_PROMPT_VERSION = 1;
+export const WORKER_PROMPT_VERSION = 2;
 
 export function buildWorkerPrompt(options: {
   host: Host;

@@ -55,6 +55,7 @@ export async function startJob(cwd, input) {
             }
             : {}),
         ...(input.discoveryFrom ? { discoveryFrom: input.discoveryFrom } : {}),
+        ...(input.reviewProfile ? { reviewProfile: input.reviewProfile } : {}),
         ...(input.modelConfiguration
             ? { modelConfiguration: structuredClone(input.modelConfiguration) }
             : {}),

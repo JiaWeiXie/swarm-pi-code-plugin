@@ -26,6 +26,7 @@ export type RunnerCommand =
   | "__worker"
   | TaskKind;
 export type ReviewScope = "auto" | "working-tree" | "branch";
+export type ReviewProfile = "standard" | "lean";
 export type JobsAction =
   | "list"
   | "status"
@@ -57,6 +58,7 @@ export interface RunnerArguments {
   provider?: string;
   base?: string;
   scope?: ReviewScope;
+  reviewProfile?: ReviewProfile;
   reconfigure: boolean;
   reset: boolean;
   modelPriority?: string[];
@@ -306,6 +308,9 @@ export function parseArguments(argv: string[]): RunnerArguments {
       case "--scope":
         parsed.scope = parseScope(readValue(argv, ++index, argument));
         break;
+      case "--review-profile":
+        parsed.reviewProfile = parseReviewProfile(readValue(argv, ++index, argument));
+        break;
       case "--set-model-priority":
         parsed.modelPriority = parseStringArray(readValue(argv, ++index, argument), argument);
         break;
@@ -370,6 +375,8 @@ export function parseArguments(argv: string[]): RunnerArguments {
     throw new Error("--discovery-from is only supported by plan");
   if (parsed.smokeTest && command !== "doctor")
     throw new Error("--smoke-test is only supported by doctor");
+  if (parsed.reviewProfile && command !== "review")
+    throw new Error("--review-profile is only supported by review");
   if (
     (parsed.executionMode ||
       parsed.timeoutMs ||
@@ -630,6 +637,11 @@ function parsePort(value: string): number {
 function parseScope(value: string): ReviewScope {
   if (value === "auto" || value === "working-tree" || value === "branch") return value;
   throw new Error(`Invalid review scope: ${value}`);
+}
+
+function parseReviewProfile(value: string): ReviewProfile {
+  if (value === "standard" || value === "lean") return value;
+  throw new Error(`Invalid review profile: ${value}`);
 }
 
 function parseStringArray(value: string, flag: string): string[] {

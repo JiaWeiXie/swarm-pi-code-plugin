@@ -48,9 +48,16 @@ ceiling, and a verification policy. Requested and effective thinking levels
 are recorded because Pi clamps thinking to model capabilities. Model fallback
 handles provider or model failure only and never bypasses a policy decision.
 
-`review-coordinator` is excluded from public `--role` selection, but version
-The runtime does not yet start a coordinator session or produce a dynamic
-`ReviewPlan`. `orchestrate` uses a bounded fixed set of perspectives: Cost
+`review-coordinator` is excluded from public `--role` selection. `review
+--review-profile lean` uses a deterministic coordinator, not a coordinator
+model session or dynamic `ReviewPlan`: three independent readonly candidates
+(clarity, YAGNI, leverage) must reach a two-of-three success quorum, are
+deduplicated by path/overlap/tag, then at most six candidates are independently
+validated in batches of three. Every logical session uses the immutable Job
+policy, a fresh readonly sandbox, independent correlation and telemetry. Only
+`supported` findings are public; a failed or timed-out validator is
+`inconclusive`, and no unresolved validation may produce `Lean already. Ship.`
+The lean panel never adds Advisor consultation. `orchestrate` uses a bounded fixed set of perspectives: Cost
 selects one, Balance two, and Power three. All selected perspectives are
 read-only. Any failed perspective currently fails the whole orchestration
 result, and outputs are concatenated rather than reduced to one canonical

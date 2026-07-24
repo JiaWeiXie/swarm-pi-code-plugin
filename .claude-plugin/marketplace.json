@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Dual-host Pi workflows with durable Host Assistance and discovery",
-    "version": "0.15.3"
+    "version": "0.16.0"
   },
   "plugins": [
     {
       "name": "swarm-pi-code-plugin",
       "description": "Delegate Host-assisted discovery, review, and verified isolated implementation to Pi.",
-      "version": "0.15.3",
+      "version": "0.16.0",
       "author": {
         "name": "JiaWei Xie"
       },

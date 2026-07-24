@@ -167,7 +167,7 @@ and keeps user decisions at the Host boundary.
 | Skill | Use it for and provide | Limits and authorization boundaries |
 | --- | --- | --- |
 | `swarm-pi-ask` | One focused repository question, explanation, or evidence check. Provide the exact question, repository scope, required evidence, freshness needs, and uncertainty to resolve. | Read-only and single-focus. It does not produce a change plan, review a diff, or edit files; route those requests to `plan`, `review`, or `implement`. The Host validates the answer and reports unsupported claims or remaining uncertainty. |
-| `swarm-pi-review` | Actionable bug, security, regression, and missing-test findings for a Git working tree or branch. Provide the intended diff scope and a base ref for branch review. | Read-only. Pi findings are evidence, not authoritative review; the Host confirms every finding against the actual diff and reports tight file and line references. It never fixes findings or modifies files; use `implement` after explicit mutation authorization. |
+| `swarm-pi-review` | Actionable bug, security, regression, and missing-test findings for a Git working tree or branch. For simplify, over-engineering, deletion, reuse, stdlib/native replacement, or YAGNI requests, select the `lean` profile. Provide the intended diff scope and a base ref for branch review. | Read-only. `standard` keeps the single reviewer flow. `lean` runs three concurrent candidate reviewers, deduplicates up to six candidates, then independently validates each with at most three concurrent validators; it reports only `supported` simplifications. Pi findings are evidence, not authoritative review; the Host confirms every finding against the actual diff. |
 | `swarm-pi-plan` | A decision-ready implementation, migration, or architecture plan when requirements and evidence are already sufficient. Provide scope, alternatives, constraints, acceptance criteria, and known decisions. | Read-only and cannot invoke implementation. Unresolved requirements or claims go to `discover`; diff findings go to `review`; an approved code change goes to `implement`. Citations, unknowns, risks, and assumptions remain visible in the final plan. |
 | `swarm-pi-orchestrate` | A bounded panel for architecture, migration, tradeoff, or risk decisions where independent perspectives materially help. Provide one shared decision brief, EvidencePack, constraints, and evidence acceptance criteria. | Read-only. Decision Mode selects one to three base perspectives, with optional quota-bounded Advisor input; the Host owns the final synthesis. Perspectives do not independently repeat expensive builds or test suites, and inline code is not presented as working code without validation. |
 | `swarm-pi-discover` | Unknown requirements or unresolved technical claims that need reproducible research, an experiment, and convergence. Provide the unknowns, constraints, evidence criteria, freshness needs, user gates, and a resource-aware experiment plan. | Research and convergence are read-only; the experiment runs in an isolated child worktree under the immutable Job policy. Research, experiment, and definition gates require review. Experiment artifacts are always `deliverable: false`, cannot be materialized, and conclude only `supported`, `refuted`, or `inconclusive`; a final gated result can be handed to `plan`. |
@@ -487,6 +487,7 @@ mise exec -- node scripts/pi-runner.mjs status --json
 mise exec -- node scripts/pi-runner.mjs doctor --smoke-test --json
 mise exec -- node scripts/pi-runner.mjs ask --host codex --prompt-file /path/to/question.md --json
 mise exec -- node scripts/pi-runner.mjs review --host codex --scope working-tree --json
+mise exec -- node scripts/pi-runner.mjs review --host codex --scope working-tree --review-profile lean --json
 mise exec -- node scripts/pi-runner.mjs plan --host codex --prompt-file /path/to/plan.md --json
 mise exec -- node scripts/pi-runner.mjs implement --host codex --prompt-file /path/to/task.md --json
 mise exec -- node scripts/pi-runner.mjs orchestrate --host codex --prompt-file /path/to/task.md --json
@@ -500,6 +501,15 @@ mise exec -- node scripts/pi-runner.mjs roles list --json
 Delegated task commands also accept `--decision-mode cost|balance|power`,
 `--host-assistance inherit|on|off`, and `--host-context-file <file>`. These
 overrides are snapshotted into the new Job and never mutate workspace defaults.
+
+`review --review-profile standard|lean` defaults to `standard`. `lean` is a
+read-only, diff-only two-round panel: clarity, YAGNI, and leverage candidates
+run in parallel; each retained candidate receives a fresh independent validator.
+It permits at most nine logical sessions (three candidates plus six validators),
+so it trades higher latency and model use for validated simplification findings.
+Only `supported` `delete`, `reuse`, `stdlib`, `native`, `yagni`, `clarify`, or
+`shrink` findings are public. A pending validation produces an inconclusive or
+partial result rather than `Lean already. Ship.`
 
 `implement` is guarded by a clean-worktree preflight and an exclusive worktree
 lease. The host must inspect the result and run verification before delivery.
@@ -848,7 +858,10 @@ mise run build
 
 ### Plugin versions
 
-Version 0.15.3 keeps the managed-relay worker parser in the TypeScript source,
+Version 0.16.0 adds the diff-only `lean` review profile: three concurrent
+candidate perspectives, deterministic six-candidate selection, independent
+validator sessions, supported-only simplification findings, and durable audit
+summary/telemetry. Version 0.15.3 keeps the managed-relay worker parser in the TypeScript source,
 adds regression coverage for its required job and worker-token pair, and
 regenerates the packaged runtime. Version 0.15.0 updates the pinned Pi SDK to 0.81.1, adds Qwen Token Plan provider
 capabilities, records cumulative Pi session usage, and captures automatic retry

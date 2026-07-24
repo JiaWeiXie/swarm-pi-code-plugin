@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { captureWorktreeChanges, inspectWorktree } from "./worktree.js";
-import type { ReviewScope } from "../runner/args.js";
+import type { ReviewProfile, ReviewScope } from "../runner/args.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -11,10 +11,12 @@ export async function buildReviewRequest(
   options: {
     base?: string | undefined;
     scope?: ReviewScope | undefined;
+    reviewProfile?: ReviewProfile | undefined;
     allowedPath?: ((relativePath: string) => Promise<boolean>) | undefined;
   },
 ): Promise<string> {
   const scope = options.scope ?? "auto";
+  const profile = options.reviewProfile ?? "standard";
   const inspection = await inspectWorktree(cwd);
   const useWorkingTree = scope === "working-tree" || (scope === "auto" && !inspection.clean);
   if (useWorkingTree) {
@@ -28,7 +30,7 @@ export async function buildReviewRequest(
     ) {
       throw new Error("Review includes changed paths outside the effective project read roots");
     }
-    return `Review the current working tree changes.\n\nStatus:\n${formatStatus(changes.entries)}\n\nDiff:\n${changes.diff || "(no textual diff)"}`;
+    return `${reviewProfilePreamble(profile)}\n\nReview the current working tree changes.\n\nStatus:\n${formatStatus(changes.entries)}\n\nDiff:\n${changes.diff || "(no textual diff)"}`;
   }
 
   const base = options.base ?? "HEAD^";
@@ -39,7 +41,16 @@ export async function buildReviewRequest(
     }
   }
   const diff = await branchDiff(cwd, base);
-  return `Review branch changes relative to ${base}.\n\nDiff:\n${diff || "(no changes)"}`;
+  return `${reviewProfilePreamble(profile)}\n\nReview branch changes relative to ${base}.\n\nDiff:\n${diff || "(no changes)"}`;
+}
+
+function reviewProfilePreamble(profile: ReviewProfile): string {
+  if (profile === "standard") return "[REVIEW_PROFILE]\nstandard";
+  return [
+    "[REVIEW_PROFILE]",
+    "lean",
+    "This review uses the validated lean panel. It is read-only and reports only behavior-preserving simplification opportunities.",
+  ].join("\n");
 }
 
 async function everyPathAllowed(

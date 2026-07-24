@@ -174,6 +174,27 @@ test("argument parsing requires host and prompt file for ask", () => {
     },
   );
   assert.throws(() => parseArguments(["review", "--host", "codex", "--scope", "bad"]), /scope/);
+  assert.equal(
+    parseArguments(["review", "--host", "codex", "--review-profile", "lean"]).reviewProfile,
+    "lean",
+  );
+  assert.throws(
+    () =>
+      parseArguments([
+        "ask",
+        "--host",
+        "codex",
+        "--prompt-file",
+        "ask.md",
+        "--review-profile",
+        "lean",
+      ]),
+    /only supported by review/,
+  );
+  assert.throws(
+    () => parseArguments(["review", "--host", "codex", "--review-profile", "fast"]),
+    /review profile/,
+  );
   assert.deepEqual(parseArguments(["configure", "--host", "codex", "--section", "project"]), {
     command: "configure",
     host: "codex",
@@ -1302,7 +1323,7 @@ test("review builds a working-tree prompt and runs readonly", async () => {
       dispose() {},
     }),
   };
-  await runCommand(
+  const result = await runCommand(
     {
       command: "review",
       host: "claude",
@@ -1317,6 +1338,99 @@ test("review builds a working-tree prompt and runs readonly", async () => {
   assert.match(receivedPrompt, /review\.txt/);
   assert.match(receivedPrompt, /-before/);
   assert.match(receivedPrompt, /\+after/);
+  assert.equal(
+    "jobId" in result && (await readJobRequest(workspace, result.jobId!)).reviewProfile,
+    "standard",
+  );
+});
+
+test("lean review runs a two-round readonly panel and persists its profile", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-lean-review-"));
+  execFileSync("git", ["init", workspace], { stdio: "ignore" });
+  execFileSync("git", ["-C", workspace, "config", "user.name", "Test User"]);
+  execFileSync("git", ["-C", workspace, "config", "user.email", "test@example.com"]);
+  fs.writeFileSync(path.join(workspace, "review.ts"), "export const value = 0;\n");
+  execFileSync("git", ["-C", workspace, "add", "."]);
+  execFileSync("git", ["-c", "commit.gpgsign=false", "-C", workspace, "commit", "-m", "fixture"], {
+    stdio: "ignore",
+  });
+  fs.writeFileSync(
+    path.join(workspace, "review.ts"),
+    Array.from({ length: 6 }, (_, index) => `export const value${index + 1} = ${index + 1};`).join(
+      "\n",
+    ) + "\n",
+  );
+  let active = 0;
+  let peakActive = 0;
+  const candidates = JSON.stringify({
+    findings: Array.from({ length: 6 }, (_, index) => ({
+      tag: index === 0 ? "delete" : "shrink",
+      path: "review.ts",
+      startLine: index + 1,
+      endLine: index + 1,
+      summary: `Candidate ${index + 1}`,
+      replacement: "Use the smaller existing expression.",
+      impact: "medium",
+    })),
+  });
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [fakeModel] },
+    readFile: async () => "unused",
+    createSession: async ({ mode }) => {
+      let listener: Parameters<RunnableSession["subscribe"]>[0] | undefined;
+      return {
+        subscribe(nextListener) {
+          listener = nextListener;
+          return () => {};
+        },
+        async prompt(prompt) {
+          assert.equal(mode, "readonly");
+          active += 1;
+          peakActive = Math.max(peakActive, active);
+          await new Promise<void>((resolve) => setTimeout(resolve, 5));
+          active -= 1;
+          const output = prompt.includes("round 1")
+            ? candidates
+            : JSON.stringify({
+                outcome: "supported",
+                behaviorEvidence: "The replacement keeps the exported value unchanged.",
+                verification: "npm run typecheck",
+              });
+          listener?.({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: output },
+          });
+          listener?.({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+        },
+        dispose() {},
+      };
+    },
+  };
+  const result = await runCommand(
+    {
+      command: "review",
+      host: "codex",
+      scope: "working-tree",
+      reviewProfile: "lean",
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal("success" in result && result.success, true);
+  assert.equal("review" in result && result.review?.profile, "lean");
+  assert.equal("review" in result && result.review?.findings.length, 6);
+  assert.equal("review" in result && result.review?.rounds.candidates.succeeded, 3);
+  assert.equal("review" in result && result.review?.rounds.validation.supported, 6);
+  assert.equal("orchestrationTrace" in result && result.orchestrationTrace?.length, 9);
+  assert.equal(peakActive, 3);
+  assert.equal(
+    "jobId" in result && (await readJobRequest(workspace, result.jobId!)).reviewProfile,
+    "lean",
+  );
 });
 
 test("branch review handles a repository with only a root commit", async () => {

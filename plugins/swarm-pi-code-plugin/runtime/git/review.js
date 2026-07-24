@@ -4,6 +4,7 @@ import { captureWorktreeChanges, inspectWorktree } from "./worktree.js";
 const execFileAsync = promisify(execFile);
 export async function buildReviewRequest(cwd, options) {
     const scope = options.scope ?? "auto";
+    const profile = options.reviewProfile ?? "standard";
     const inspection = await inspectWorktree(cwd);
     const useWorkingTree = scope === "working-tree" || (scope === "auto" && !inspection.clean);
     if (useWorkingTree) {
@@ -12,7 +13,7 @@ export async function buildReviewRequest(cwd, options) {
             !(await everyPathAllowed(changes.entries.map((entry) => entry.path), options.allowedPath))) {
             throw new Error("Review includes changed paths outside the effective project read roots");
         }
-        return `Review the current working tree changes.\n\nStatus:\n${formatStatus(changes.entries)}\n\nDiff:\n${changes.diff || "(no textual diff)"}`;
+        return `${reviewProfilePreamble(profile)}\n\nReview the current working tree changes.\n\nStatus:\n${formatStatus(changes.entries)}\n\nDiff:\n${changes.diff || "(no textual diff)"}`;
     }
     const base = options.base ?? "HEAD^";
     if (options.allowedPath) {
@@ -22,7 +23,16 @@ export async function buildReviewRequest(cwd, options) {
         }
     }
     const diff = await branchDiff(cwd, base);
-    return `Review branch changes relative to ${base}.\n\nDiff:\n${diff || "(no changes)"}`;
+    return `${reviewProfilePreamble(profile)}\n\nReview branch changes relative to ${base}.\n\nDiff:\n${diff || "(no changes)"}`;
+}
+function reviewProfilePreamble(profile) {
+    if (profile === "standard")
+        return "[REVIEW_PROFILE]\nstandard";
+    return [
+        "[REVIEW_PROFILE]",
+        "lean",
+        "This review uses the validated lean panel. It is read-only and reports only behavior-preserving simplification opportunities.",
+    ].join("\n");
 }
 async function everyPathAllowed(paths, allowedPath) {
     for (const relativePath of paths) {

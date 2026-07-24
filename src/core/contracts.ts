@@ -714,6 +714,7 @@ export interface WorkerRequest {
   hostAssistance?: HostAssistanceMode;
   hostContextFile?: string;
   discoveryFrom?: string;
+  reviewProfile?: "standard" | "lean";
 }
 
 export interface WorkerResult {
@@ -739,7 +740,34 @@ export interface WorkerResult {
   role?: WorkerRoleId;
   requestedThinkingLevel?: ThinkingLevel;
   effectiveThinkingLevel?: ThinkingLevel;
-  orchestrationTrace?: Array<{ role: RoleId; model: string | null; status: string }>;
+  orchestrationTrace?: Array<{
+    role: RoleId;
+    model: string | null;
+    status: string;
+    round?: "candidate" | "validation";
+    perspective?: string;
+  }>;
+  review?: {
+    profile: "lean";
+    strategy: "validated-panel";
+    outcome: "passed" | "partial" | "inconclusive";
+    rounds: {
+      candidates: { succeeded: number; failed: number; submitted: number; selected: number };
+      validation: { supported: number; refuted: number; inconclusive: number };
+    };
+    findings: Array<{
+      tag: "delete" | "reuse" | "stdlib" | "native" | "yagni" | "clarify" | "shrink";
+      path: string;
+      startLine: number;
+      endLine: number;
+      summary: string;
+      replacement: string;
+      behaviorEvidence: string;
+      verification: string;
+      supportingReviewers: number;
+    }>;
+    truncatedCandidates: number;
+  };
   policySummary?: {
     mode: SandboxMode;
     hash: string;
@@ -846,6 +874,7 @@ export interface AuditRequestSummary {
   workspaceStrategy?: WorkspaceStrategy;
   target?: string;
   adoptExisting?: boolean;
+  reviewProfile?: "standard" | "lean";
   providerSnapshotHash?: string;
   createdAt: string;
 }
@@ -929,6 +958,7 @@ export interface AuditResultSummary {
   artifact?: WorkerResult["artifact"];
   hostAdjudications?: HostAdjudicationSummary[];
   telemetry?: WorkerResult["telemetry"];
+  review?: WorkerResult["review"];
 }
 
 export interface JobAuditExportV1 {

@@ -72,6 +72,7 @@ export interface JobStart {
   hostAssistance?: HostAssistanceMode;
   hostContextFile?: string;
   discoveryFrom?: string;
+  reviewProfile?: "standard" | "lean";
   modelConfiguration?: ModelConfiguration;
 }
 
@@ -99,6 +100,7 @@ export interface JobRequest {
   hostAssistance?: HostAssistanceMode;
   hostContextFile?: string;
   discoveryFrom?: string;
+  reviewProfile?: "standard" | "lean";
   modelConfiguration?: ModelConfiguration;
   providerSnapshotHash?: string;
   workerToken: string;
@@ -199,6 +201,7 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
         }
       : {}),
     ...(input.discoveryFrom ? { discoveryFrom: input.discoveryFrom } : {}),
+    ...(input.reviewProfile ? { reviewProfile: input.reviewProfile } : {}),
     ...(input.modelConfiguration
       ? { modelConfiguration: structuredClone(input.modelConfiguration) }
       : {}),

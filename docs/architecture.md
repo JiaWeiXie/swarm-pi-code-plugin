@@ -77,7 +77,7 @@ mise exec -- node scripts/pi-runner.mjs models --refresh --json
 mise exec -- node scripts/pi-runner.mjs providers --json
 mise exec -- node scripts/pi-runner.mjs configure --host <host> [--section project] [--no-open]
 mise exec -- node scripts/pi-runner.mjs ask --host <host> --prompt-file <file> --json
-mise exec -- node scripts/pi-runner.mjs review --host <host> [--base <ref>] [--scope <scope>] --json
+mise exec -- node scripts/pi-runner.mjs review --host <host> [--base <ref>] [--scope <scope>] [--review-profile standard|lean] --json
 mise exec -- node scripts/pi-runner.mjs plan --host <host> --prompt-file <file> [--discovery-from <job-id>] --json
 mise exec -- node scripts/pi-runner.mjs implement --host <host> --prompt-file <file> --json
 mise exec -- node scripts/pi-runner.mjs orchestrate --host <host> --prompt-file <file> --json
@@ -96,8 +96,10 @@ and snapshotted automatic ceiling.
 
 Every worker result includes the task kind, status, success flag, selected
 model, output, changed files, diff summary, verification status, and any
-explicit next action. Discovery results add stage reports and an experiment
-conclusion; Host Action children add a receipt. Status reports separate
+explicit next action. Lean review results additionally preserve the profile,
+validated-panel outcome, per-round counts, validated findings, truncation, and
+the per-session round, perspective, role, model, terminal status, and telemetry.
+Discovery results add stage reports and an experiment conclusion; Host Action children add a receipt. Status reports separate
 read-only, mutation, and delivery readiness so an unborn repository cannot be
 described as implementation-ready.
 
@@ -150,6 +152,10 @@ recovery and observability stream, not a replacement for the decision relay.
 ## Safety and Mutation Policy
 
 - `ask`, `review`, `plan`, and orchestration perspectives are read-only.
+- `review --review-profile standard` is the compatible single-reviewer path.
+  `lean` is diff-only: it runs three isolated candidate sessions, keeps at most
+  six deterministic candidates, and validates them with fresh isolated sessions
+  in batches of three. It does not add Advisor consultation or modify files.
 - `implement` requires explicit user mutation intent.
 - `implement` requires a committed HEAD and a clean assigned worktree before a
   Pi session starts. Unborn repositories fail before model startup.

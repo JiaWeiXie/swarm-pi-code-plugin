@@ -176,6 +176,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
                 ? await buildReviewRequest(cwd, {
                     base: args.base,
                     scope: args.scope,
+                    reviewProfile: args.reviewProfile,
                     ...(reviewPolicy
                         ? {
                             allowedPath: async (relativePath) => {
@@ -196,6 +197,9 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         ? await buildDiscoveryHandoffPrompt(cwd, discoveryFrom, submittedPrompt)
         : submittedPrompt;
     const executionMode = args.executionMode ?? "supervised";
+    const reviewProfile = args.command === "review"
+        ? (options.requestOverride?.reviewProfile ?? args.reviewProfile ?? "standard")
+        : undefined;
     const sandboxMode = persistedSnapshot?.sandboxMode ?? state.config.sandboxMode ?? "strict";
     const roleId = args.role ?? defaultRoleForTask(args.command);
     let rolePolicy = persistedSnapshot
@@ -337,6 +341,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         ...(args.hostAssistance ? { hostAssistance: args.hostAssistance } : {}),
         ...(args.hostContextFile ? { hostContextFile: args.hostContextFile } : {}),
         ...(discoveryFrom ? { discoveryFrom } : {}),
+        ...(reviewProfile ? { reviewProfile } : {}),
     };
     const setupBlocked = !dependencies &&
         readiness.issues.some((issue) => issue.severity === "blocking" && issue.stage !== "workspace");
@@ -428,6 +433,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         ...(args.hostAssistance ? { hostAssistance: args.hostAssistance } : {}),
         ...(args.hostContextFile ? { hostContextFile: args.hostContextFile } : {}),
         ...(discoveryFrom ? { discoveryFrom } : {}),
+        ...(reviewProfile ? { reviewProfile } : {}),
         modelConfiguration,
     });
     let executionCwd = cwd;
@@ -857,6 +863,7 @@ function requestArguments(request) {
         ...(request.target ? { target: request.target } : {}),
         ...(request.adoptExisting ? { adoptExisting: true } : {}),
         ...(request.discoveryFrom ? { discoveryFrom: request.discoveryFrom } : {}),
+        ...(request.reviewProfile ? { reviewProfile: request.reviewProfile } : {}),
         reconfigure: false,
         reset: false,
         json: true,
@@ -1249,6 +1256,43 @@ async function runStartedJob(options) {
             });
             const final = withMetadata(discovery, options.host, jobId, discovery.attempts ?? 0);
             final.role = options.policySnapshot.rolePolicy.role;
+            final.policySummary = {
+                mode: options.sandboxMode,
+                hash: options.policySnapshot.hash,
+                ...metrics,
+            };
+            const finalized = options.finalizeResult?.(final) ?? final;
+            await finishJob(options.stateCwd, jobId, finalized);
+            return finalized;
+        }
+        if (kind === "review" && options.args.reviewProfile === "lean") {
+            // The regular worker sandbox is intentionally not shared by concurrent
+            // panel sessions. Each round creates and disposes its own readonly sandbox.
+            await sandboxRunner?.dispose().catch(() => { });
+            sandboxRunner = undefined;
+            await updateJobProgress(options.stateCwd, jobId, options.job.workerToken, "delegating", "Running the lean review candidate panel.");
+            const result = await runLeanReviewPanel({
+                cwd: options.cwd,
+                host: options.host,
+                prompt: options.rawPrompt,
+                projectGoal: options.projectGoal,
+                renderedProjectPolicy,
+                candidates: options.candidates,
+                dependencies: options.dependencies,
+                sandboxMode: options.sandboxMode,
+                trustedDomains: options.policySnapshot.adaptivePolicy.trustedDomains,
+                ...(boundProjectPolicy ? { boundProjectPolicy } : {}),
+                onPolicyViolation: recordPolicyViolation,
+                policyEngine: engine,
+                onApproval,
+                requestHostAssistance,
+                thinkingLevel: options.policySnapshot.rolePolicy.thinkingLevel,
+                deadline,
+                ...(options.signal ? { signal: options.signal } : {}),
+            });
+            const final = withMetadata(result, options.host, jobId, result.attempts ?? 0);
+            final.role = options.policySnapshot.rolePolicy.role;
+            final.requestedThinkingLevel = options.policySnapshot.rolePolicy.thinkingLevel;
             final.policySummary = {
                 mode: options.sandboxMode,
                 hash: options.policySnapshot.hash,
@@ -2762,6 +2806,404 @@ async function runIsolatedExperimentChild(options) {
     finally {
         await childSandbox?.dispose().catch(() => { });
     }
+}
+const LEAN_TAGS = ["delete", "reuse", "stdlib", "native", "yagni", "clarify", "shrink"];
+const LEAN_PERSPECTIVES = [
+    [
+        "clarity",
+        "Find readability and maintainability reductions: unnecessary nesting, duplication, unclear naming, and redundant comments. Prefer explicit boring code over clever compression.",
+    ],
+    [
+        "yagni",
+        "Find dead code, speculative flexibility, one-implementation abstractions, one-caller wrappers, and configuration no caller uses. Prefer deletion when no requested behavior needs it.",
+    ],
+    [
+        "leverage",
+        "Find places to reuse an existing project capability, the standard library, a native platform feature, or an already-installed dependency instead of custom code.",
+    ],
+];
+async function runLeanReviewPanel(options) {
+    const traces = [];
+    const changedPaths = changedPathsFromReviewPrompt(options.prompt);
+    const candidateStages = await Promise.all(LEAN_PERSPECTIVES.map(async ([id, instruction]) => {
+        const stage = await runLeanStructuredStage({
+            ...options,
+            perspective: `lean:${id}`,
+            telemetryRole: "reviewer",
+            parse: parseLeanCandidates,
+            prompt: buildWorkerPrompt({
+                host: options.host,
+                kind: "review",
+                perspective: `lean:${id}`,
+                projectGoal: options.projectGoal,
+                renderedProjectPolicy: options.renderedProjectPolicy,
+                prompt: [
+                    "You are round 1 of a validated lean review panel.",
+                    instruction,
+                    "Inspect only the supplied diff. Do not modify files and do not propose removing validation, security, accessibility, data-loss protection, or necessary tests.",
+                    'Return JSON only: {"findings":[{"tag":"delete|reuse|stdlib|native|yagni|clarify|shrink","path":"relative/path","startLine":1,"endLine":1,"summary":"what is unnecessarily complex","replacement":"specific smaller replacement","impact":"high|medium|low"}]}. Return an empty findings array when uncertain.',
+                    options.prompt,
+                ].join("\n\n"),
+            }),
+        });
+        traces.push({
+            role: "reviewer",
+            model: stage.result.model,
+            status: stage.result.status,
+            round: "candidate",
+            perspective: id,
+        });
+        return { id, ...stage };
+    }));
+    const successfulCandidates = candidateStages.filter((stage) => stage.value !== undefined);
+    const candidateTelemetry = candidateStages.flatMap((stage) => stage.result.telemetry?.attempts ?? []);
+    const candidateAttempts = candidateStages.reduce((total, stage) => total + (stage.result.attempts ?? 0), 0);
+    const candidateFallback = candidateStages.some((stage) => stage.result.fallbackUsed);
+    const candidateRounds = {
+        succeeded: successfulCandidates.length,
+        failed: candidateStages.length - successfulCandidates.length,
+        submitted: 0,
+        selected: 0,
+    };
+    if (successfulCandidates.length < 2) {
+        return leanResult("failed", "Lean review is inconclusive: fewer than two candidate reviewers returned schema-valid results.", candidateStages.find((stage) => stage.result.model)?.result.model ?? null, candidateAttempts, candidateFallback, candidateTelemetry, traces, {
+            profile: "lean",
+            strategy: "validated-panel",
+            outcome: "inconclusive",
+            rounds: {
+                candidates: candidateRounds,
+                validation: { supported: 0, refuted: 0, inconclusive: 0 },
+            },
+            findings: [],
+            truncatedCandidates: 0,
+        }, "lean-review-candidate-quorum");
+    }
+    const merged = mergeLeanCandidates(successfulCandidates.flatMap((stage) => stage
+        .value.findings.filter((finding) => changedPaths.size === 0 || changedPaths.has(finding.path))
+        .map((finding) => ({ finding, reviewer: stage.id }))), new Map([...changedPaths].map((candidatePath, index) => [candidatePath, index])));
+    const selected = merged.slice(0, 6);
+    const truncatedCandidates = Math.max(0, merged.length - selected.length);
+    candidateRounds.submitted = merged.length;
+    candidateRounds.selected = selected.length;
+    if (selected.length === 0) {
+        return leanResult("succeeded", "Lean already. Ship.", candidateStages.find((stage) => stage.result.model)?.result.model ?? null, candidateAttempts, candidateFallback, candidateTelemetry, traces, {
+            profile: "lean",
+            strategy: "validated-panel",
+            outcome: "passed",
+            rounds: {
+                candidates: candidateRounds,
+                validation: { supported: 0, refuted: 0, inconclusive: 0 },
+            },
+            findings: [],
+            truncatedCandidates,
+        });
+    }
+    const validationStages = await mapWithConcurrency(selected, 3, async (candidate) => {
+        const stage = await runLeanStructuredStage({
+            ...options,
+            candidates: options.candidates.slice(0, 2),
+            perspective: `lean:validate:${candidate.path}:${candidate.startLine}`,
+            telemetryRole: "verifier",
+            thinkingLevel: "medium",
+            parse: parseLeanValidation,
+            prompt: buildWorkerPrompt({
+                host: options.host,
+                kind: "review",
+                perspective: "lean:validator",
+                projectGoal: options.projectGoal,
+                renderedProjectPolicy: options.renderedProjectPolicy,
+                prompt: [
+                    "You are round 2 of a validated lean review panel. Independently validate exactly one proposed simplification.",
+                    "Confirm it is in the supplied diff, the replacement actually exists and is simpler, and behavior and necessary extension points remain intact. Reject proposals that remove trust-boundary validation, data-loss protection, security, accessibility, or necessary tests.",
+                    `CANDIDATE:\n${JSON.stringify(leanFinding(candidate))}`,
+                    'Return JSON only: {"outcome":"supported|refuted|inconclusive","behaviorEvidence":"specific evidence","verification":"smallest verification"}.',
+                    options.prompt,
+                ].join("\n\n"),
+            }),
+        });
+        traces.push({
+            role: "verifier",
+            model: stage.result.model,
+            status: stage.result.status,
+            round: "validation",
+            perspective: `${candidate.path}:${candidate.startLine}`,
+        });
+        return { candidate, ...stage };
+    });
+    const validationTelemetry = validationStages.flatMap((stage) => stage.result.telemetry?.attempts ?? []);
+    const attempts = candidateAttempts +
+        validationStages.reduce((total, stage) => total + (stage.result.attempts ?? 0), 0);
+    const supported = validationStages.filter((stage) => stage.value?.outcome === "supported");
+    const refuted = validationStages.filter((stage) => stage.value?.outcome === "refuted");
+    const inconclusive = validationStages.length - supported.length - refuted.length;
+    const findings = supported.map((stage) => ({
+        ...leanFinding(stage.candidate),
+        behaviorEvidence: stage.value.behaviorEvidence,
+        verification: stage.value.verification,
+        supportingReviewers: stage.candidate.reviewers.size,
+    }));
+    const review = {
+        profile: "lean",
+        strategy: "validated-panel",
+        outcome: (inconclusive > 0 ? "partial" : "passed"),
+        rounds: {
+            candidates: candidateRounds,
+            validation: { supported: supported.length, refuted: refuted.length, inconclusive },
+        },
+        findings,
+        truncatedCandidates,
+    };
+    const model = validationStages.find((stage) => stage.result.model)?.result.model ??
+        candidateStages.find((stage) => stage.result.model)?.result.model ??
+        null;
+    const telemetry = [...candidateTelemetry, ...validationTelemetry];
+    const fallbackUsed = candidateFallback || validationStages.some((stage) => stage.result.fallbackUsed);
+    if (supported.length === 0 && inconclusive > 0) {
+        return leanResult("failed", "Lean review is inconclusive: no candidate completed independent validation.", model, attempts, fallbackUsed, telemetry, traces, { ...review, outcome: "inconclusive" }, "lean-review-validation-inconclusive");
+    }
+    const output = findings.length
+        ? findings
+            .map((finding) => `${finding.path}:L${finding.startLine}-${finding.endLine} [${finding.tag}] ${finding.summary}\nReplacement: ${finding.replacement}\nEvidence: ${finding.behaviorEvidence}\nVerify: ${finding.verification}`)
+            .join("\n\n")
+        : inconclusive > 0
+            ? `No validated lean findings. ${inconclusive} candidate(s) could not be independently validated.`
+            : "Lean already. Ship.";
+    return leanResult("succeeded", output, model, attempts, fallbackUsed, telemetry, traces, review);
+}
+function leanResult(status, output, model, attempts, fallbackUsed, telemetryAttempts, orchestrationTrace, review, errorCode) {
+    return {
+        ...statusResult("review", status, output, model),
+        attempts,
+        fallbackUsed,
+        orchestrationTrace,
+        review,
+        ...(telemetryAttempts.length ? { telemetry: { attempts: telemetryAttempts } } : {}),
+        ...(errorCode ? { errorCode } : {}),
+    };
+}
+async function runLeanStructuredStage(options) {
+    let last = failure("review", "No lean review model attempt completed.");
+    const telemetry = [];
+    for (const candidate of options.candidates) {
+        let sandbox;
+        let result;
+        try {
+            sandbox = await createLeanReadonlySandbox(options);
+            result = await runWithFallback({
+                kind: "review",
+                cwd: options.cwd,
+                prompt: options.prompt,
+                mode: "readonly",
+                candidates: [candidate],
+                dependencies: options.dependencies,
+                ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+                ...(options.onPolicyViolation ? { onPolicyViolation: options.onPolicyViolation } : {}),
+                ...(sandbox ? { sandboxRunner: sandbox } : {}),
+                ...(options.policyEngine ? { policyEngine: options.policyEngine } : {}),
+                ...(options.onApproval ? { onApproval: options.onApproval } : {}),
+                ...(options.requestHostAssistance
+                    ? {
+                        requestHostAssistance: options.requestHostAssistance,
+                        perspective: options.perspective,
+                    }
+                    : {}),
+                ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+                telemetryRole: options.telemetryRole,
+                deadline: options.deadline,
+                ...(options.signal ? { signal: options.signal } : {}),
+            });
+        }
+        catch (error) {
+            result = failure("review", error instanceof Error ? error.message : "Lean review session could not start.");
+        }
+        finally {
+            await sandbox?.dispose().catch(() => { });
+        }
+        telemetry.push(...(result.telemetry?.attempts ?? []));
+        last = result;
+        if (last.success) {
+            const value = options.parse(last.output);
+            if (value !== null)
+                return {
+                    result: {
+                        ...last,
+                        attempts: telemetry.length,
+                        fallbackUsed: telemetry.length > 1,
+                        telemetry: { attempts: telemetry },
+                    },
+                    value,
+                };
+            last = {
+                ...last,
+                status: "failed",
+                success: false,
+                error: "Lean review response did not match the required JSON schema.",
+                output: "Lean review response did not match the required JSON schema.",
+            };
+        }
+        if (last.status === "cancelled" || last.status === "timed-out")
+            break;
+    }
+    return {
+        result: {
+            ...last,
+            attempts: telemetry.length,
+            fallbackUsed: telemetry.length > 1,
+            telemetry: { attempts: telemetry },
+        },
+    };
+}
+async function createLeanReadonlySandbox(options) {
+    if (!options.dependencies.createSandboxRunner || options.sandboxMode === "strict")
+        return undefined;
+    return options.dependencies.createSandboxRunner({
+        cwd: options.cwd,
+        mode: "readonly",
+        sandboxMode: options.sandboxMode === "full-access" || options.sandboxMode === "autopilot"
+            ? "lenient"
+            : options.sandboxMode,
+        trustedDomains: options.trustedDomains,
+        ...(options.boundProjectPolicy ? { boundProjectPolicy: options.boundProjectPolicy } : {}),
+        ...(options.sandboxMode === "adaptive" && options.policyEngine
+            ? {
+                authorizeNetwork: async (host, port) => {
+                    if (!(await publicNetworkTarget(host)))
+                        return false;
+                    const action = {
+                        toolName: "network",
+                        input: { host, port },
+                        cwd: options.cwd,
+                        domain: host,
+                        ...(port ? { port } : {}),
+                    };
+                    let decision = await options.policyEngine.authorize(action, options.signal);
+                    if (decision.decision === "require-approval" && options.onApproval) {
+                        const resolution = await options.onApproval(action, decision, actionFingerprint(action), options.signal);
+                        if (resolution === "approved")
+                            decision = await options.policyEngine.authorize(action, options.signal);
+                    }
+                    return decision.decision === "allow";
+                },
+            }
+            : {}),
+    });
+}
+function parseLeanCandidates(output) {
+    const value = parseLeanJson(output);
+    if (!isLeanRecord(value) || !Array.isArray(value.findings) || value.findings.length > 20)
+        return null;
+    const findings = [];
+    for (const finding of value.findings) {
+        if (!isLeanRecord(finding) ||
+            !LEAN_TAGS.includes(finding.tag) ||
+            typeof finding.path !== "string" ||
+            !isRelativeRepositoryPath(finding.path) ||
+            typeof finding.startLine !== "number" ||
+            !Number.isSafeInteger(finding.startLine) ||
+            typeof finding.endLine !== "number" ||
+            !Number.isSafeInteger(finding.endLine) ||
+            finding.startLine < 1 ||
+            finding.endLine < finding.startLine ||
+            typeof finding.summary !== "string" ||
+            !finding.summary.trim() ||
+            typeof finding.replacement !== "string" ||
+            !finding.replacement.trim() ||
+            !["high", "medium", "low"].includes(finding.impact))
+            return null;
+        findings.push({
+            tag: finding.tag,
+            path: finding.path,
+            startLine: finding.startLine,
+            endLine: finding.endLine,
+            summary: finding.summary.trim(),
+            replacement: finding.replacement.trim(),
+            impact: finding.impact,
+        });
+    }
+    return { findings };
+}
+function parseLeanValidation(output) {
+    const value = parseLeanJson(output);
+    if (!isLeanRecord(value) ||
+        !["supported", "refuted", "inconclusive"].includes(value.outcome) ||
+        typeof value.behaviorEvidence !== "string" ||
+        !value.behaviorEvidence.trim() ||
+        typeof value.verification !== "string" ||
+        !value.verification.trim())
+        return null;
+    return {
+        outcome: value.outcome,
+        behaviorEvidence: value.behaviorEvidence.trim(),
+        verification: value.verification.trim(),
+    };
+}
+function parseLeanJson(output) {
+    const fenced = output.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    try {
+        return JSON.parse(fenced ? fenced[1] : output.trim());
+    }
+    catch {
+        return null;
+    }
+}
+function isLeanRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isRelativeRepositoryPath(value) {
+    return (Boolean(value) &&
+        !path.isAbsolute(value) &&
+        !value.split("/").includes("..") &&
+        !value.includes("\\"));
+}
+function changedPathsFromReviewPrompt(prompt) {
+    return new Set([...prompt.matchAll(/^\+\+\+ b\/(.+)$/gm)]
+        .map((match) => match[1])
+        .filter((value) => value !== "/dev/null"));
+}
+function mergeLeanCandidates(values, pathOrder) {
+    const merged = [];
+    values.forEach(({ finding, reviewer }, order) => {
+        const existing = merged.find((candidate) => candidate.tag === finding.tag &&
+            candidate.path === finding.path &&
+            candidate.startLine <= finding.endLine &&
+            finding.startLine <= candidate.endLine);
+        if (existing) {
+            existing.reviewers.add(reviewer);
+            existing.startLine = Math.min(existing.startLine, finding.startLine);
+            existing.endLine = Math.max(existing.endLine, finding.endLine);
+            return;
+        }
+        merged.push({ ...finding, reviewers: new Set([reviewer]), order });
+    });
+    const impact = { high: 3, medium: 2, low: 1 };
+    return merged.sort((left, right) => right.reviewers.size - left.reviewers.size ||
+        impact[right.impact] - impact[left.impact] ||
+        (pathOrder.get(left.path) ?? Number.MAX_SAFE_INTEGER) -
+            (pathOrder.get(right.path) ?? Number.MAX_SAFE_INTEGER) ||
+        left.startLine - right.startLine ||
+        left.order - right.order);
+}
+function leanFinding(candidate) {
+    return {
+        tag: candidate.tag,
+        path: candidate.path,
+        startLine: candidate.startLine,
+        endLine: candidate.endLine,
+        summary: candidate.summary,
+        replacement: candidate.replacement,
+    };
+}
+async function mapWithConcurrency(values, limit, run) {
+    const results = Array.from({ length: values.length });
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(limit, values.length) }, async () => {
+        while (next < values.length) {
+            const index = next;
+            next += 1;
+            results[index] = await run(values[index]);
+        }
+    }));
+    return results;
 }
 async function runOrchestration(options) {
     const basePerspectives = [

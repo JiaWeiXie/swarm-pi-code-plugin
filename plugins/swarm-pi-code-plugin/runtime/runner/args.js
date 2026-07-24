@@ -192,6 +192,9 @@ export function parseArguments(argv) {
             case "--scope":
                 parsed.scope = parseScope(readValue(argv, ++index, argument));
                 break;
+            case "--review-profile":
+                parsed.reviewProfile = parseReviewProfile(readValue(argv, ++index, argument));
+                break;
             case "--set-model-priority":
                 parsed.modelPriority = parseStringArray(readValue(argv, ++index, argument), argument);
                 break;
@@ -251,6 +254,8 @@ export function parseArguments(argv) {
         throw new Error("--discovery-from is only supported by plan");
     if (parsed.smokeTest && command !== "doctor")
         throw new Error("--smoke-test is only supported by doctor");
+    if (parsed.reviewProfile && command !== "review")
+        throw new Error("--review-profile is only supported by review");
     if ((parsed.executionMode ||
         parsed.timeoutMs ||
         parsed.role ||
@@ -490,6 +495,11 @@ function parseScope(value) {
     if (value === "auto" || value === "working-tree" || value === "branch")
         return value;
     throw new Error(`Invalid review scope: ${value}`);
+}
+function parseReviewProfile(value) {
+    if (value === "standard" || value === "lean")
+        return value;
+    throw new Error(`Invalid review profile: ${value}`);
 }
 function parseStringArray(value, flag) {
     const parsed = parseJson(value, flag);
