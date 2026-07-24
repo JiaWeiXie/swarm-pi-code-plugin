@@ -25,7 +25,7 @@ The six full-setup steps are:
 4. Configure sandbox, classifier, approval, background behavior, Decision Mode,
    Host Assistance, Advisor, doctrine, and isolated Host Actions.
 5. Review the workspace and project delegation profile.
-6. Review, smoke-test required models, and save transactionally.
+6. Review, smoke-test new or changed required routes, and save transactionally.
 
 Project-only setup retains Roles, Execution & Safety, Workspace, and Review. It
 does not rewrite provider credentials or model configuration.
@@ -366,9 +366,11 @@ the user can enter model IDs manually; this remains `configured`, not
 `verified`.
 
 **Verify API** is explicit and warns through its action text that it sends a
-minimal request. Final save always verifies the primary model and every
-required Adaptive classifier. Fallbacks may remain discovered, and Review shows
-their actual readiness.
+minimal request. Final save verifies new or changed primary routes and required
+Adaptive classifiers. An unchanged saved route that is temporarily unavailable
+is retained as degraded health so unrelated settings can still save; it is not
+silently selected for a new route. Fallbacks may remain discovered, and Review
+shows their actual readiness.
 When a new Adaptive configuration has a primary model but no explicit
 classifier selection, the primary becomes its initial classifier. Provider and
 project drafts may still be saved before a primary exists, but Job readiness
@@ -381,10 +383,21 @@ Credentials may use HTTP only for loopback endpoints.
 ## Transaction and Background Jobs
 
 Save builds a candidate Pi environment from the proposed profiles and an
-in-memory clone of CredentialStore. It validates every selected model, runs required
-smoke tests, then commits credentials, `model.json`, and `state.json`. A failure
+in-memory clone of CredentialStore. It reconciles references caused by an
+explicit provider/model deletion, validates newly selected or changed routes,
+runs their required smoke tests, then commits credentials, `model.json`, and
+`state.json`. Unchanged unavailable references return typed degraded-health
+issues instead of making structurally valid settings unparsable. A failure
 restores prior values. An incomplete rollback writes a redacted recovery journal
 and returns `configuration-recovery-required`.
+
+Removing a provider removes its project connection and all affected model
+references, but does not delete its credential. The first surviving fallback is
+promoted when the primary is removed; without one, save requires an explicit
+replacement primary. Empty role chains inherit the project chain, and an emptied
+Adaptive classifier uses the reconciled primary. Saves carry a configuration
+revision so an older browser tab must reload instead of reintroducing a deleted
+connection.
 
 New durable jobs use `requestVersion: 5`. `request.json` contains the complete
 non-secret `ModelConfiguration` snapshot, its SHA-256 integrity hash, and the

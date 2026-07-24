@@ -305,7 +305,12 @@ sizes, and shuts down after save, close, or timeout.
 Full setup saves model configuration, role policy, execution safety, and project
 profile together. Project-only setup starts at **Roles**, pre-populates the
 existing settings, and writes only shared state. Neither flow deletes jobs or
-global Pi credentials.
+global Pi credentials. A save carries the configuration revision that was loaded
+by the browser, so a stale setup tab cannot restore a provider another session
+removed. Explicit provider/model removal reconciles project routing references;
+it removes no credential and never rewrites submitted Job snapshots. Existing
+unavailable routes are represented as degraded health, while new or changed
+routes remain subject to required availability and smoke verification.
 
 New jobs use request version 5. They embed the submitted non-secret model and
 provider configuration plus an integrity hash and PolicySnapshot v3. The

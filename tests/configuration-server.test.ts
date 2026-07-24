@@ -20,6 +20,7 @@ import {
 } from "../src/state/model-config.js";
 import {
   configureBuiltInProvider,
+  ConfigurationSaveError,
   loadConfigurationView,
   saveConfigurationSubmission,
   saveProjectProfileSubmission,
@@ -61,6 +62,23 @@ function fixture() {
     },
   ];
   return { workspace, privateDir, env, customProviders };
+}
+
+function localProvider(id: string, models: string[]) {
+  return {
+    id,
+    name: id,
+    baseUrl: "http://127.0.0.1:11434/v1",
+    api: "openai-completions" as const,
+    authHeader: false,
+    requiresApiKey: false,
+    models: models.map((model) => ({
+      id: model,
+      name: model,
+      reasoning: false,
+      input: ["text" as const],
+    })),
+  };
 }
 
 test("configuration page starts from connections and uses the original Swarm Pi mark", () => {
@@ -147,6 +165,9 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   assert.match(html, /draft\.baseRevision === bootRevision/);
   assert.match(html, /baseRevision:bootRevision/);
   assert.match(html, /Saved model unavailable/);
+  assert.match(html, /New or changed primary and required Adaptive classifier routes/);
+  assert.match(html, /invalid response/);
+  assert.match(html, /reconcileLocalRemovedReferences/);
   assert.match(html, /class="brand-logo"/);
   assert.match(html, />Close setup</);
   assert.match(html, /id="closed-screen"/);
@@ -587,6 +608,254 @@ test("sign out removes credentials for built-in and configured custom providers 
   );
 });
 
+test("unchanged unavailable routes save unrelated settings as degraded health", async () => {
+  const { workspace, env, customProviders } = fixture();
+  await saveModelConfiguration(
+    workspace,
+    {
+      primary: "local-test/test-model",
+      fallbacks: [],
+      customProviders,
+      providerProfiles: [],
+    },
+    env,
+  );
+  const persisted = (await loadConfigurationView(workspace, env)).configuration.customProviders;
+
+  const saved = await saveConfigurationSubmission(
+    workspace,
+    {
+      primary: "local-test/test-model",
+      fallbacks: [],
+      customProviders: persisted,
+      decisionMode: "cost",
+    },
+    env,
+  );
+
+  assert.equal(saved.health?.status, "degraded");
+  assert.equal(saved.issues?.[0]?.code, "model-health-check-failed");
+  assert.equal(saved.configuration.primary, "local-test/test-model");
+});
+
+test("provider deletion reconciles primary, role, classifier, profiles, and priority", async () => {
+  const { workspace, env } = fixture();
+  const removed = localProvider("remove-me", ["old-model"]);
+  const survivor = localProvider("survivor", ["fallback-model"]);
+  await saveModelConfiguration(
+    workspace,
+    {
+      primary: "remove-me/old-model",
+      fallbacks: ["survivor/fallback-model"],
+      customProviders: [removed, survivor],
+      providerProfiles: [
+        {
+          id: "remove-me",
+          provider: "remove-me",
+          name: "remove-me",
+          connectionKind: "custom",
+          auth: { method: "none" },
+          protocol: "openai-chat-completions",
+          runtimeApi: "openai-completions",
+          readiness: "verified",
+          settings: {},
+          headers: [],
+          verifiedAt: "2026-07-24T00:00:00.000Z",
+          verifiedModel: "remove-me/old-model",
+        },
+      ],
+    },
+    env,
+  );
+  await updateState(
+    workspace,
+    (state) => {
+      state.config.modelPriority = ["remove-me/old-model", "survivor/fallback-model"];
+      state.config.rolePolicies = { planner: { models: ["remove-me/old-model"] } };
+      state.config.adaptivePolicy = {
+        classifierModels: ["remove-me/old-model"],
+        classifierThinkingLevel: "medium",
+        approvalPolicy: "deny",
+        trustedDomains: [],
+        rules: [],
+        diagnostics: false,
+      };
+    },
+    env,
+  );
+
+  const saved = await saveConfigurationSubmission(
+    workspace,
+    {
+      primary: "remove-me/old-model",
+      fallbacks: ["survivor/fallback-model"],
+      customProviders: [survivor],
+    },
+    env,
+  );
+
+  assert.equal(saved.configuration.primary, "survivor/fallback-model");
+  assert.deepEqual(saved.configuration.fallbacks, []);
+  assert.deepEqual(saved.rolePolicies?.planner?.models, undefined);
+  assert.deepEqual(saved.adaptivePolicy?.classifierModels, ["survivor/fallback-model"]);
+  assert.deepEqual(saved.configuration.providerProfiles, []);
+  assert.ok(saved.reconciledChanges?.some((change) => change.path === "primary"));
+  assert.deepEqual((await loadState(workspace, { env })).config.modelPriority, [
+    "survivor/fallback-model",
+  ]);
+});
+
+test("provider deletion requires an explicit replacement primary when no fallback survives", async () => {
+  const { workspace, env } = fixture();
+  const removed = localProvider("remove-me", ["old-model"]);
+  await saveModelConfiguration(
+    workspace,
+    {
+      primary: "remove-me/old-model",
+      fallbacks: [],
+      customProviders: [removed],
+      providerProfiles: [],
+    },
+    env,
+  );
+
+  await assert.rejects(
+    () =>
+      saveConfigurationSubmission(
+        workspace,
+        {
+          primary: "remove-me/old-model",
+          fallbacks: [],
+          customProviders: [],
+        },
+        env,
+      ),
+    (error: unknown) =>
+      error instanceof ConfigurationSaveError && error.code === "primary-selection-required",
+  );
+});
+
+test("custom model removal clears stale role references and uses the surviving primary for Adaptive", async () => {
+  const { workspace, env } = fixture();
+  const provider = localProvider("replace-models", ["old-model", "primary-model"]);
+  await saveModelConfiguration(
+    workspace,
+    {
+      primary: "replace-models/primary-model",
+      fallbacks: [],
+      customProviders: [provider],
+      providerProfiles: [],
+    },
+    env,
+  );
+  await updateState(
+    workspace,
+    (state) => {
+      state.config.rolePolicies = { planner: { models: ["replace-models/old-model"] } };
+      state.config.adaptivePolicy = {
+        classifierModels: ["replace-models/old-model"],
+        classifierThinkingLevel: "medium",
+        approvalPolicy: "deny",
+        trustedDomains: [],
+        rules: [],
+        diagnostics: false,
+      };
+    },
+    env,
+  );
+
+  const saved = await saveConfigurationSubmission(
+    workspace,
+    {
+      primary: "replace-models/primary-model",
+      fallbacks: [],
+      customProviders: [localProvider("replace-models", ["primary-model"])],
+    },
+    env,
+  );
+
+  assert.equal(saved.rolePolicies?.planner?.models, undefined);
+  assert.deepEqual(saved.adaptivePolicy?.classifierModels, ["replace-models/primary-model"]);
+});
+
+test("stale configuration revisions receive a typed conflict", async () => {
+  const { workspace, env } = fixture();
+  const provider = localProvider("revision-local", ["model"]);
+  await saveModelConfiguration(
+    workspace,
+    {
+      primary: "revision-local/model",
+      fallbacks: [],
+      customProviders: [provider],
+      providerProfiles: [],
+    },
+    env,
+  );
+  const view = await loadConfigurationView(workspace, env);
+
+  await assert.rejects(
+    () =>
+      saveConfigurationSubmission(
+        workspace,
+        {
+          baseRevision: "stale-revision",
+          primary: "revision-local/model",
+          fallbacks: [],
+          customProviders: [provider],
+        },
+        env,
+      ),
+    (error: unknown) =>
+      error instanceof ConfigurationSaveError &&
+      error.code === "configuration-revision-conflict" &&
+      view.configurationRevision !== "stale-revision",
+  );
+});
+
+test("configuration server returns typed revision conflicts with a reload action", async () => {
+  const { workspace, env } = fixture();
+  const provider = localProvider("server-revision", ["model"]);
+  await saveModelConfiguration(
+    workspace,
+    {
+      primary: "server-revision/model",
+      fallbacks: [],
+      customProviders: [provider],
+      providerProfiles: [],
+    },
+    env,
+  );
+  const server = await startConfigurationServer(workspace, { env, openBrowser: false });
+  const url = new URL(server.url);
+  try {
+    const response = await fetch(`${url.origin}/api/save`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-swarm-token": url.searchParams.get("token")!,
+        origin: url.origin,
+      },
+      body: JSON.stringify({
+        baseRevision: "stale-revision",
+        primary: "server-revision/model",
+        fallbacks: [],
+        customProviders: [provider],
+      }),
+    });
+    const body = (await response.json()) as {
+      code: string;
+      path: string;
+      nextActions: string[];
+    };
+    assert.equal(response.status, 409);
+    assert.equal(body.code, "configuration-revision-conflict");
+    assert.equal(body.path, "configurationRevision");
+    assert.deepEqual(body.nextActions, ["reload-configuration"]);
+  } finally {
+    await server.close();
+  }
+});
+
 test("configuration save smoke-tests the selected model before persistence", async () => {
   const { workspace, env } = fixture();
   const { SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST: _skip, ...smokeEnv } = env;
@@ -762,7 +1031,7 @@ test("configuration service validates every fallback and credential payload", as
         env,
         { credentialVault },
       ),
-    /Selected models are not authenticated/,
+    /currently unavailable/,
   );
   await assert.rejects(
     () =>

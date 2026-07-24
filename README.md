@@ -241,7 +241,7 @@ Run the host-specific setup entry point. The browser walks through six steps:
 4. Choose sandbox, classifier, approval, background, Decision Mode, Host
    Assistance, Advisor, doctrine metadata, and Host Action policies.
 5. Review the detected Git, empty-folder, or adoption workspace state.
-6. Test the primary and required classifier models, then save atomically.
+6. Test new or changed primary/classifier routes, then save atomically.
 
 If setup was opened by a delegated request, the Host retains that request and
 resumes it after configuration. Cancellation or idle timeout does not require
@@ -267,6 +267,14 @@ The connection list is intentionally empty when no usable service is detected.
 Custom endpoints select their API protocol before model discovery. Provider
 IDs remain internal, and model limits stay automatic when the endpoint and Pi
 catalog do not establish them.
+
+Saving distinguishes configuration structure from live model health. An unchanged
+saved route that is temporarily unavailable is retained and reported as degraded,
+so unrelated project settings can still save; a new or changed route must pass
+availability and required verification. Removing a provider or custom model shows
+its routing impact, removes affected fallback/role/classifier references, promotes
+an existing fallback when possible, and never silently deletes the stored
+credential. A replacement primary is required when no fallback survives.
 
 ### Provider connections
 

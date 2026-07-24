@@ -81,6 +81,14 @@ import {
   type EndpointDiscoveryRequest,
   type EndpointDiscoveryResult,
 } from "./model-discovery.js";
+import {
+  modelReferences,
+  providerForModelReference,
+  reconcileRemovedModelReferences,
+  removedCustomModelReferences,
+  removedCustomProviderIds,
+  type ConfigurationReferenceChange,
+} from "./configuration-references.js";
 
 export interface BrowserModel extends AvailableModel {
   available: boolean;
@@ -132,9 +140,46 @@ export interface ConfigurationView {
   doctrine: DoctrineId | null;
   hostActions: HostActionPolicy;
   workflowBounds: typeof WORKFLOW_BOUNDS;
+  issues?: ConfigurationIssue[];
+  health?: ConfigurationHealth;
+  reconciledChanges?: ConfigurationReferenceChange[];
+}
+
+export type ConfigurationIssue = {
+  code: "model-health-check-failed";
+  severity: "warning" | "error";
+  blocking: boolean;
+  path: string;
+  modelId: string;
+  providerId: string;
+  message: string;
+};
+
+export type ConfigurationHealth = {
+  status: "ready" | "degraded";
+  checkedAt: string;
+};
+
+export class ConfigurationSaveError extends Error {
+  constructor(
+    readonly code:
+      | "configuration-reference-conflict"
+      | "configuration-revision-conflict"
+      | "model-health-check-failed"
+      | "primary-selection-required",
+    message: string,
+    readonly options: {
+      status?: number;
+      path?: string;
+      issues?: ConfigurationIssue[];
+    } = {},
+  ) {
+    super(message);
+  }
 }
 
 export interface ConfigurationSubmission {
+  baseRevision?: string | undefined;
   primary: string | null;
   fallbacks: string[];
   customProviders: CustomProviderConfiguration[];
@@ -666,6 +711,8 @@ export async function loadConfigurationView(
         JSON.stringify({
           primary: configuration.primary,
           fallbacks: configuration.fallbacks,
+          customProviders: configuration.customProviders,
+          providerProfiles: configuration.providerProfiles,
           profile: state.config.profile ?? null,
           sandboxMode: state.config.sandboxMode ?? "strict",
           rolePolicies,
@@ -734,22 +781,69 @@ export async function saveConfigurationSubmission(
   options: { credentialVault?: CredentialDraftVault | undefined } = {},
 ): Promise<ConfigurationView> {
   const current = await loadConfigurationView(cwd, env);
+  if (
+    submission.baseRevision !== undefined &&
+    submission.baseRevision !== current.configurationRevision
+  ) {
+    throw new ConfigurationSaveError(
+      "configuration-revision-conflict",
+      "Configuration changed in another setup session. Reload before saving.",
+      { status: 409, path: "configurationRevision" },
+    );
+  }
   const profile = submission.profile
     ? await normalizeProjectProfile(cwd, submission.profile)
     : undefined;
   const sandboxMode = normalizeSandboxMode(submission.sandboxMode, current.sandboxMode);
   const execution = normalizeExecutionSettings(submission, current);
   assertSandboxModeAvailable(sandboxMode);
-  const candidate = parseModelConfiguration({
+  const submittedProviderIds = new Set(
+    Array.isArray(submission.customProviders)
+      ? submission.customProviders
+          .filter((provider) => typeof provider.id === "string")
+          .map((provider) => provider.id)
+      : [],
+  );
+  const removedProviderIds = new Set(
+    current.configuration.customProviders
+      .map((provider) => provider.id)
+      .filter((provider) => !submittedProviderIds.has(provider)),
+  );
+  const submittedProfiles = submission.providerProfiles ?? current.configuration.providerProfiles;
+  let candidate = parseModelConfiguration({
     version: 1,
     primary: submission.primary,
     fallbacks: submission.fallbacks,
     customProviders: submission.customProviders,
-    providerProfiles: submission.providerProfiles ?? current.configuration.providerProfiles,
+    providerProfiles: submittedProfiles.filter(
+      (profile) => !removedProviderIds.has(profile.provider),
+    ),
     updatedAt: null,
   });
   assertNoBuiltInProviderOverride(current, candidate);
   assertProviderProfilePolicies(candidate);
+  const removedReferences = removedCustomModelReferences(current.configuration, candidate);
+  const reconciled = reconcileRemovedModelReferences(
+    candidate,
+    execution.rolePolicies,
+    execution.adaptivePolicy,
+    removedReferences,
+    removedCustomProviderIds(current.configuration, candidate),
+  );
+  candidate = reconciled.configuration;
+  execution.rolePolicies = reconciled.rolePolicies;
+  execution.adaptivePolicy = reconciled.adaptivePolicy;
+  if (
+    current.configuration.primary &&
+    removedReferences.has(current.configuration.primary) &&
+    !candidate.primary
+  ) {
+    throw new ConfigurationSaveError(
+      "primary-selection-required",
+      "Choose a replacement primary model before removing the active provider or model.",
+      { status: 400, path: "primary" },
+    );
+  }
 
   const persistentCredentials = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
   const credentialDrafts = normalizeCredentialDrafts(
@@ -768,29 +862,50 @@ export async function saveConfigurationSubmission(
   const pi = await createPiEnvironment(candidate, env, { credentials: stagingCredentials });
 
   const all = new Map([...pi.modelRuntime.getModels()].map((model) => [modelId(model), model]));
-  const priority = modelPriority(candidate);
-  const missing = priority.filter((reference) => !all.has(reference));
-  if (missing.length > 0) {
-    throw new Error(`Unknown model selection: ${missing.join(", ")}`);
-  }
   for (const credential of credentials) {
     if (![...all.values()].some((model) => model.provider === credential.provider)) {
       throw new Error(`Unknown credential provider: ${credential.provider}`);
     }
   }
   const available = new Set(pi.modelRuntime.getAvailableSnapshot().map(modelId));
-  const unavailable = priority.filter((reference) => !available.has(reference));
-  if (unavailable.length > 0) {
-    throw new Error(`Selected models are not authenticated: ${unavailable.join(", ")}`);
+  const requireAdaptiveClassifier =
+    sandboxMode === "adaptive" &&
+    (sandboxMode !== current.sandboxMode ||
+      candidate.primary !== current.configuration.primary ||
+      !sameStrings(
+        current.adaptivePolicy?.classifierModels ?? [],
+        execution.adaptivePolicy.classifierModels,
+      ));
+  if (requireAdaptiveClassifier) {
+    applyAdaptiveClassifierDefault(execution, sandboxMode, candidate.primary);
   }
-  applyAdaptiveClassifierDefault(execution, sandboxMode, candidate.primary);
-  assertExecutionModels(execution, all, available, sandboxMode, Boolean(candidate.primary));
+  const requiredReferences = requiredModelReferences(
+    current,
+    candidate,
+    execution,
+    credentials.map((credential) => credential.provider),
+  );
+  const issues = validateModelReferences(candidate, execution, all, available, requiredReferences);
+  assertExecutionModels(
+    execution,
+    all,
+    available,
+    sandboxMode,
+    requireAdaptiveClassifier,
+    requiredReferences,
+  );
 
   if (env.SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST !== "1") {
     const smokeModels = [
       ...new Set([
-        ...(candidate.primary ? [candidate.primary] : []),
-        ...(sandboxMode === "adaptive" ? execution.adaptivePolicy.classifierModels : []),
+        ...(candidate.primary && requiredReferences.has(candidate.primary)
+          ? [candidate.primary]
+          : []),
+        ...(sandboxMode === "adaptive"
+          ? execution.adaptivePolicy.classifierModels.filter((model) =>
+              requiredReferences.has(model),
+            )
+          : []),
       ]),
     ];
     for (const reference of smokeModels) {
@@ -811,8 +926,13 @@ export async function saveConfigurationSubmission(
         session,
         timeoutMs: 15_000,
       });
-      if (!smoke.success)
-        throw new Error(`Model smoke test failed for ${reference}: ${smoke.error ?? smoke.output}`);
+      if (!smoke.success) {
+        throw new ConfigurationSaveError(
+          "model-health-check-failed",
+          `Model smoke test failed for ${reference}: ${smoke.error ?? smoke.output}`,
+          { status: 400, path: modelReferencePath(candidate, execution, reference) },
+        );
+      }
       const provider = reference.slice(0, reference.indexOf("/"));
       const profile = candidate.providerProfiles.find((entry) => entry.provider === provider);
       if (profile) {
@@ -878,7 +998,16 @@ export async function saveConfigurationSubmission(
     throw error;
   }
   for (const credential of credentials) options.credentialVault?.remove(credential.draftId);
-  return loadConfigurationView(cwd, env);
+  const view = await loadConfigurationView(cwd, env);
+  return {
+    ...view,
+    issues,
+    health: {
+      status: issues.length > 0 ? "degraded" : "ready",
+      checkedAt: new Date().toISOString(),
+    },
+    reconciledChanges: reconciled.changes,
+  };
 }
 
 interface FileSnapshot {
@@ -957,13 +1086,41 @@ export async function saveProjectProfileSubmission(
     (catalog.all?.() ?? catalog.available()).map((model) => [modelId(model), model]),
   );
   const available = new Set(catalog.available().map(modelId));
-  applyAdaptiveClassifierDefault(execution, sandboxMode, modelConfiguration.primary);
+  const requiredReferences = new Set<string>();
+  const currentRoles = current.config.rolePolicies ?? {};
+  const currentAdaptive = normalizeAdaptivePolicy(current.config.adaptivePolicy);
+  for (const role of new Set([
+    ...Object.keys(currentRoles),
+    ...Object.keys(execution.rolePolicies),
+  ])) {
+    const before = modelsForRole(currentRoles, role);
+    const after = modelsForRole(execution.rolePolicies, role);
+    if (!sameStrings(before, after))
+      after.forEach((reference) => requiredReferences.add(reference));
+  }
+  if (!sameStrings(currentAdaptive.classifierModels, execution.adaptivePolicy.classifierModels)) {
+    execution.adaptivePolicy.classifierModels.forEach((reference) =>
+      requiredReferences.add(reference),
+    );
+  }
+  const requireAdaptiveClassifier =
+    sandboxMode === "adaptive" &&
+    (sandboxMode !== (current.config.sandboxMode ?? "strict") ||
+      !sameStrings(currentAdaptive.classifierModels, execution.adaptivePolicy.classifierModels));
+  if (requireAdaptiveClassifier) {
+    applyAdaptiveClassifierDefault(execution, sandboxMode, modelConfiguration.primary);
+    execution.adaptivePolicy.classifierModels.forEach((reference) =>
+      requiredReferences.add(reference),
+    );
+  }
+  validateModelReferences(modelConfiguration, execution, all, available, requiredReferences);
   assertExecutionModels(
     execution,
     all,
     available,
     sandboxMode,
-    Boolean(modelConfiguration.primary),
+    requireAdaptiveClassifier,
+    requiredReferences,
   );
   const state = await saveProjectSettings(cwd, profile, sandboxMode, execution, env);
   return state.config.profile!;
@@ -1294,19 +1451,30 @@ function assertExecutionModels(
   available: Set<string>,
   sandboxMode: SandboxMode,
   requireAdaptiveClassifier = true,
+  requiredReferences: ReadonlySet<string> = new Set(),
 ): void {
   const selected = [
     ...Object.values(execution.rolePolicies).flatMap((policy) => policy?.models ?? []),
     ...execution.adaptivePolicy.classifierModels,
   ];
-  const unknown = selected.filter((model) => !all.has(model));
-  if (unknown.length)
-    throw new Error(`Unknown role or classifier model: ${[...new Set(unknown)].join(", ")}`);
-  const unavailable = selected.filter((model) => !available.has(model));
-  if (unavailable.length)
-    throw new Error(
-      `Role or classifier models are not authenticated: ${[...new Set(unavailable)].join(", ")}`,
+  const unknown = selected.filter((model) => !all.has(model) && requiredReferences.has(model));
+  if (unknown.length) {
+    throw new ConfigurationSaveError(
+      "configuration-reference-conflict",
+      `Unknown role or classifier model: ${[...new Set(unknown)].join(", ")}`,
+      { status: 400, path: "rolePolicies" },
     );
+  }
+  const unavailable = selected.filter(
+    (model) => !available.has(model) && requiredReferences.has(model),
+  );
+  if (unavailable.length) {
+    throw new ConfigurationSaveError(
+      "model-health-check-failed",
+      `Role or classifier models are not authenticated: ${[...new Set(unavailable)].join(", ")}`,
+      { status: 400, path: "rolePolicies" },
+    );
+  }
   if (
     requireAdaptiveClassifier &&
     sandboxMode === "adaptive" &&
@@ -1314,6 +1482,134 @@ function assertExecutionModels(
   ) {
     throw new Error("Adaptive mode requires at least one classifier model");
   }
+}
+
+function requiredModelReferences(
+  current: ConfigurationView,
+  candidate: ModelConfiguration,
+  execution: ReturnType<typeof normalizeExecutionSettings>,
+  credentialProviders: string[],
+): Set<string> {
+  const required = new Set<string>();
+  const currentRoles = current.rolePolicies ?? {};
+  const currentAdaptive = current.adaptivePolicy ?? DEFAULT_ADAPTIVE_POLICY;
+  if (candidate.primary && candidate.primary !== current.configuration.primary)
+    required.add(candidate.primary);
+  if (!sameStrings(candidate.fallbacks, current.configuration.fallbacks)) {
+    candidate.fallbacks.forEach((reference) => required.add(reference));
+  }
+  for (const role of new Set([
+    ...Object.keys(currentRoles),
+    ...Object.keys(execution.rolePolicies),
+  ])) {
+    const before = modelsForRole(currentRoles, role);
+    const after = modelsForRole(execution.rolePolicies, role);
+    if (!sameStrings(before, after)) after.forEach((reference) => required.add(reference));
+  }
+  if (!sameStrings(currentAdaptive.classifierModels, execution.adaptivePolicy.classifierModels)) {
+    execution.adaptivePolicy.classifierModels.forEach((reference) => required.add(reference));
+  }
+  const currentProviders = new Map(
+    current.configuration.customProviders.map((provider) => [
+      provider.id,
+      JSON.stringify(provider),
+    ]),
+  );
+  const changedProviders = new Set(credentialProviders);
+  for (const provider of candidate.customProviders) {
+    if (currentProviders.get(provider.id) !== JSON.stringify(provider))
+      changedProviders.add(provider.id);
+  }
+  for (const reference of modelReferences(
+    candidate,
+    execution.rolePolicies,
+    execution.adaptivePolicy,
+  )) {
+    if (changedProviders.has(providerForModelReference(reference))) required.add(reference);
+  }
+  return required;
+}
+
+function validateModelReferences(
+  candidate: ModelConfiguration,
+  execution: ReturnType<typeof normalizeExecutionSettings>,
+  all: Map<string, PiModel>,
+  available: Set<string>,
+  requiredReferences: ReadonlySet<string>,
+): ConfigurationIssue[] {
+  const issues: ConfigurationIssue[] = [];
+  for (const reference of modelReferences(
+    candidate,
+    execution.rolePolicies,
+    execution.adaptivePolicy,
+  )) {
+    const path = modelReferencePath(candidate, execution, reference);
+    const providerId = providerForModelReference(reference);
+    if (!all.has(reference)) {
+      const issue: ConfigurationIssue = {
+        code: "model-health-check-failed",
+        severity: "warning",
+        blocking: requiredReferences.has(reference),
+        path,
+        modelId: reference,
+        providerId,
+        message: `Saved model is no longer in the current catalog: ${reference}`,
+      };
+      if (issue.blocking) {
+        throw new ConfigurationSaveError("configuration-reference-conflict", issue.message, {
+          status: 400,
+          path,
+          issues: [issue],
+        });
+      }
+      issues.push(issue);
+      continue;
+    }
+    if (!available.has(reference)) {
+      const issue: ConfigurationIssue = {
+        code: "model-health-check-failed",
+        severity: "warning",
+        blocking: requiredReferences.has(reference),
+        path,
+        modelId: reference,
+        providerId,
+        message: `Saved model is currently unavailable: ${reference}`,
+      };
+      if (issue.blocking) {
+        throw new ConfigurationSaveError("model-health-check-failed", issue.message, {
+          status: 400,
+          path,
+          issues: [issue],
+        });
+      }
+      issues.push(issue);
+    }
+  }
+  return issues;
+}
+
+function modelReferencePath(
+  candidate: Pick<ModelConfiguration, "primary" | "fallbacks">,
+  execution: Pick<ReturnType<typeof normalizeExecutionSettings>, "rolePolicies" | "adaptivePolicy">,
+  reference: string,
+): string {
+  if (candidate.primary === reference) return "primary";
+  if (candidate.fallbacks.includes(reference)) return "fallbacks";
+  for (const [role, policy] of Object.entries(execution.rolePolicies)) {
+    if (policy?.models?.includes(reference)) return `rolePolicies.${role}.models`;
+  }
+  if (execution.adaptivePolicy.classifierModels.includes(reference)) {
+    return "adaptivePolicy.classifierModels";
+  }
+  return "models";
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function modelsForRole(policies: RolePolicyOverrides, role: string): string[] {
+  return policies[role as keyof RolePolicyOverrides]?.models ?? [];
 }
 
 function applyAdaptiveClassifierDefault(

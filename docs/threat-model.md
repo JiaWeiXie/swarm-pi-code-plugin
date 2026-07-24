@@ -52,6 +52,8 @@ repository instructions, or a supervisor approval.
 | OAuth flow outlives setup | bounded polling, AbortSignal, timeout, cancel and server-dispose cleanup |
 | Literal header triggers Pi config syntax | controlled allowlist, control-character rejection, literal escaping |
 | Settings change during a background job | immutable provider/model snapshot, PolicySnapshot v3, request v5 hashes |
+| Stale setup tab restores a removed provider or model route | configuration revision conflict, server-side reference reconciliation, explicit reload |
+| Provider removal silently deletes a reusable credential | project connection removal is separate from CredentialStore sign-out |
 | Credential is revoked after submission | resolve current CredentialStore at execution and fail explicitly |
 | Background mutation conflicts with host | job-owned worktree and branch, no automatic integration |
 | Logs expose source or secrets | redacted summaries by default, mode 0600 artifacts, bounded diagnostics |

@@ -174,6 +174,13 @@ Authentication choices also describe different account boundaries:
 A local `/models` endpoint can succeed while `/responses` is unimplemented. That
 connection is Discovered, not Verified.
 
+Configuration structure, catalog/auth availability, and live health are separate
+states. A saved model can remain structurally valid while its provider is offline
+or no longer lists it. The setup page keeps that reference visible for repair but
+does not offer it as a new selection; saving unrelated settings reports degraded
+health instead of corrupting or rejecting the saved configuration. New or changed
+routes still require availability and any required verification.
+
 | Field | Default or blank behavior | Fill it when | Avoid |
 | --- | --- | --- | --- |
 | Organization/project IDs | Provider or credential default | One credential can address multiple scopes and an explicit ID is required | API keys, display names where an ID is required |

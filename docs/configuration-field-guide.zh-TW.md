@@ -165,6 +165,11 @@ Connection → Adapter → Protocol → Endpoint → Provider 的某個 Model
 例如本機 server 的 `/models` 可以正常回應，但 `/responses` 尚未實作，狀態就可能是
 Discovered 而不是 Verified。
 
+設定結構、catalog／auth 可用性與即時健康狀態是三件不同的事。已儲存的 model 即使
+provider 暫時離線或不再列出它，設定結構仍可能有效。設定頁會保留這個引用讓使用者修復，
+但不會把它提供為新的選項；儲存無關設定時會回報 degraded health，而不是破壞或拒絕既有
+設定。新增或變更 route 仍必須通過可用性與必要驗證。
+
 | 欄位 | 預設或空白行為 | 何時填寫 | 不要填入 |
 | --- | --- | --- | --- |
 | Organization／project ID | 使用 provider 或憑證的預設 scope | 一組憑證可存取多個 scope，且必須指定 ID | API key、顯示名稱 |

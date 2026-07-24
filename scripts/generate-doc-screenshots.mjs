@@ -25,47 +25,55 @@ async function makeFixture(configured, projectOnly = false) {
     SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST: "1",
   };
   if (configured) {
-    await saveModelConfiguration(workspace, {
-      version: 1,
-      primary: "fixture/fixture-model",
-      fallbacks: [],
-      customProviders: [
-        {
-          id: "fixture",
-          name: "Fixture Service",
-          baseUrl: "http://127.0.0.1:11434/v1",
-          api: "openai-completions",
-          authHeader: false,
-          requiresApiKey: false,
-          models: [
-            { id: "fixture-model", name: "Fixture Model", reasoning: true, input: ["text"] },
-          ],
-        },
-      ],
-      providerProfiles: [],
-    });
+    await saveModelConfiguration(
+      workspace,
+      {
+        version: 1,
+        primary: "fixture/fixture-model",
+        fallbacks: [],
+        customProviders: [
+          {
+            id: "fixture",
+            name: "Fixture Service",
+            baseUrl: "http://127.0.0.1:11434/v1",
+            api: "openai-completions",
+            authHeader: false,
+            requiresApiKey: false,
+            models: [
+              { id: "fixture-model", name: "Fixture Model", reasoning: true, input: ["text"] },
+            ],
+          },
+        ],
+        providerProfiles: [],
+      },
+      env,
+    );
   }
-  await updateState(workspace, (state) => {
-    state.config.profile = {
-      goal: "Maintain a dependable project setup experience",
-      tasks: TASKS,
-      ...(projectOnly ? {} : { dirs: ["."] }),
-      configuredAt: "2026-01-01T00:00:00.000Z",
-    };
-    state.config.sandboxMode = "adaptive";
-    state.config.adaptivePolicy = {
-      classifierModels: configured ? ["fixture/fixture-model"] : [],
-      classifierThinkingLevel: "medium",
-      approvalPolicy: "wait",
-      trustedDomains: [],
-      rules: [],
-      diagnostics: true,
-    };
-    state.config.rolePolicies = {
-      planner: { models: ["fixture/fixture-model"], thinkingLevel: "xhigh", maxAttempts: 2 },
-      reviewer: { models: ["fixture/fixture-model"], thinkingLevel: "high", maxAttempts: 2 },
-    };
-  });
+  await updateState(
+    workspace,
+    (state) => {
+      state.config.profile = {
+        goal: "Maintain a dependable project setup experience",
+        tasks: TASKS,
+        ...(projectOnly ? {} : { dirs: ["."] }),
+        configuredAt: "2026-01-01T00:00:00.000Z",
+      };
+      state.config.sandboxMode = "adaptive";
+      state.config.adaptivePolicy = {
+        classifierModels: configured ? ["fixture/fixture-model"] : [],
+        classifierThinkingLevel: "medium",
+        approvalPolicy: "wait",
+        trustedDomains: [],
+        rules: [],
+        diagnostics: true,
+      };
+      state.config.rolePolicies = {
+        planner: { models: ["fixture/fixture-model"], thinkingLevel: "xhigh", maxAttempts: 2 },
+        reviewer: { models: ["fixture/fixture-model"], thinkingLevel: "high", maxAttempts: 2 },
+      };
+    },
+    env,
+  );
   return { workspace, privateDir, env };
 }
 

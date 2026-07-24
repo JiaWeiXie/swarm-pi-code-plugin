@@ -15,6 +15,7 @@ import {
 } from "../state/state.js";
 import {
   configureBuiltInProvider,
+  ConfigurationSaveError,
   createManualCustomProvider,
   discoverConfigurationEndpoint,
   discoverLocalConfigurationEndpoints,
@@ -148,7 +149,14 @@ export async function startConfigurationServer(
         const view = await saveConfigurationSubmission(cwd, submission, env, { credentialVault });
         response.setHeader("Connection", "close");
         response.once("finish", () => void finish("saved"));
-        json(response, 200, { saved: true, configuration: view.configuration });
+        json(response, 200, {
+          saved: true,
+          configuration: view.configuration,
+          configurationRevision: view.configurationRevision,
+          reconciledChanges: view.reconciledChanges ?? [],
+          issues: view.issues ?? [],
+          health: view.health ?? { status: "ready", checkedAt: new Date().toISOString() },
+        });
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/save-profile") {
@@ -276,6 +284,9 @@ export async function startConfigurationServer(
         recoverable: problem.recoverable,
         preserved: problem.preserved,
         nextActions: problem.nextActions,
+        ...(error instanceof ConfigurationSaveError
+          ? { path: error.options.path, issues: error.options.issues ?? [] }
+          : {}),
       });
     }
   });
@@ -341,24 +352,31 @@ function setupProblem(error: unknown): {
     error instanceof Error ? error.message : "Configuration failed",
   );
   const code =
-    error instanceof EndpointDiscoveryError
+    error instanceof ConfigurationSaveError
       ? error.code
-      : message.includes("smoke test")
-        ? "model-smoke-test-failed"
-        : message.includes("recovery-required")
-          ? "configuration-recovery-required"
-          : /sandbox/i.test(message)
-            ? "sandbox-backend-unavailable"
-            : /model|authenticated/i.test(message)
-              ? "model-configuration-invalid"
-              : "configuration-save-failed";
-  const stage = code.includes("sandbox")
-    ? "execution-safety"
-    : code.includes("model")
-      ? "models"
-      : code.includes("recovery")
-        ? "recovery"
-        : "workspace";
+      : error instanceof EndpointDiscoveryError
+        ? error.code
+        : message.includes("smoke test")
+          ? "model-smoke-test-failed"
+          : message.includes("recovery-required")
+            ? "configuration-recovery-required"
+            : /sandbox/i.test(message)
+              ? "sandbox-backend-unavailable"
+              : /model|authenticated/i.test(message)
+                ? "model-configuration-invalid"
+                : "configuration-save-failed";
+  const stage =
+    error instanceof ConfigurationSaveError && error.options.path?.startsWith("adaptivePolicy")
+      ? "execution-safety"
+      : error instanceof ConfigurationSaveError && error.options.path?.startsWith("rolePolicies")
+        ? "roles"
+        : code.includes("sandbox")
+          ? "execution-safety"
+          : code.includes("model")
+            ? "models"
+            : code.includes("recovery")
+              ? "recovery"
+              : "workspace";
   return {
     code,
     stage,
@@ -368,7 +386,9 @@ function setupProblem(error: unknown): {
     nextActions:
       code === "sandbox-backend-unavailable"
         ? ["use-strict", "doctor"]
-        : ["review-current-step", "doctor"],
+        : code === "configuration-revision-conflict"
+          ? ["reload-configuration"]
+          : ["review-current-step", "doctor"],
   };
 }
 
@@ -803,6 +823,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 }
 
 function statusForError(error: unknown): number {
+  if (error instanceof ConfigurationSaveError) return error.options.status ?? 400;
   return error instanceof HttpError ? error.status : 400;
 }
 

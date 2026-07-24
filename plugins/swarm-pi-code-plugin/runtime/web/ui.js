@@ -266,7 +266,7 @@ export function renderConfigurationPage(view, nonce, mode = "full") {
         <div class="review-section full-only"><h2>Primary model</h2><div id="review-primary" class="review-value"></div></div>
         <div class="review-section full-only"><h2>Fallback order</h2><div id="review-fallbacks" class="review-list"></div></div>
         <div class="review-section full-only"><h2>Connections</h2><div id="review-connections" class="review-list"></div></div>
-        <div class="review-section full-only"><h2>Connection test</h2><div class="review-value">The primary model and required Adaptive classifier will receive a minimal READY request before settings are saved.</div></div>
+        <div class="review-section full-only"><h2>Connection test</h2><div class="review-value">New or changed primary and required Adaptive classifier routes receive a minimal READY request before settings are saved. Unchanged unavailable routes remain visible as health warnings.</div></div>
         <div class="review-section"><h2>Project goal</h2><div id="review-goal" class="review-value review-text"></div></div>
         <div class="review-section"><h2>Working area</h2><div id="review-directories" class="review-list"></div></div>
         <div class="review-section"><h2>Delegated work</h2><div id="review-tasks" class="review-list"></div></div>
@@ -712,7 +712,9 @@ const clientScript = String.raw `
   });
   const draftKey = "swarm-pi-setup-draft:" + (boot.workspaceId || "default");
   const bootRevision = boot.configurationRevision || JSON.stringify({
-    primary:boot.configuration.primary,fallbacks:boot.configuration.fallbacks,profile:boot.profile,
+    primary:boot.configuration.primary,fallbacks:boot.configuration.fallbacks,
+    customProviders:boot.configuration.customProviders,providerProfiles:boot.configuration.providerProfiles,
+    profile:boot.profile,
     sandboxMode:boot.sandboxMode,rolePolicies:boot.rolePolicies,adaptivePolicy:boot.adaptivePolicy,
     backgroundRolePolicy:boot.backgroundRolePolicy,decisionMode:boot.decisionMode,
     hostAssistance:boot.hostAssistance,contextBudget:boot.contextBudget,advisor:boot.advisor,
@@ -788,8 +790,7 @@ const clientScript = String.raw `
   }
   function usableModels() {
     const ready = new Set(state.connections.filter(item => item.ready).map(item => item.id));
-    const selected = selectedModelIds();
-    return state.models.filter(item => item.available || ready.has(item.provider) || state.credentialDrafts[item.provider] || selected.has(item.id));
+    return state.models.filter(item => item.available || ready.has(item.provider) || state.credentialDrafts[item.provider]);
   }
   function normalizeSelection() {
     const usable = usableModels();
@@ -809,6 +810,10 @@ const clientScript = String.raw `
       if (index >= 0) state.models[index] = model;
       else state.models.push(model);
     }
+  }
+  function replaceProviderModels(provider) {
+    state.models = state.models.filter(item => item.provider !== provider.id);
+    upsertModels(browserModels(provider));
   }
   function upsertProviderProfile(profile) {
     state.providerProfiles = state.providerProfiles.filter(item => item.id !== profile.id);
@@ -1492,13 +1497,41 @@ const clientScript = String.raw `
     input.addEventListener("change", () => { const current = state.customDraft.models[index], value = input.value ? Number(input.value) : null; current.metadata = current.metadata || {}; if (value && Number.isInteger(value) && value > 0) { current[field] = value; current.metadata[field] = "user"; } else { delete current[field]; delete current.metadata[field]; } renderCustomDraft(); }); wrap.append(lab,input,note); return wrap;
   }
   function syncDraftFields() { if (!state.customDraft) return; state.customDraft.name = $("endpoint-name").value.trim() || state.customDraft.name; state.customDraft.baseUrl = $("endpoint-canonical-url").value.trim(); if (state.customProfileDraft) state.customProfileDraft.name = state.customDraft.name; }
+  function reconcileLocalRemovedReferences(removed, action) {
+    const removedSet = new Set(removed), fallback = state.fallbacks.find(model => !removedSet.has(model));
+    const primaryRemoved = state.primary && removedSet.has(state.primary), roleNames = Object.entries(state.rolePolicies).filter(([,policy]) => policy?.models?.some(model => removedSet.has(model))).map(([role]) => role), classifierRemoved = state.adaptivePolicy.classifierModels.some(model => removedSet.has(model));
+    if (primaryRemoved && !fallback) { alert("Choose a replacement primary model before " + action + "."); return false; }
+    const impacts = [];
+    if (primaryRemoved) impacts.push("Primary model will change to " + fallback + ".");
+    if (state.fallbacks.some(model => removedSet.has(model))) impacts.push("Removed fallback models will be cleared.");
+    if (roleNames.length) impacts.push("Role routing will inherit the project model chain for: " + roleNames.join(", ") + ".");
+    if (classifierRemoved) impacts.push("Adaptive classifier routing will be updated.");
+    if (impacts.length && !confirm(action + " affects model routing:\n\n" + impacts.join("\n") + "\n\nContinue?")) return false;
+    if (primaryRemoved) state.primary = fallback;
+    state.fallbacks = state.fallbacks.filter(model => !removedSet.has(model) && model !== state.primary);
+    for (const policy of Object.values(state.rolePolicies)) {
+      if (!policy?.models) continue;
+      const models = policy.models.filter(model => !removedSet.has(model));
+      if (models.length) policy.models = models; else delete policy.models;
+    }
+    const classifiers = state.adaptivePolicy.classifierModels.filter(model => !removedSet.has(model));
+    state.adaptivePolicy.classifierModels = classifiers.length ? classifiers : (classifierRemoved && state.primary ? [state.primary] : classifiers);
+    return true;
+  }
   function acceptCustom(provider, profile) {
     const matchingIndex = state.editingCustomIndex >= 0 ? state.editingCustomIndex : state.customProviders.findIndex(item => endpointKey(item) === endpointKey(provider)); const oldId = matchingIndex >= 0 ? state.customProviders[matchingIndex].id : null;
-    if (matchingIndex >= 0) state.customProviders[matchingIndex] = provider; else state.customProviders.push(provider); if (oldId && oldId !== provider.id) { state.models = state.models.filter(item => item.provider !== oldId); state.providerProfiles = state.providerProfiles.filter(item => item.provider !== oldId); delete state.credentialDrafts[oldId]; }
-    upsertProviderProfile(profile); upsertModels(browserModels(provider)); upsertConnection({id:provider.id,name:provider.name,ready:true,modelCount:provider.models.length,availableModelCount:provider.models.length,auth:{source:state.credentialDrafts[provider.id]?"runtime":provider.requiresApiKey?"stored":"local",label:state.credentialDrafts[provider.id]?"Credential pending save":provider.requiresApiKey?"Pi credential store":"No credential"},selection:null,custom:true}); normalizeSelection(); if ($("connection-dialog").open) $("connection-dialog").close(); render();
+    const previous = matchingIndex >= 0 ? state.customProviders[matchingIndex] : null;
+    const removed = previous ? previous.models.filter(model => oldId !== provider.id || !provider.models.some(next => next.id === model.id)).map(model => oldId + "/" + model.id) : [];
+    if (removed.length && !reconcileLocalRemovedReferences(removed, "saving this connection")) return;
+    if (matchingIndex >= 0) state.customProviders[matchingIndex] = provider; else state.customProviders.push(provider); if (oldId && oldId !== provider.id) { state.models = state.models.filter(item => item.provider !== oldId); state.connections = state.connections.filter(item => item.id !== oldId); state.providerProfiles = state.providerProfiles.filter(item => item.provider !== oldId); delete state.credentialDrafts[oldId]; }
+    upsertProviderProfile(profile); replaceProviderModels(provider); upsertConnection({id:provider.id,name:provider.name,ready:true,modelCount:provider.models.length,availableModelCount:provider.models.length,auth:{source:state.credentialDrafts[provider.id]?"runtime":provider.requiresApiKey?"stored":"local",label:state.credentialDrafts[provider.id]?"Credential pending save":provider.requiresApiKey?"Pi credential store":"No credential"},selection:null,custom:true}); normalizeSelection(); if ($("connection-dialog").open) $("connection-dialog").close(); render();
   }
   function removeConnection(id) {
-    const item = connection(id); if (!item || !confirm("Remove " + item.name + " from this project?")) return; state.customProviders = state.customProviders.filter(provider => provider.id !== id); state.providerProfiles = state.providerProfiles.filter(profile => profile.provider !== id); state.connections = state.connections.filter(connection => connection.id !== id); state.models = state.models.filter(model => model.provider !== id); delete state.credentialDrafts[id]; if (state.primary.startsWith(id + "/")) state.primary = ""; state.fallbacks = state.fallbacks.filter(model => !model.startsWith(id + "/")); render();
+    const item = connection(id); if (!item) return;
+    const removed = state.models.filter(model => model.provider === id).map(model => model.id);
+    if (!reconcileLocalRemovedReferences(removed, "removing " + item.name)) return;
+    if (!confirm("Remove " + item.name + " from this project? Stored credentials are not deleted.")) return;
+    state.customProviders = state.customProviders.filter(provider => provider.id !== id); state.providerProfiles = state.providerProfiles.filter(profile => profile.provider !== id); state.connections = state.connections.filter(connection => connection.id !== id); state.models = state.models.filter(model => model.provider !== id); delete state.credentialDrafts[id]; render();
   }
   async function verifyConnection(id, chosenModelId) {
     const status = $("connection-status"); const targetId = chosenModelId || preferredVerifyModel(id); const model = targetId ? modelById(targetId) : null; if (!model) { status.textContent = "No model is available to verify."; return; }
@@ -1515,7 +1548,10 @@ const clientScript = String.raw `
 
   async function post(path, body) {
     const response = await fetch(path, {method:"POST",headers:{"content-type":"application/json","x-swarm-token":token},body:JSON.stringify(body || {})});
-    const payload = await response.json(); if (!response.ok) { const error = new Error(payload.error || "Request failed"); error.code = payload.code; error.stage = payload.stage; error.nextActions = payload.nextActions; throw error; } return payload;
+    const text = await response.text(); let payload;
+    try { payload = text ? JSON.parse(text) : {}; }
+    catch { throw new Error("The local setup server returned an invalid response. Your saved configuration was not confirmed; reload and try again."); }
+    if (!response.ok) { const error = new Error(payload.error || "Request failed"); error.code = payload.code; error.stage = payload.stage; error.path = payload.path; error.nextActions = payload.nextActions; throw error; } return payload;
   }
   function setBusy(button, busy, label) { button.disabled = busy; if (label) button.textContent = busy ? label : button.dataset.defaultLabel || button.textContent; }
   async function findLocal() {
@@ -1612,7 +1648,7 @@ const clientScript = String.raw `
   $("back-button").addEventListener("click", () => setPhase(Math.max(initialPhase, state.phase - 1)));
   document.querySelectorAll("[data-step]").forEach(button => button.addEventListener("click", () => { const step = Number(button.dataset.step); if (step >= initialPhase && step <= state.phase) setPhase(step); }));
   $("save-button").addEventListener("click", async () => {
-    const status = $("save-status"), button = $("save-button"); status.className = "save-status"; status.textContent = "Testing selected models and saving configuration..."; button.disabled = true;
+    const status = $("save-status"), button = $("save-button"); status.className = "save-status"; status.textContent = "Saving configuration and checking changed model routes..."; button.disabled = true;
     try {
       const profile = projectProfile();
       const execution = {
@@ -1620,10 +1656,10 @@ const clientScript = String.raw `
         decisionMode:state.decisionMode,hostAssistance:state.hostAssistance,contextBudget:state.contextBudget,
         advisor:state.advisor,doctrine:state.doctrine,hostActions:state.hostActions,
       };
-      if (setupMode === "project") await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution});
-      else await post("/api/save", {primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id})),profile,sandboxMode:state.sandboxMode,...execution});
-      showCompletion(setupMode === "project" ? "Project setup saved" : "Configuration saved", "Swarm Pi will use these project settings for delegated work. You can close this tab.", true);
-    } catch (error) { status.className = "save-status error"; status.textContent = error.message; button.disabled = false; }
+      const saved = setupMode === "project" ? await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution}) : await post("/api/save", {baseRevision:bootRevision,primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id})),profile,sandboxMode:state.sandboxMode,...execution});
+      const degraded = saved.health?.status === "degraded";
+      showCompletion(setupMode === "project" ? "Project setup saved" : degraded ? "Configuration saved with model health warnings" : "Configuration saved", degraded ? "The structure was saved, but one or more unchanged saved models are currently unavailable. Reconnect or replace them before running work that needs those routes." : "Swarm Pi will use these project settings for delegated work. You can close this tab.", true);
+    } catch (error) { if (error.stage === "models") setPhase(2); else if (error.stage === "roles") setPhase(3); else if (error.stage === "execution-safety") setPhase(4); status.className = "save-status error"; status.textContent = error.message; button.disabled = false; }
   });
   $("cancel-button").addEventListener("click", async () => {
     if (!confirm("Close setup without saving your changes?")) return;

@@ -6,7 +6,7 @@ import { createFileCredentialStore } from "../pi/credentials.js";
 import { CredentialDraftVault, OAuthSessionManager } from "../providers/credentials.js";
 import {} from "../state/model-config.js";
 import { loadState, prepareConfigurationStorage, resolveStateDir, } from "../state/state.js";
-import { configureBuiltInProvider, createManualCustomProvider, discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, saveConfigurationSubmission, saveProjectProfileSubmission, signOutProvider, stageCustomProviderCredential, verifyProviderConnection, } from "./configuration-service.js";
+import { configureBuiltInProvider, ConfigurationSaveError, createManualCustomProvider, discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, saveConfigurationSubmission, saveProjectProfileSubmission, signOutProvider, stageCustomProviderCredential, verifyProviderConnection, } from "./configuration-service.js";
 import { EndpointDiscoveryError } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
 import { renderTelemetryDashboardPage } from "./dashboard.js";
@@ -83,7 +83,14 @@ export async function startConfigurationServer(cwd, options = {}) {
                 const view = await saveConfigurationSubmission(cwd, submission, env, { credentialVault });
                 response.setHeader("Connection", "close");
                 response.once("finish", () => void finish("saved"));
-                json(response, 200, { saved: true, configuration: view.configuration });
+                json(response, 200, {
+                    saved: true,
+                    configuration: view.configuration,
+                    configurationRevision: view.configurationRevision,
+                    reconciledChanges: view.reconciledChanges ?? [],
+                    issues: view.issues ?? [],
+                    health: view.health ?? { status: "ready", checkedAt: new Date().toISOString() },
+                });
                 return;
             }
             if (request.method === "POST" && url.pathname === "/api/save-profile") {
@@ -184,6 +191,9 @@ export async function startConfigurationServer(cwd, options = {}) {
                 recoverable: problem.recoverable,
                 preserved: problem.preserved,
                 nextActions: problem.nextActions,
+                ...(error instanceof ConfigurationSaveError
+                    ? { path: error.options.path, issues: error.options.issues ?? [] }
+                    : {}),
             });
         }
     });
@@ -237,24 +247,30 @@ export async function startConfigurationServer(cwd, options = {}) {
 }
 function setupProblem(error) {
     const message = redactSetupMessage(error instanceof Error ? error.message : "Configuration failed");
-    const code = error instanceof EndpointDiscoveryError
+    const code = error instanceof ConfigurationSaveError
         ? error.code
-        : message.includes("smoke test")
-            ? "model-smoke-test-failed"
-            : message.includes("recovery-required")
-                ? "configuration-recovery-required"
-                : /sandbox/i.test(message)
-                    ? "sandbox-backend-unavailable"
-                    : /model|authenticated/i.test(message)
-                        ? "model-configuration-invalid"
-                        : "configuration-save-failed";
-    const stage = code.includes("sandbox")
+        : error instanceof EndpointDiscoveryError
+            ? error.code
+            : message.includes("smoke test")
+                ? "model-smoke-test-failed"
+                : message.includes("recovery-required")
+                    ? "configuration-recovery-required"
+                    : /sandbox/i.test(message)
+                        ? "sandbox-backend-unavailable"
+                        : /model|authenticated/i.test(message)
+                            ? "model-configuration-invalid"
+                            : "configuration-save-failed";
+    const stage = error instanceof ConfigurationSaveError && error.options.path?.startsWith("adaptivePolicy")
         ? "execution-safety"
-        : code.includes("model")
-            ? "models"
-            : code.includes("recovery")
-                ? "recovery"
-                : "workspace";
+        : error instanceof ConfigurationSaveError && error.options.path?.startsWith("rolePolicies")
+            ? "roles"
+            : code.includes("sandbox")
+                ? "execution-safety"
+                : code.includes("model")
+                    ? "models"
+                    : code.includes("recovery")
+                        ? "recovery"
+                        : "workspace";
     return {
         code,
         stage,
@@ -263,7 +279,9 @@ function setupProblem(error) {
         preserved: ["form input", "previous saved configuration"],
         nextActions: code === "sandbox-backend-unavailable"
             ? ["use-strict", "doctor"]
-            : ["review-current-step", "doctor"],
+            : code === "configuration-revision-conflict"
+                ? ["reload-configuration"]
+                : ["review-current-step", "doctor"],
     };
 }
 function redactSetupMessage(value) {
@@ -626,6 +644,8 @@ function json(response, status, value) {
     response.end(`${JSON.stringify(value)}\n`);
 }
 function statusForError(error) {
+    if (error instanceof ConfigurationSaveError)
+        return error.options.status ?? 400;
     return error instanceof HttpError ? error.status : 400;
 }
 class HttpError extends Error {
