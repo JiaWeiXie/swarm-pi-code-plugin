@@ -265,6 +265,75 @@ test("attempt telemetry persists bounded lifecycle details and aggregates report
   });
 });
 
+test("telemetry reports bound history reads to the newest MiB and expose truncation", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-telemetry-truncated-"));
+  await appendTelemetryAttempts(stateDir, { jobId: "job-latest", taskKind: "ask" }, [
+    {
+      attempt: 1,
+      startedAt: "2026-07-16T12:00:00.000Z",
+      finishedAt: "2026-07-16T12:00:01.000Z",
+      durationMs: 1000,
+      outcome: "succeeded",
+      provider: "openai",
+      model: "gpt-5",
+    },
+  ]);
+  const file = path.join(stateDir, "telemetry", "events.jsonl");
+  const latest = fs.readFileSync(file, "utf8");
+  fs.writeFileSync(file, `${"x".repeat(1024 * 1024)}\n${latest}`);
+
+  const stored = await readTelemetryEvents(stateDir);
+  assert.equal(stored.events.length, 1);
+  assert.equal(stored.events[0]?.kind, "attempt");
+  assert.equal(stored.health.status, "degraded");
+  assert.equal(stored.health.reason, "history-truncated");
+});
+
+test("telemetry keeps a complete record at the exact history read boundary", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-telemetry-boundary-"));
+  await appendTelemetryAttempts(stateDir, { jobId: "job-boundary", taskKind: "ask" }, [
+    {
+      attempt: 1,
+      startedAt: "2026-07-16T12:00:00.000Z",
+      finishedAt: "2026-07-16T12:00:01.000Z",
+      durationMs: 1000,
+      outcome: "succeeded",
+      provider: "openai",
+      model: "gpt-5",
+    },
+  ]);
+  const file = path.join(stateDir, "telemetry", "events.jsonl");
+  const latest = fs.readFileSync(file, "utf8");
+  fs.writeFileSync(file, `prefix\n${latest}${"\n".repeat(1024 * 1024 - latest.length)}`);
+
+  const stored = await readTelemetryEvents(stateDir);
+  assert.equal(stored.events.length, 1);
+  assert.equal(stored.events[0]?.kind, "attempt");
+  assert.equal(stored.health.reason, "history-truncated");
+});
+
+test("telemetry makes truncation visible when retained history has an invalid record", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-telemetry-mixed-"));
+  await appendTelemetryAttempts(stateDir, { jobId: "job-mixed", taskKind: "ask" }, [
+    {
+      attempt: 1,
+      startedAt: "2026-07-16T12:00:00.000Z",
+      finishedAt: "2026-07-16T12:00:01.000Z",
+      durationMs: 1000,
+      outcome: "succeeded",
+      provider: "openai",
+      model: "gpt-5",
+    },
+  ]);
+  const file = path.join(stateDir, "telemetry", "events.jsonl");
+  const latest = fs.readFileSync(file, "utf8");
+  fs.writeFileSync(file, `${"x".repeat(1024 * 1024)}\nnot-json\n${latest}`);
+
+  const stored = await readTelemetryEvents(stateDir);
+  assert.equal(stored.events.length, 1);
+  assert.equal(stored.health.reason, "history-truncated");
+});
+
 test("pricing parser rejects reversed and ambiguous intervals, including currency changes", () => {
   const first = pricing().entries[0]!;
   assert.throws(

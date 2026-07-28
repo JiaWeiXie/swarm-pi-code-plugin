@@ -50,6 +50,8 @@ export type CollectorHealthReason =
   | "not-enabled"
   | "validation-rejected"
   | "write-failed"
+  | "history-invalid"
+  | "history-truncated"
   | "clock-skew"
   | "migration-pending"
   | "unknown";
@@ -310,6 +312,8 @@ export function parseCollectorHealth(input: unknown): CollectorHealth {
         "not-enabled",
         "validation-rejected",
         "write-failed",
+        "history-invalid",
+        "history-truncated",
         "clock-skew",
         "migration-pending",
         "unknown",

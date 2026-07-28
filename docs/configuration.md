@@ -154,10 +154,11 @@ mise exec -- node scripts/pi-runner.mjs telemetry report --json
 `--from`, `--to`, `--job`, and `--limit` narrow the report; timestamps are UTC
 ISO 8601 and the limit is capped at 500. Use
 `mise exec -- node scripts/pi-runner.mjs dashboard` to start the loopback,
-token-protected dashboard. It displays summary totals, model and role
-breakdowns, recent attempts, and the explicit unavailable-cost state. The
-dashboard does not expose a network listener beyond loopback or accept raw
-telemetry input.
+token-protected dashboard. It displays summary totals (including automatic
+retries), model and role breakdowns, recent attempts with retry counts, and the
+explicit unavailable-cost state. Reports and the dashboard read at most the
+newest 1 MiB of history and visibly mark a truncated history. The dashboard does
+not expose a network listener beyond loopback or accept raw telemetry input.
 
 | Setting | New-project default | Runtime effect |
 | --- | --- | --- |

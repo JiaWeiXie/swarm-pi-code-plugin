@@ -45,9 +45,13 @@ The file store writes newline-delimited JSON to:
 The directory is mode `0700` and the event file is mode `0600`. A terminal Job
 is marked complete before telemetry is appended. A telemetry write or parse
 failure is diagnostic only and cannot turn a completed Job into a failed Job.
-The report marks malformed or unreadable history as degraded. Existing Job
-pruning does not silently delete telemetry history; removing the state directory
-remains an explicit local state-management action.
+The report reads at most the newest 1 MiB of history. When older entries are
+outside that read budget, it keeps the newest complete JSONL records and marks
+health as degraded with `history-truncated`; this takes precedence when retained
+history also has malformed records. Untruncated malformed records use
+`history-invalid`. Existing Job pruning does not silently delete telemetry
+history; removing the state directory remains an explicit local state-management
+action.
 
 Each fallback attempt is retained when the runner has a measured session
 boundary. Attempts that fail before a session starts still retain outcome and
@@ -87,10 +91,12 @@ mise exec -- node scripts/pi-runner.mjs dashboard
 
 The server binds to `127.0.0.1`, uses a random session token, enforces the same
 loopback and CSP boundary as setup, and closes after its normal timeout or an
-explicit Ctrl-C. The dashboard displays summary cards, model/role breakdowns,
-recent attempt details, empty/degraded states, and the unavailable-cost label.
-It is not a provider dashboard, an upload endpoint, a billing console, or a
-replacement for `jobs export --audit`.
+explicit Ctrl-C. The dashboard displays summary cards (including automatic
+retries), model/role breakdowns, retry counts for recent attempts,
+empty/degraded states, and the unavailable-cost label. A truncated history state
+states that the dashboard is showing only the newest 1 MiB. It is not a provider
+dashboard, an upload endpoint, a billing console, or a replacement for `jobs
+export --audit`.
 
 ## Cost semantics
 

@@ -167,7 +167,7 @@ Claude Code commands 與 Codex skills 使用相同的 Host protocol：委派前�
 ### Telemetry、詳細報告與儀表板
 
 本機 collector 會把終端 Job attempt 以 privacy 驗證過的 JSONL 儲存在既有 state
-directory。只保留安全 label、role/task、outcome、duration，以及 provider 回報的
+directory。只保留安全 label、role/task、outcome、duration、Pi automatic retry count，以及 provider 回報的
 input/output/cache-read/cache-write counters；不會儲存 prompt、completion、reasoning、路徑、
 credential、endpoint、Git metadata 或任意文字。不會上傳資料、不會啟動 sidecar，
 也不宣稱 billing accuracy。本機模型仍是 usage-only；沒有權威 pricing 時，cost
@@ -176,7 +176,8 @@ credential、endpoint、Git metadata 或任意文字。不會上傳資料、不�
 使用 `mise exec -- node scripts/pi-runner.mjs telemetry report --json` 取得版本化的
 詳細報告，也可加上 `--from`、`--to` 與 `--limit`（最多 500）。使用
 `mise exec -- node scripts/pi-runner.mjs dashboard` 開啟 loopback、token 保護的儀表板，
-查看 summary cards、model/role breakdown 與最近 attempts。詳見[telemetry 合約與儀表板參考](docs/telemetry.md)。
+查看包含 automatic retries 的 summary cards、model/role breakdown，以及含 retry counts 的最近
+attempts。報告最多讀取最新 1 MiB，並會明確標示 history 已截斷。詳見[telemetry 合約與儀表板參考](docs/telemetry.md)。
 
 ### 第一次設定
 

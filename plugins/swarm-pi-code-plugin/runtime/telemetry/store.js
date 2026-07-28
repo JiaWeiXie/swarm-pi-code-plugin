@@ -5,6 +5,7 @@ import { parseTelemetryEvent, TELEMETRY_SCHEMA_VERSION } from "./contracts.js";
 import { classifyProviderModel, redactTelemetryEvent } from "./privacy.js";
 const TELEMETRY_DIRECTORY = "telemetry";
 const EVENTS_FILE = "events.jsonl";
+const MAX_TELEMETRY_READ_BYTES = 1024 * 1024;
 function eventFile(stateDir) {
     return path.join(stateDir, TELEMETRY_DIRECTORY, EVENTS_FILE);
 }
@@ -24,11 +25,11 @@ function disabled(now = new Date().toISOString()) {
         checkedAt: now,
     };
 }
-function failed(now = new Date().toISOString()) {
+function degraded(reason, now = new Date().toISOString()) {
     return {
         schemaVersion: TELEMETRY_SCHEMA_VERSION,
         status: "degraded",
-        reason: "write-failed",
+        reason,
         checkedAt: now,
     };
 }
@@ -100,13 +101,38 @@ export async function appendTelemetryAttempts(stateDir, context, attempts) {
         await appendTelemetryEvent(stateDir, event);
     }
 }
+async function readNewestTelemetryLines(file) {
+    const size = (await fs.stat(file)).size;
+    const byteLength = Math.min(size, MAX_TELEMETRY_READ_BYTES);
+    const start = size - byteLength;
+    const readStart = start === 0 ? 0 : start - 1;
+    const buffer = Buffer.alloc(byteLength + (start === 0 ? 0 : 1));
+    const handle = await fs.open(file, "r");
+    try {
+        await handle.read(buffer, 0, buffer.length, readStart);
+    }
+    finally {
+        await handle.close();
+    }
+    if (start === 0)
+        return { contents: buffer.toString("utf8"), truncated: false };
+    const beginsAtLineBoundary = buffer[0] === 0x0a;
+    const contents = buffer.subarray(1).toString("utf8");
+    if (beginsAtLineBoundary)
+        return { contents, truncated: true };
+    const firstNewline = contents.indexOf("\n");
+    return {
+        contents: firstNewline === -1 ? "" : contents.slice(firstNewline + 1),
+        truncated: true,
+    };
+}
 export async function readTelemetryEvents(stateDir) {
     const file = eventFile(stateDir);
     if (!(await fileExists(file)))
         return { events: [], health: disabled() };
     const checkedAt = new Date().toISOString();
     try {
-        const contents = await fs.readFile(file, "utf8");
+        const { contents, truncated } = await readNewestTelemetryLines(file);
         const events = [];
         let invalid = false;
         for (const line of contents.split("\n")) {
@@ -119,9 +145,16 @@ export async function readTelemetryEvents(stateDir) {
                 invalid = true;
             }
         }
-        return { events, health: invalid ? failed(checkedAt) : healthy(checkedAt) };
+        return {
+            events,
+            health: truncated
+                ? degraded("history-truncated", checkedAt)
+                : invalid
+                    ? degraded("history-invalid", checkedAt)
+                    : healthy(checkedAt),
+        };
     }
     catch {
-        return { events: [], health: failed(checkedAt) };
+        return { events: [], health: degraded("write-failed", checkedAt) };
     }
 }

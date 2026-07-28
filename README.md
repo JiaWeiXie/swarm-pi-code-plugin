@@ -227,8 +227,10 @@ without authoritative pricing.
 Use `mise exec -- node scripts/pi-runner.mjs telemetry report --json` for the
 versioned detailed report, or add `--from`, `--to`, and `--limit` (maximum 500).
 Use `mise exec -- node scripts/pi-runner.mjs dashboard` for the loopback,
-token-protected dashboard with summary cards, model/role breakdowns, and recent
-attempts. See the [telemetry contract and dashboard reference](docs/telemetry.md).
+token-protected dashboard with summary cards (including automatic retries),
+model/role breakdowns, and recent attempts with retry counts. Reports read at
+most the newest 1 MiB and visibly mark truncated history. See the [telemetry
+contract and dashboard reference](docs/telemetry.md).
 
 ### First setup
 

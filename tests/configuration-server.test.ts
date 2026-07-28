@@ -1238,6 +1238,7 @@ test("local dashboard serves a token-protected detailed telemetry report", async
     [
       {
         attempt: 1,
+        automaticRetries: 2,
         startedAt: "2026-07-16T12:00:00.000Z",
         finishedAt: "2026-07-16T12:00:01.000Z",
         durationMs: 1000,
@@ -1261,6 +1262,8 @@ test("local dashboard serves a token-protected detailed telemetry report", async
   assert.equal(page.status, 200);
   assert.match(html, /Usage dashboard/);
   assert.match(html, /Recent attempts/);
+  assert.match(html, /Automatic retries/);
+  assert.match(html, /Retries/);
   assert.match(page.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
   const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
   assert.doesNotThrow(() => new Function(scripts.at(-1)?.[1] ?? ""));
@@ -1271,9 +1274,12 @@ test("local dashboard serves a token-protected detailed telemetry report", async
   const report = await fetch(
     `${pageUrl.origin}/api/telemetry/report?token=${encodeURIComponent(pageUrl.searchParams.get("token")!)}&days=30`,
   );
-  const body = (await report.json()) as { summary: { attempts: number; inputTokens: number } };
+  const body = (await report.json()) as {
+    summary: { attempts: number; automaticRetries: number; inputTokens: number };
+  };
   assert.equal(report.status, 200);
   assert.equal(body.summary.attempts, 1);
+  assert.equal(body.summary.automaticRetries, 2);
   assert.equal(body.summary.inputTokens, 10);
   const writeAttempt = await fetch(`${pageUrl.origin}/api/save`, {
     method: "POST",

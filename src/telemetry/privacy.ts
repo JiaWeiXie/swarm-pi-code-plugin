@@ -90,6 +90,8 @@ const HEALTH_REASONS = [
   "not-enabled",
   "validation-rejected",
   "write-failed",
+  "history-invalid",
+  "history-truncated",
   "clock-skew",
   "migration-pending",
   "unknown",
