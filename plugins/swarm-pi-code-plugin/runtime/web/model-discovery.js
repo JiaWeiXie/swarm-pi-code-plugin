@@ -53,6 +53,7 @@ export async function discoverEndpoint(request, catalogModels = [], options = {}
         ? probeAnthropic(context)
         : probeOpenAi(context));
     const id = stableCustomProviderId(normalizedRoot, request.protocol);
+    assertProviderIdAvailable(id, options.reservedProviderIds);
     const secretHeader = authMethod === "custom-header" && request.headerName
         ? [{ name: request.headerName, secretRef: providerHeaderSecretRef(id, request.headerName) }]
         : [];
@@ -102,6 +103,7 @@ async function discoverLocalEndpoint(baseUrl, catalogModels, options) {
             const result = await probe(context);
             const root = normalizeProtocolRoot(result.baseUrl, "openai-chat-completions");
             const id = stableCustomProviderId(root, "openai-chat-completions");
+            assertProviderIdAvailable(id, options.reservedProviderIds);
             return {
                 adapter: result.adapter === "lm-studio" || result.adapter === "ollama"
                     ? result.adapter
@@ -124,6 +126,11 @@ async function discoverLocalEndpoint(baseUrl, catalogModels, options) {
         }
     }
     throw bestDiscoveryError(errors);
+}
+function assertProviderIdAvailable(providerId, reservedProviderIds) {
+    if (!reservedProviderIds || !new Set(reservedProviderIds).has(providerId))
+        return;
+    throw new EndpointDiscoveryError("unsupported", `Provider identifier ${providerId} is already configured`);
 }
 async function probeLmStudio(context) {
     const url = new URL("/api/v1/models", context.base.origin);

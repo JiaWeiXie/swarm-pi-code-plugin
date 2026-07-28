@@ -6,7 +6,7 @@ import { createFileCredentialStore } from "../pi/credentials.js";
 import { CredentialDraftVault, OAuthSessionManager } from "../providers/credentials.js";
 import {} from "../state/model-config.js";
 import { loadState, prepareConfigurationStorage, resolveStateDir, } from "../state/state.js";
-import { configureBuiltInProvider, ConfigurationSaveError, createManualCustomProvider, discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, saveConfigurationSubmission, saveProjectProfileSubmission, signOutProvider, stageCustomProviderCredential, verifyProviderConnection, } from "./configuration-service.js";
+import { configureBuiltInProvider, ConfigurationSaveError, createManualCustomProvider, discoverConfigurationEndpoint, discoverLocalConfigurationEndpoints, loadConfigurationView, resolveConfigurationProviderMigration, saveConfigurationSubmission, saveProjectProfileSubmission, signOutProvider, stageCustomProviderCredential, verifyProviderConnection, } from "./configuration-service.js";
 import { EndpointDiscoveryError } from "./model-discovery.js";
 import { renderConfigurationPage } from "./ui.js";
 import { renderTelemetryDashboardPage } from "./dashboard.js";
@@ -91,6 +91,21 @@ export async function startConfigurationServer(cwd, options = {}) {
                     issues: view.issues ?? [],
                     health: view.health ?? { status: "ready", checkedAt: new Date().toISOString() },
                 });
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/api/providers/migration-resolve") {
+                assertJsonRequest(request, origin);
+                const body = (await readJsonBody(request));
+                if (typeof body.providerId !== "string" ||
+                    typeof body.baseProviderRevision !== "string" ||
+                    (body.strategy !== "use-global" && body.strategy !== "import-new")) {
+                    throw new HttpError(400, "Invalid provider migration resolution");
+                }
+                json(response, 200, await resolveConfigurationProviderMigration(cwd, {
+                    providerId: body.providerId,
+                    strategy: body.strategy,
+                    baseProviderRevision: body.baseProviderRevision,
+                }, env));
                 return;
             }
             if (request.method === "POST" && url.pathname === "/api/save-profile") {

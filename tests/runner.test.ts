@@ -33,7 +33,7 @@ import {
   resolveJobHostRequest,
   startJob,
 } from "../src/state/jobs.js";
-import { defaultModelConfiguration } from "../src/state/model-config.js";
+import { defaultModelConfiguration, saveModelConfiguration } from "../src/state/model-config.js";
 import { detectSandboxAvailability } from "../src/sandbox/availability.js";
 import {
   defaultState,
@@ -1123,6 +1123,123 @@ test("init replaces validated model priority and preserves it in status", async 
   );
 });
 
+test("status excludes stale cached and historical provider references from active routing", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-status-provider-state-"));
+  const userState = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-status-provider-user-"));
+  const previousUserState = process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR;
+  process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR = userState;
+  try {
+    await saveModelConfiguration(workspace, {
+      primary: "test-provider/test-model",
+      fallbacks: [],
+      customProviders: [],
+      providerProfiles: [],
+    });
+    await updateState(workspace, (state) => {
+      state.config.modelPriority = ["test-provider/test-model"];
+      state.config.availableModels = [
+        "custom-127.0.0.1-1337/dead-model",
+        "test-provider/test-model",
+      ];
+      state.jobs.push({
+        id: "historical-local-job",
+        status: "succeeded",
+        model: "custom-127.0.0.1-1337/dead-model",
+      });
+    });
+    const dependencies: RunnerDependencies = {
+      catalog: { available: () => [fakeModel], all: () => [fakeModel] },
+      readFile: async () => "unused",
+      createSession: async () => {
+        throw new Error("status must not create a provider session");
+      },
+    };
+
+    const result = await runCommand(parseArguments(["status", "--json"]), workspace, dependencies);
+    assert.ok("providerState" in result);
+    if (!("providerState" in result)) return;
+    assert.deepEqual(result.providerState?.activeProviders, ["test-provider"]);
+    assert.equal(result.providerState?.historicalSnapshotsExcluded, true);
+    assert.equal(result.providerState?.ignoredCachedModelReferences, 1);
+  } finally {
+    if (previousUserState === undefined) delete process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR;
+    else process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR = previousUserState;
+  }
+});
+
+test("status does not report provider-missing-global when only the selected model is absent", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-status-model-missing-"));
+  const userState = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-status-model-user-"));
+  const previousUserState = process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR;
+  process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR = userState;
+  try {
+    await saveModelConfiguration(workspace, {
+      primary: "test-provider/removed-model",
+      fallbacks: [],
+      customProviders: [],
+      providerProfiles: [],
+    });
+    await updateState(workspace, (state) => {
+      state.config.modelPriority = ["test-provider/removed-model"];
+    });
+    const dependencies: RunnerDependencies = {
+      catalog: { available: () => [fakeModel], all: () => [fakeModel] },
+      readFile: async () => "unused",
+      createSession: async () => {
+        throw new Error("status must not create a provider session");
+      },
+    };
+
+    const result = await runCommand(parseArguments(["status", "--json"]), workspace, dependencies);
+    assert.ok("issues" in result);
+    if (!("issues" in result)) return;
+    assert.equal(
+      result.issues.some((issue) => issue.code === "provider-missing-global"),
+      false,
+    );
+  } finally {
+    if (previousUserState === undefined) delete process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR;
+    else process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR = previousUserState;
+  }
+});
+
+test("status fails closed when a role route references a globally missing provider", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-status-role-provider-"));
+  const userState = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-status-role-user-"));
+  const previousUserState = process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR;
+  process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR = userState;
+  try {
+    await saveModelConfiguration(workspace, {
+      primary: "test-provider/test-model",
+      fallbacks: [],
+      customProviders: [],
+      providerProfiles: [],
+    });
+    await updateState(workspace, (state) => {
+      state.config.modelPriority = ["test-provider/test-model"];
+      state.config.rolePolicies = {
+        planner: { models: ["deleted-provider/planner-model"] },
+      };
+    });
+    const dependencies: RunnerDependencies = {
+      catalog: { available: () => [fakeModel], all: () => [fakeModel] },
+      readFile: async () => "unused",
+      createSession: async () => {
+        throw new Error("status must not create a provider session");
+      },
+    };
+
+    const result = await runCommand(parseArguments(["status", "--json"]), workspace, dependencies);
+    assert.ok("providerState" in result && "issues" in result);
+    if (!("providerState" in result) || !("issues" in result)) return;
+    assert.deepEqual(result.providerState?.activeProviders, ["deleted-provider", "test-provider"]);
+    assert.ok(result.issues.some((issue) => issue.code === "provider-missing-global"));
+  } finally {
+    if (previousUserState === undefined) delete process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR;
+    else process.env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR = previousUserState;
+  }
+});
+
 test("init --json reports pending migration without moving non-Git user state", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-init-pending-migration-"));
   const userState = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-init-pending-state-"));
@@ -2151,13 +2268,36 @@ test("background submission returns an accepted job without creating a Pi sessio
   assert.equal(snapshot.job.timeoutMs, 30 * 60_000);
   assert.equal(snapshot.job.sandboxMode, "lenient");
   const request = await readJobRequest(workspace, "jobId" in result ? result.jobId : "");
-  assert.equal(request.requestVersion, 5);
+  assert.equal(request.requestVersion, 6);
+  assert.match(request.providerRegistryRevision ?? "", /^[a-f0-9]{24}$/);
   assert.equal(request.modelConfiguration?.version, 1);
   assert.match(request.providerSnapshotHash ?? "", /^[a-f0-9]{64}$/);
   assert.doesNotMatch(
     JSON.stringify(request.modelConfiguration),
     /apiKey|access-token|refresh-token/,
   );
+  const requestFile = path.join(
+    await resolveStateDir(workspace),
+    "jobs",
+    request.id,
+    "request.json",
+  );
+  request.providerRegistryRevision = "0".repeat(24);
+  fs.writeFileSync(requestFile, JSON.stringify(request));
+  const workerResult = await runCommand(
+    {
+      command: "__worker",
+      jobId: request.id,
+      workerToken: request.workerToken,
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+  assert.equal("status" in workerResult && workerResult.status, "failed");
+  assert.match("output" in workerResult ? workerResult.output : "", /integrity validation/);
 });
 
 test("background mechanical implementation uses an isolated job worktree", async () => {
@@ -2746,7 +2886,7 @@ test("background durable replay ignores a later profile change", async () => {
     { spawnWorker: async () => 555 },
   );
   const jobId = "jobId" in submit ? submit.jobId : "";
-  assert.equal((await readJobRequest(workspace, jobId)).requestVersion, 5);
+  assert.equal((await readJobRequest(workspace, jobId)).requestVersion, 6);
   // Tighten the live profile so the original task kind would now be rejected.
   await updateState(workspace, (state) => {
     state.config.profile = { tasks: [] };

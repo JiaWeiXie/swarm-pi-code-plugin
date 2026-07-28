@@ -249,6 +249,9 @@ function summarizeRequest(
     ...(request.adoptExisting ? { adoptExisting: true } : {}),
     ...(request.reviewProfile ? { reviewProfile: request.reviewProfile } : {}),
     ...(request.providerSnapshotHash ? { providerSnapshotHash: request.providerSnapshotHash } : {}),
+    ...(request.providerRegistryRevision
+      ? { providerRegistryRevision: request.providerRegistryRevision }
+      : {}),
     createdAt: request.createdAt,
   };
   return redactValue(value, roots, counter) as AuditRequestSummary;

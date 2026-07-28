@@ -227,7 +227,7 @@ export async function resolveStateDir(
   if (commonDir) return path.join(commonDir, "swarm-pi-code-plugin");
   const workspace = await fs.realpath(path.resolve(cwd)).catch(() => path.resolve(cwd));
   const key = createHash("sha256").update(workspace).digest("hex");
-  return path.join(userStateRoot(env), "workspaces", key);
+  return path.join(resolveUserStateRoot(env), "workspaces", key);
 }
 
 export async function resolveStateFile(
@@ -353,7 +353,7 @@ async function findMigrationSources(
   const root = await resolveWorkspaceRoot(cwd);
   const candidates = [...new Set([workspace, root])].map((directory) => {
     const key = createHash("sha256").update(directory).digest("hex");
-    return path.join(userStateRoot(env), "workspaces", key);
+    return path.join(resolveUserStateRoot(env), "workspaces", key);
   });
   const existing: string[] = [];
   for (const candidate of candidates) {
@@ -916,7 +916,7 @@ async function resolveGitCommonDir(cwd: string): Promise<string | undefined> {
   }
 }
 
-function userStateRoot(env: NodeJS.ProcessEnv): string {
+export function resolveUserStateRoot(env: NodeJS.ProcessEnv = process.env): string {
   if (env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR)
     return path.resolve(env.SWARM_PI_CODE_PLUGIN_USER_STATE_DIR);
   if (process.platform === "darwin")

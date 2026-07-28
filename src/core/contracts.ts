@@ -357,6 +357,15 @@ export interface ReadinessReport {
   configured: boolean;
   activeModel: string | null;
   sandboxMode: SandboxMode;
+  providerState?: {
+    source: "global-registry" | "legacy-project";
+    registryFile: string;
+    registryRevision: string | null;
+    activeProviders: string[];
+    configuredProviders: string[];
+    historicalSnapshotsExcluded: true;
+    ignoredCachedModelReferences: number;
+  };
   configurationStorage?: import("../state/state.js").ConfigurationStorage;
   workspace: WorkspaceAssessment;
   capabilities: {
@@ -872,7 +881,7 @@ export interface AuditJobSummary {
 }
 
 export interface AuditRequestSummary {
-  requestVersion?: 1 | 2 | 3 | 4 | 5;
+  requestVersion?: 1 | 2 | 3 | 4 | 5 | 6;
   id: string;
   host: Host;
   kind: TaskKind;
@@ -888,6 +897,7 @@ export interface AuditRequestSummary {
   adoptExisting?: boolean;
   reviewProfile?: "standard" | "lean";
   providerSnapshotHash?: string;
+  providerRegistryRevision?: string;
   createdAt: string;
 }
 

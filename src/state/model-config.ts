@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -13,8 +13,16 @@ import {
   normalizeModelsEndpoint,
   normalizeProtocolRoot,
   runtimeApiForWireProtocol,
+  stableCustomProviderId,
   wireProtocolForRuntimeApi,
 } from "../providers/endpoints.js";
+import {
+  loadProviderRegistry,
+  mergeLegacyProviderRegistry,
+  ProviderRegistryRevisionConflictError,
+  resolveProviderRegistryFile,
+  saveProviderRegistry,
+} from "./provider-registry.js";
 import { resolveStateDir } from "./state.js";
 
 export const SUPPORTED_PROVIDER_APIS = [
@@ -120,6 +128,19 @@ export interface ModelConfiguration {
   updatedAt: string | null;
 }
 
+export interface ProjectModelConfigurationV2 {
+  version: 2;
+  primary: string | null;
+  fallbacks: string[];
+  updatedAt: string | null;
+}
+
+export interface ModelConfigurationStorageView {
+  source: "global-registry" | "legacy-project";
+  registryFile: string;
+  registryRevision: string | null;
+}
+
 export function defaultModelConfiguration(priority: string[] = []): ModelConfiguration {
   return {
     version: 1,
@@ -145,10 +166,29 @@ export async function loadModelConfiguration(
 ): Promise<ModelConfiguration> {
   const file = await resolveModelConfigurationFile(cwd, env);
   try {
-    return parseModelConfiguration(JSON.parse(await fs.readFile(file, "utf8")) as unknown);
+    const value = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
+    if (isProjectModelConfigurationV2(value)) {
+      const routing = parseProjectModelConfiguration(value);
+      const registry = await loadProviderRegistry(env);
+      return parseModelConfiguration({
+        version: 1,
+        primary: routing.primary,
+        fallbacks: routing.fallbacks,
+        customProviders: registry.customProviders,
+        providerProfiles: registry.providerProfiles,
+        updatedAt: routing.updatedAt,
+      });
+    }
+    return parseModelConfiguration(value);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return defaultModelConfiguration(legacyPriority);
+      const defaults = defaultModelConfiguration(legacyPriority);
+      const registry = await loadProviderRegistry(env);
+      return {
+        ...defaults,
+        customProviders: registry.customProviders,
+        providerProfiles: registry.providerProfiles,
+      };
     }
     throw error;
   }
@@ -159,22 +199,234 @@ export async function saveModelConfiguration(
   value: Omit<ModelConfiguration, "version" | "updatedAt" | "providerProfiles"> &
     Partial<Pick<ModelConfiguration, "version" | "updatedAt" | "providerProfiles">>,
   env: NodeJS.ProcessEnv = process.env,
+  options: { expectedProviderRegistryRevision?: string | undefined } = {},
 ): Promise<ModelConfiguration> {
   const normalized = parseModelConfiguration({
     ...value,
     version: 1,
     updatedAt: new Date().toISOString(),
   });
+  await saveProviderRegistry(
+    {
+      customProviders: normalized.customProviders,
+      providerProfiles: normalized.providerProfiles,
+    },
+    env,
+    options.expectedProviderRegistryRevision,
+  );
   const file = await resolveModelConfigurationFile(cwd, env);
   await fs.mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  const routing: ProjectModelConfigurationV2 = {
+    version: 2,
+    primary: normalized.primary,
+    fallbacks: normalized.fallbacks,
+    updatedAt: normalized.updatedAt,
+  };
   try {
-    await fs.writeFile(temporary, `${JSON.stringify(normalized, null, 2)}\n`, { mode: 0o600 });
+    await fs.writeFile(temporary, `${JSON.stringify(routing, null, 2)}\n`, { mode: 0o600 });
     await fs.rename(temporary, file);
   } finally {
     await fs.rm(temporary, { force: true });
   }
   return normalized;
+}
+
+export async function prepareProviderRegistryForConfiguration(
+  cwd: string,
+  legacyPriority: string[] = [],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ModelConfiguration> {
+  const file = await resolveModelConfigurationFile(cwd, env);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return loadModelConfiguration(cwd, legacyPriority, env);
+    }
+    throw error;
+  }
+  if (isProjectModelConfigurationV2(raw)) {
+    return loadModelConfiguration(cwd, legacyPriority, env);
+  }
+  const legacy = parseModelConfiguration(raw);
+  const registry = await mergeLegacyProviderRegistry(
+    legacy.customProviders,
+    legacy.providerProfiles,
+    env,
+  );
+  const normalized = {
+    ...legacy,
+    customProviders: registry.customProviders,
+    providerProfiles: registry.providerProfiles,
+  };
+  await writeProjectModelConfiguration(cwd, normalized, env);
+  return normalized;
+}
+
+export async function resolveProviderRegistryMigrationConflict(
+  cwd: string,
+  providerId: string,
+  strategy: "use-global" | "import-new",
+  env: NodeJS.ProcessEnv = process.env,
+  options: {
+    expectedProviderRegistryRevision?: string | undefined;
+    blockGlobalProfile?: boolean | undefined;
+  } = {},
+): Promise<{ previousProviderId: string; providerId: string }> {
+  const file = await resolveModelConfigurationFile(cwd, env);
+  const raw = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
+  if (isProjectModelConfigurationV2(raw)) {
+    throw new Error("Provider registry migration is already complete");
+  }
+  const legacy = parseModelConfiguration(raw);
+  const registry = await loadProviderRegistry(env);
+  if (
+    options.expectedProviderRegistryRevision !== undefined &&
+    options.expectedProviderRegistryRevision !== registry.revision
+  ) {
+    throw new ProviderRegistryRevisionConflictError(
+      options.expectedProviderRegistryRevision,
+      registry.revision,
+    );
+  }
+  if (strategy === "use-global") {
+    const globalProvider = registry.customProviders.find(
+      (candidate) => candidate.id === providerId,
+    );
+    const globalProfile = registry.providerProfiles.find(
+      (candidate) => candidate.provider === providerId,
+    );
+    if (!globalProvider && !globalProfile) {
+      throw new Error(`Global provider conflict no longer exists for ${providerId}`);
+    }
+    const merged = await mergeLegacyProviderRegistry(
+      legacy.customProviders.filter((candidate) => candidate.id !== providerId),
+      legacy.providerProfiles.filter((candidate) => candidate.provider !== providerId),
+      env,
+    );
+    if (options.blockGlobalProfile && globalProfile) {
+      await saveProviderRegistry(
+        {
+          customProviders: merged.customProviders,
+          providerProfiles: merged.providerProfiles.map((profile) =>
+            profile.provider === providerId
+              ? {
+                  ...profile,
+                  readiness: "blocked",
+                  verifiedAt: undefined,
+                  verifiedModel: undefined,
+                }
+              : profile,
+          ),
+        },
+        env,
+        merged.revision,
+      );
+    }
+    await writeProjectModelConfiguration(cwd, legacy, env);
+    return { previousProviderId: providerId, providerId };
+  }
+  const provider = legacy.customProviders.find((candidate) => candidate.id === providerId);
+  if (!provider) {
+    throw new Error("Only a custom provider conflict can be imported under a new ID");
+  }
+  const protocol = provider.wireProtocol ?? wireProtocolForRuntimeApi(provider.api);
+  if (!protocol) throw new Error(`Cannot derive a wire protocol for ${providerId}`);
+  const canonicalId = stableCustomProviderId(provider.baseUrl, protocol);
+  const replacementId =
+    canonicalId === providerId
+      ? `${canonicalId.slice(0, 53)}-${createHash("sha256")
+          .update(JSON.stringify(provider))
+          .digest("hex")
+          .slice(0, 10)}`
+      : canonicalId;
+  const rewrite = (reference: string): string =>
+    reference.startsWith(`${providerId}/`)
+      ? `${replacementId}/${reference.slice(providerId.length + 1)}`
+      : reference;
+  const renamedProviders = legacy.customProviders
+    .filter((candidate) => candidate.id !== providerId)
+    .concat({
+      ...provider,
+      id: replacementId,
+      ...(provider.auth
+        ? {
+            auth: {
+              ...provider.auth,
+              ...(provider.auth.method === "none"
+                ? { secretRef: undefined }
+                : { secretRef: providerSecretRef(replacementId) }),
+            },
+          }
+        : {}),
+      ...(provider.headers
+        ? {
+            headers: provider.headers.map((header) => ({
+              ...header,
+              ...(header.secretRef
+                ? { secretRef: providerHeaderSecretRef(replacementId, header.name) }
+                : {}),
+            })),
+          }
+        : {}),
+    });
+  const renamedProfiles = legacy.providerProfiles.map((profile) =>
+    profile.provider === providerId
+      ? {
+          ...profile,
+          id: replacementId,
+          provider: replacementId,
+          auth: {
+            ...profile.auth,
+            ...(profile.auth.method === "none"
+              ? { secretRef: undefined }
+              : { secretRef: providerSecretRef(replacementId) }),
+          },
+          headers: profile.headers.map((header) => ({
+            ...header,
+            ...(header.secretRef
+              ? { secretRef: providerHeaderSecretRef(replacementId, header.name) }
+              : {}),
+          })),
+          ...(profile.verifiedModel ? { verifiedModel: rewrite(profile.verifiedModel) } : {}),
+          readiness: profile.readiness === "verified" ? ("configured" as const) : profile.readiness,
+          verifiedAt: undefined,
+        }
+      : profile,
+  );
+  await mergeLegacyProviderRegistry(renamedProviders, renamedProfiles, env);
+  await writeProjectModelConfiguration(
+    cwd,
+    {
+      ...legacy,
+      primary: legacy.primary ? rewrite(legacy.primary) : null,
+      fallbacks: legacy.fallbacks.map(rewrite),
+    },
+    env,
+  );
+  return { previousProviderId: providerId, providerId: replacementId };
+}
+
+export async function inspectModelConfigurationStorage(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ModelConfigurationStorageView> {
+  const file = await resolveModelConfigurationFile(cwd, env);
+  let source: ModelConfigurationStorageView["source"] = "global-registry";
+  try {
+    const raw = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
+    if (!isProjectModelConfigurationV2(raw)) source = "legacy-project";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const registry = await loadProviderRegistry(env);
+  return {
+    source,
+    registryFile: resolveProviderRegistryFile(env),
+    registryRevision: registry.updatedAt === null ? null : registry.revision,
+  };
 }
 
 export async function saveModelPriority(
@@ -184,16 +436,17 @@ export async function saveModelPriority(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ModelConfiguration> {
   const normalizedPriority = unique(priority.map((entry) => modelReference(entry)));
-  return saveModelConfiguration(
-    cwd,
-    {
-      primary: normalizedPriority[0] ?? null,
-      fallbacks: normalizedPriority.slice(1),
-      customProviders: current.customProviders,
-      providerProfiles: current.providerProfiles,
-    },
-    env,
-  );
+  const updatedAt = new Date().toISOString();
+  const saved = parseModelConfiguration({
+    version: 1,
+    primary: normalizedPriority[0] ?? null,
+    fallbacks: normalizedPriority.slice(1),
+    customProviders: current.customProviders,
+    providerProfiles: current.providerProfiles,
+    updatedAt,
+  });
+  await writeProjectModelConfiguration(cwd, saved, env);
+  return saved;
 }
 
 export async function clearModelConfiguration(
@@ -201,6 +454,51 @@ export async function clearModelConfiguration(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   await fs.rm(await resolveModelConfigurationFile(cwd, env), { force: true });
+}
+
+async function writeProjectModelConfiguration(
+  cwd: string,
+  configuration: Pick<ModelConfiguration, "primary" | "fallbacks" | "updatedAt">,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const file = await resolveModelConfigurationFile(cwd, env);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  const routing: ProjectModelConfigurationV2 = {
+    version: 2,
+    primary: configuration.primary,
+    fallbacks: configuration.fallbacks,
+    updatedAt: configuration.updatedAt,
+  };
+  try {
+    await fs.writeFile(temporary, `${JSON.stringify(routing, null, 2)}\n`, { mode: 0o600 });
+    await fs.rename(temporary, file);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
+}
+
+function isProjectModelConfigurationV2(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).version === 2
+  );
+}
+
+function parseProjectModelConfiguration(value: unknown): ProjectModelConfigurationV2 {
+  const record = asRecord(value, "project model configuration");
+  if (record.version !== 2) throw new Error("project model configuration version must be 2");
+  const primary = record.primary === null ? null : modelReference(record.primary);
+  const fallbacks = unique(stringArray(record.fallbacks, "fallbacks").map(modelReference));
+  return {
+    version: 2,
+    primary,
+    fallbacks: primary ? fallbacks.filter((entry) => entry !== primary) : [],
+    updatedAt:
+      record.updatedAt === null ? null : (optionalString(record.updatedAt, "updatedAt") ?? null),
+  };
 }
 
 export function modelPriority(configuration: ModelConfiguration): string[] {

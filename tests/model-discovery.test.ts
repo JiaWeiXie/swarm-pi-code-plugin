@@ -82,6 +82,17 @@ test("endpoint discovery derives a stable protocol-specific provider identifier"
 
   assert.match(result.provider.id, /^custom-127\.0\.0\.1-1234-/);
   assert.equal(result.provider.api, "openai-responses");
+  await assert.rejects(
+    () =>
+      discoverEndpoint({ baseUrl: "http://127.0.0.1:1234", protocol: "openai-responses" }, [], {
+        fetchImpl,
+        reservedProviderIds: [result.provider.id],
+      }),
+    (error: unknown) =>
+      error instanceof EndpointDiscoveryError &&
+      error.code === "unsupported" &&
+      /already configured/.test(error.message),
+  );
 });
 
 test("Anthropic discovery keeps endpoint-reported capabilities and limits", async () => {

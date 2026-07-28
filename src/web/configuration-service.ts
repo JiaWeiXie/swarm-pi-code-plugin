@@ -54,6 +54,8 @@ import { assessWorkspace } from "../git/worktree.js";
 import { normalizeDelegatedTaskSelections } from "../policy/project-policy.js";
 import {
   loadModelConfiguration,
+  prepareProviderRegistryForConfiguration,
+  resolveProviderRegistryMigrationConflict,
   modelPriority,
   parseModelConfiguration,
   saveModelConfiguration,
@@ -65,6 +67,14 @@ import {
   type ProviderProfile,
 } from "../state/model-config.js";
 import {
+  loadProviderRegistry,
+  ProviderRegistryConflictError,
+  ProviderRegistryRevisionConflictError,
+  resolveProviderRegistryFile,
+  resolveProviderRegistryRecoveryFile,
+  withProviderRegistryTransaction,
+} from "../state/provider-registry.js";
+import {
   loadState,
   resolveStateDir,
   resolveStateFile,
@@ -72,6 +82,7 @@ import {
   saveProjectSettings,
   saveExecutionSettings,
   setModelPriority,
+  updateState,
   type SwarmProfile,
   defaultHostActionPolicy,
 } from "../state/state.js";
@@ -133,6 +144,12 @@ export interface ConfigurationView {
   workspace?: WorkspaceAssessment;
   workspaceId?: string;
   configurationRevision?: string;
+  providerRegistryRevision?: string;
+  providerMigrationConflict?: {
+    providerId: string;
+    kind: "custom-provider" | "provider-profile";
+    canImportAsNew: boolean;
+  };
   decisionMode: DecisionMode;
   hostAssistance: HostAssistancePolicy;
   contextBudget: number;
@@ -165,6 +182,7 @@ export class ConfigurationSaveError extends Error {
     readonly code:
       | "configuration-reference-conflict"
       | "configuration-revision-conflict"
+      | "provider-registry-revision-conflict"
       | "model-health-check-failed"
       | "primary-selection-required",
     message: string,
@@ -180,6 +198,7 @@ export class ConfigurationSaveError extends Error {
 
 export interface ConfigurationSubmission {
   baseRevision?: string | undefined;
+  baseProviderRevision?: string | undefined;
   primary: string | null;
   fallbacks: string[];
   customProviders: CustomProviderConfiguration[];
@@ -356,7 +375,9 @@ export async function discoverConfigurationEndpoint(
     all,
     {
       reservedProviderIds: [
-        ...all.map((model) => model.provider),
+        ...all
+          .map((model) => model.provider)
+          .filter((provider) => !existingProvider || provider !== request.provider),
         ...(request.reservedProviderIds ?? []),
       ],
     },
@@ -615,7 +636,10 @@ export async function signOutProvider(
   ) {
     throw new Error(`Unknown provider: ${provider}`);
   }
-  await createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).delete(provider);
+  await withProviderRegistryTransaction(
+    () => createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE).delete(provider),
+    env,
+  );
 }
 
 export async function discoverLocalConfigurationEndpoints(
@@ -636,7 +660,24 @@ export async function loadConfigurationView(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ConfigurationView> {
   const state = await loadState(cwd, { env });
-  const configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
+  let providerMigrationConflict: ConfigurationView["providerMigrationConflict"];
+  let configuration: ModelConfiguration;
+  try {
+    configuration = await prepareProviderRegistryForConfiguration(
+      cwd,
+      state.config.modelPriority,
+      env,
+    );
+  } catch (error) {
+    if (!(error instanceof ProviderRegistryConflictError)) throw error;
+    configuration = await loadModelConfiguration(cwd, state.config.modelPriority, env);
+    providerMigrationConflict = {
+      providerId: error.providerId,
+      kind: error.kind,
+      canImportAsNew: error.kind === "custom-provider",
+    };
+  }
+  const providerRegistry = await loadProviderRegistry(env);
   const catalog = await createModelCatalog(configuration, env);
   const all = catalog.all?.() ?? catalog.available();
   const availableModels = catalog.available();
@@ -728,6 +769,8 @@ export async function loadConfigurationView(
       )
       .digest("hex")
       .slice(0, 24),
+    providerRegistryRevision: providerRegistry.revision,
+    ...(providerMigrationConflict ? { providerMigrationConflict } : {}),
     decisionMode: state.config.decisionMode ?? "balance",
     hostAssistance,
     contextBudget: state.config.contextBudget ?? WORKFLOW_BOUNDS.contextBudget.default,
@@ -736,6 +779,104 @@ export async function loadConfigurationView(
     hostActions: structuredClone(state.config.hostActions ?? defaultHostActionPolicy()),
     workflowBounds: structuredClone(WORKFLOW_BOUNDS),
   };
+}
+
+export async function resolveConfigurationProviderMigration(
+  cwd: string,
+  request: {
+    providerId: string;
+    strategy: "use-global" | "import-new";
+    baseProviderRevision: string;
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ providerId: string; previousProviderId: string }> {
+  return withProviderRegistryTransaction(async () => {
+    const registry = await loadProviderRegistry(env);
+    if (registry.revision !== request.baseProviderRevision) {
+      throw new ConfigurationSaveError(
+        "provider-registry-revision-conflict",
+        "Provider connections changed in another setup session. Reload before resolving the conflict.",
+        { status: 409, path: "providerRegistryRevision" },
+      );
+    }
+    const modelFile = await resolveModelConfigurationFile(cwd, env);
+    const stateFile = await resolveStateFile(cwd, env);
+    const registryFile = resolveProviderRegistryFile(env);
+    const fileSnapshots = await Promise.all([modelFile, stateFile, registryFile].map(snapshotFile));
+    const credentialStore = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+    const credentialSnapshot = await credentialStore.read(request.providerId);
+    try {
+      const result = await resolveProviderRegistryMigrationConflict(
+        cwd,
+        request.providerId,
+        request.strategy,
+        env,
+        {
+          expectedProviderRegistryRevision: request.baseProviderRevision,
+          blockGlobalProfile: request.strategy === "use-global",
+        },
+      );
+      if (request.strategy === "use-global") {
+        await credentialStore.delete(request.providerId);
+      }
+      if (result.providerId !== result.previousProviderId) {
+        const rewrite = (reference: string): string =>
+          reference.startsWith(`${result.previousProviderId}/`)
+            ? `${result.providerId}/${reference.slice(result.previousProviderId.length + 1)}`
+            : reference;
+        await updateState(
+          cwd,
+          (state) => {
+            state.config.modelPriority = state.config.modelPriority.map(rewrite);
+            for (const policy of Object.values(state.config.rolePolicies ?? {})) {
+              if (policy?.models) policy.models = policy.models.map(rewrite);
+            }
+            if (state.config.adaptivePolicy) {
+              state.config.adaptivePolicy.classifierModels =
+                state.config.adaptivePolicy.classifierModels.map(rewrite);
+            }
+          },
+          env,
+        );
+      }
+      return result;
+    } catch (error) {
+      const rollbackErrors: string[] = [];
+      try {
+        if (credentialSnapshot) {
+          await credentialStore.modify(request.providerId, async () => credentialSnapshot);
+        } else {
+          await credentialStore.delete(request.providerId);
+        }
+      } catch (rollbackError) {
+        rollbackErrors.push(
+          `credential:${request.providerId}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        );
+      }
+      for (const snapshot of fileSnapshots) {
+        try {
+          await restoreFile(snapshot);
+        } catch (rollbackError) {
+          rollbackErrors.push(
+            `file:${snapshot.file}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          );
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        await writeRecoveryJournal(cwd, rollbackErrors, env);
+        throw new Error(
+          "Provider migration failed and could not be fully rolled back; run doctor (provider-registry-recovery-required)",
+        );
+      }
+      if (error instanceof ProviderRegistryRevisionConflictError) {
+        throw new ConfigurationSaveError("provider-registry-revision-conflict", error.message, {
+          status: 409,
+          path: "providerRegistryRevision",
+        });
+      }
+      throw error;
+    }
+  }, env);
 }
 
 function browserModel(
@@ -781,6 +922,23 @@ export async function saveConfigurationSubmission(
   options: { credentialVault?: CredentialDraftVault | undefined } = {},
 ): Promise<ConfigurationView> {
   const current = await loadConfigurationView(cwd, env);
+  if (current.providerMigrationConflict) {
+    throw new ConfigurationSaveError(
+      "configuration-reference-conflict",
+      `Resolve the global provider conflict for ${current.providerMigrationConflict.providerId} before saving.`,
+      { status: 409, path: "providerMigrationConflict" },
+    );
+  }
+  if (
+    submission.baseProviderRevision !== undefined &&
+    submission.baseProviderRevision !== current.providerRegistryRevision
+  ) {
+    throw new ConfigurationSaveError(
+      "provider-registry-revision-conflict",
+      "Provider connections changed in another setup session. Reload before saving.",
+      { status: 409, path: "providerRegistryRevision" },
+    );
+  }
   if (
     submission.baseRevision !== undefined &&
     submission.baseRevision !== current.configurationRevision
@@ -948,55 +1106,91 @@ export async function saveConfigurationSubmission(
     if (refreshed) credential.credential = refreshed;
   }
 
-  const modelFile = await resolveModelConfigurationFile(cwd, env);
-  const stateFile = await resolveStateFile(cwd, env);
-  const fileSnapshots = await Promise.all([snapshotFile(modelFile), snapshotFile(stateFile)]);
-  const credentialSnapshots = await Promise.all(
-    credentials.map(async (credential) => ({
-      provider: credential.provider,
-      value: await persistentCredentials.read(credential.provider),
-    })),
-  );
-  try {
-    for (const credential of credentials) {
-      await persistentCredentials.modify(credential.provider, async () => credential.credential);
-    }
-    const saved = await saveModelConfiguration(cwd, candidate, env);
-    await setModelPriority(cwd, modelPriority(saved), env);
-    if (profile) await saveProjectSettings(cwd, profile, sandboxMode, execution, env);
-    else await saveExecutionSettings(cwd, sandboxMode, execution, env);
-  } catch (error) {
-    const rollbackErrors: string[] = [];
-    for (const snapshot of credentialSnapshots) {
-      try {
-        if (snapshot.value) {
-          await persistentCredentials.modify(snapshot.provider, async () => snapshot.value);
-        } else {
-          await persistentCredentials.delete(snapshot.provider);
-        }
-      } catch (rollbackError) {
-        rollbackErrors.push(
-          `credential:${snapshot.provider}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-        );
-      }
-    }
-    for (const snapshot of fileSnapshots) {
-      try {
-        await restoreFile(snapshot);
-      } catch (rollbackError) {
-        rollbackErrors.push(
-          `file:${snapshot.file}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-        );
-      }
-    }
-    if (rollbackErrors.length > 0) {
-      await writeRecoveryJournal(cwd, rollbackErrors, env);
-      throw new Error(
-        "Configuration failed and could not be fully rolled back; run doctor (configuration-recovery-required)",
+  await withProviderRegistryTransaction(async () => {
+    const latestRegistry = await loadProviderRegistry(env);
+    if (latestRegistry.revision !== current.providerRegistryRevision) {
+      throw new ConfigurationSaveError(
+        "provider-registry-revision-conflict",
+        "Provider connections changed in another setup session. Reload before saving.",
+        { status: 409, path: "providerRegistryRevision" },
       );
     }
-    throw error;
-  }
+    const modelFile = await resolveModelConfigurationFile(cwd, env);
+    const stateFile = await resolveStateFile(cwd, env);
+    const fileSnapshots = await Promise.all([snapshotFile(modelFile), snapshotFile(stateFile)]);
+    const credentialSnapshots = await Promise.all(
+      [
+        ...new Set([
+          ...credentials.map((credential) => credential.provider),
+          ...removedProviderIds,
+        ]),
+      ].map(async (provider) => ({
+        provider,
+        value: await persistentCredentials.read(provider),
+      })),
+    );
+    const registryFile = resolveProviderRegistryFile(env);
+    fileSnapshots.push(await snapshotFile(registryFile));
+    try {
+      for (const credential of credentials) {
+        await persistentCredentials.modify(credential.provider, async () => credential.credential);
+      }
+      for (const provider of removedProviderIds) {
+        await persistentCredentials.delete(provider);
+      }
+      const saved = await saveModelConfiguration(cwd, candidate, env, {
+        expectedProviderRegistryRevision: current.providerRegistryRevision,
+      });
+      await setModelPriority(cwd, modelPriority(saved), env);
+      if (profile) await saveProjectSettings(cwd, profile, sandboxMode, execution, env);
+      else await saveExecutionSettings(cwd, sandboxMode, execution, env);
+      await updateState(
+        cwd,
+        (state) => {
+          state.config.availableModels = [...available];
+          state.config.availableModelsCheckedAt = new Date().toISOString();
+        },
+        env,
+      );
+    } catch (error) {
+      const rollbackErrors: string[] = [];
+      for (const snapshot of credentialSnapshots) {
+        try {
+          if (snapshot.value) {
+            await persistentCredentials.modify(snapshot.provider, async () => snapshot.value);
+          } else {
+            await persistentCredentials.delete(snapshot.provider);
+          }
+        } catch (rollbackError) {
+          rollbackErrors.push(
+            `credential:${snapshot.provider}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          );
+        }
+      }
+      for (const snapshot of fileSnapshots) {
+        try {
+          await restoreFile(snapshot);
+        } catch (rollbackError) {
+          rollbackErrors.push(
+            `file:${snapshot.file}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          );
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        await writeRecoveryJournal(cwd, rollbackErrors, env);
+        throw new Error(
+          "Configuration failed and could not be fully rolled back; run doctor (configuration-recovery-required)",
+        );
+      }
+      if (error instanceof ProviderRegistryRevisionConflictError) {
+        throw new ConfigurationSaveError("provider-registry-revision-conflict", error.message, {
+          status: 409,
+          path: "providerRegistryRevision",
+        });
+      }
+      throw error;
+    }
+  }, env);
   for (const credential of credentials) options.credentialVault?.remove(credential.draftId);
   const view = await loadConfigurationView(cwd, env);
   return {
@@ -1041,19 +1235,21 @@ async function writeRecoveryJournal(
 ): Promise<void> {
   const directory = path.join(await resolveStateDir(cwd, env), "recovery");
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  await fs.writeFile(
-    path.join(directory, "configuration.json"),
-    `${JSON.stringify(
-      {
-        code: "configuration-recovery-required",
-        createdAt: new Date().toISOString(),
-        errors: errors.map((error) => error.replace(/(?:sk-|key=)[^\s:]+/gi, "[redacted]")),
-      },
-      null,
-      2,
-    )}\n`,
-    { mode: 0o600 },
-  );
+  const journal = `${JSON.stringify(
+    {
+      code: "provider-registry-recovery-required",
+      createdAt: new Date().toISOString(),
+      errors: errors.map((error) => error.replace(/(?:sk-|key=)[^\s:]+/gi, "[redacted]")),
+    },
+    null,
+    2,
+  )}\n`;
+  const globalFile = resolveProviderRegistryRecoveryFile(env);
+  await fs.mkdir(path.dirname(globalFile), { recursive: true, mode: 0o700 });
+  await Promise.all([
+    fs.writeFile(path.join(directory, "configuration.json"), journal, { mode: 0o600 }),
+    fs.writeFile(globalFile, journal, { mode: 0o600 }),
+  ]);
 }
 
 export async function saveProjectProfileSubmission(

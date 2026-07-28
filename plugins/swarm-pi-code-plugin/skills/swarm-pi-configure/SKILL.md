@@ -17,7 +17,14 @@ Route arguments before opening the browser:
 2. Start `$RUNNER configure --host "$HOST"`, adding `--continuation <id>` only when recovering a saved request. If the browser can load but save reports `EPERM` under `.git/swarm-pi-code-plugin/`, follow the write-boundary recovery exactly: preserve the draft, relaunch with Host approval outside the outer sandbox, and give the user the new loopback URL. Do not change Pi Sandbox mode or edit stored files to work around it.
 3. Keep setup active through provider fields, protocol selection, subscription OAuth, models, roles, Sandbox and approval policy (including the five Sandbox modes, among them the opt-in `full-access` and `autopilot` modes), Decision Mode, Host Assistance, Discovery gates, context budget, Advisor, doctrine metadata, Host Actions, workspace, and review. Never request an API key or OAuth code in the Host conversation.
 4. Treat ChatGPT Plus/Pro as the separate `openai-codex` subscription connection. Treat model discovery and **Verify API** as distinct; a loaded model list is not proof of verification.
-5. After save, run `$RUNNER doctor --smoke-test --json`, `$RUNNER roles list --json`, and `$RUNNER status --json`. Report readiness, `configurationStorage.directory`, `modelConfigurationFile`, `stateFile`, and migration status; resume a continuation once.
+5. Treat custom provider definitions and profiles as user-global. Final Save
+   commits their diff to the plugin-owned global registry together with project
+   routing; deleting a custom provider also deletes its CredentialStore entry.
+   Conflict resolution is revision-guarded: using the global definition revokes
+   the provider-ID credential, while canonical import never copies credentials.
+   Never infer the active provider from `state.config.availableModels` or Job
+   history.
+6. After save, run `$RUNNER doctor --smoke-test --json`, `$RUNNER roles list --json`, and `$RUNNER status --json`. Report readiness, `providerState`, `configurationStorage.directory`, `modelConfigurationFile`, `stateFile`, and migration status; resume a continuation once.
 
 The browser restores only non-sensitive drafts. Secrets enter the setup server's in-memory vault and reach Pi AuthStorage only after verification; `model.json` and runtime state remain outside the checked-out worktree.
 

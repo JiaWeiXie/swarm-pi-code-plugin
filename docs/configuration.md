@@ -239,12 +239,16 @@ as `modelsEndpoint` and must use the same origin as the generation root.
 
 ## Configuration Ownership
 
-Git workspaces store shared state in the Git common directory. Non-Git folders
-use a user-state namespace keyed by canonical workspace path. The relevant
+Git workspaces store routing and durable Job state in the Git common directory.
+Non-Git folders use a user-state namespace keyed by canonical workspace path.
+Provider connections live in a plugin-owned user-global registry. The relevant
 files are:
 
 ```text
-swarm-pi-code-plugin/
+<user-state>/swarm-pi-code-plugin/
+└── providers.json
+
+<git-common-dir>/swarm-pi-code-plugin/
 ├── model.json
 ├── state.json
 └── jobs/<job-id>/request.json
@@ -269,35 +273,20 @@ the operation without merging, overwriting, or deleting either side. An
 explicit `SWARM_PI_CODE_PLUGIN_DATA_DIR` is an ownership override and disables
 this migration.
 
-`model.json.version` remains `1`. Additive optional fields preserve old files:
+New project routing uses `model.json.version: 2`; provider definitions and
+profiles come from the global registry:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "primary": "openai/gpt-5.4",
   "fallbacks": ["anthropic/claude-sonnet-4-5"],
-  "customProviders": [],
-  "providerProfiles": [
-    {
-      "id": "openai",
-      "provider": "openai",
-      "name": "OpenAI",
-      "connectionKind": "builtin",
-      "auth": { "method": "api-key", "secretRef": "auth:openai" },
-      "protocol": "openai-responses",
-      "runtimeApi": "openai-responses",
-      "readiness": "verified",
-      "settings": {},
-      "headers": [],
-      "verifiedModel": "openai/gpt-5.4",
-      "verifiedAt": "2026-07-11T00:00:00.000Z"
-    }
-  ],
   "updatedAt": "2026-07-11T00:00:00.000Z"
 }
 ```
 
-Profiles contain only non-secret settings, controlled literal headers, and
+`providers.json.version: 1` carries a revision, `customProviders`,
+`providerProfiles`, and `updatedAt`. Profiles contain only non-secret settings, controlled literal headers, and
 opaque `secretRef` values. Custom definitions contain protocol roots, model
 metadata, structured auth policy, and optional controlled headers. They reject
 embedded API keys, OAuth tokens, raw header JSON, command-backed values, and
@@ -321,7 +310,8 @@ Secrets never enter:
 - stdout, worker logs, URLs, stack traces, or recovery journals.
 
 Blank secret fields retain an existing credential. **Replace credential**,
-**Sign out**, and **Remove from project** are distinct operations.
+built-in **Sign out**, and **Delete globally** are distinct operations. Global
+custom-provider deletion removes the provider credential during final Save.
 
 ChatGPT Plus/Pro is the `openai-codex` subscription connection. It is not an
 OpenAI API-key option. The browser drives Pi's browser or device-code OAuth with
@@ -387,31 +377,44 @@ Save builds a candidate Pi environment from the proposed profiles and an
 in-memory clone of CredentialStore. It reconciles references caused by an
 explicit provider/model deletion, validates newly selected or changed routes,
 runs their required smoke tests, then commits credentials, `model.json`, and
-`state.json`. Unchanged unavailable references return typed degraded-health
+`state.json` under the user-global provider transaction lock. Registry,
+credential, project routing, and project-state locks are acquired in that fixed
+order. Unchanged unavailable references return typed degraded-health
 issues instead of making structurally valid settings unparsable. A failure
 restores prior values. An incomplete rollback writes a redacted recovery journal
 and returns `configuration-recovery-required`.
 
-Removing a provider removes its project connection and all affected model
-references, but does not delete its credential. The first surviving fallback is
+Removing a custom provider deletes its global definition and credential and
+reconciles all affected references in the current project. The first surviving fallback is
 promoted when the primary is removed; without one, save requires an explicit
 replacement primary. Empty role chains inherit the project chain, and an emptied
 Adaptive classifier uses the reconciled primary. Saves carry a configuration
-revision so an older browser tab must reload instead of reintroducing a deleted
-connection.
+revision and provider-registry revision so an older browser tab must reload
+instead of reintroducing a deleted connection. Other workspaces are not scanned
+or rewritten; a stale route fails closed with `provider-missing-global`.
+Role and active Adaptive-classifier routes participate in that check without
+causing `status` to probe their endpoints.
 
-New durable jobs use `requestVersion: 5`. `request.json` contains the complete
+Conflict resolution also carries the provider-registry revision and uses the
+same rollback boundary. **Use global definition** imports every unrelated
+legacy provider, revokes the conflicted provider ID's credential, and marks its
+global profile blocked until it is verified again. **Import with a new ID**
+rekeys provider/profile secret references but does not copy credential data.
+
+New durable jobs use `requestVersion: 6`. `request.json` contains the complete
 non-secret `ModelConfiguration` snapshot, its SHA-256 integrity hash, and the
-version-3 enforced project-policy snapshot, Decision Mode, Host Assistance, and
+derived global registry revision plus the version-3 enforced project-policy snapshot, Decision Mode, Host Assistance, and
 Advisor controls. A background worker uses those
 submitted snapshots even if the settings page changes later, while resolving
 current credentials at execution time. Credential revocation therefore fails
 explicitly instead of falling back to unauthenticated execution.
 
-Requests v1–v4 remain readable for recovery with their legacy execution
+Requests v1–v5 remain readable for recovery with their legacy execution
 semantics. Version 4 preserves its submitted v2 enforced-policy snapshot.
 Version 5 adds the v3 Decision Mode, Host Assistance, Advisor, doctrine, and
-context-budget controls. Host Action policy is checked from workspace
+context-budget controls; version 6 derives the registry revision from the
+embedded provider definitions and integrity-binds both values.
+Host Action policy is checked from workspace
 configuration when a recommendation is explicitly started; the child keeps
 the parent's snapshotted effective project policy and receives a new bounded
 action-family lease.
@@ -443,8 +446,8 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
   Strict, and normalization never selects `full-access`.
 - Missing Host-first policy fields remain User-only until a user saves the
   updated configuration.
-- Legacy jobs with request versions 1–4 retain their original semantics and
-  are not retroactively given v5 controls. Version 3 jobs continue to use
+- Legacy jobs with request versions 1–5 retain their original semantics and
+  are not retroactively given v6 provenance. Version 3 jobs continue to use
   their submitted provider snapshot; version 4 jobs additionally use their
   submitted project-policy snapshot.
 - `init --set-model-priority[-file]`, `models --json`, `models --refresh --json`,

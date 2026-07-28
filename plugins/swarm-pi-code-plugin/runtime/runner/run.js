@@ -21,8 +21,9 @@ import { assertTaskAdmitted, assertPathAllowed, assertChangedPathsAllowed, bindP
 import { exportJobAudit } from "../audit/export.js";
 import { readTelemetryReport } from "../telemetry/report.js";
 import { classifyProviderModel } from "../telemetry/privacy.js";
-import { acknowledgeJob, attachJobProcess, cancelJob, finishJob, getJob, heartbeatJob, JOB_HEARTBEAT_INTERVAL_MS, listJobs, markJobRunning, modelConfigurationSnapshotHash, readJobPrompt, readJobRequest, updateJobExecutionWorkspace, updateJobProgress, requestJobApproval, startJob, waitForApprovalResolution, createJobLeaseProvider, appendPolicyEvent, waitForJob, approveJob, denyJobApproval, listJobApprovals, recordJobApprovalAdjudication, isTerminalJobStatus, requestJobHostAssistance, waitForHostAssistanceResolution, listJobHostRequests, resolveJobHostRequest, declineJobHostRequest, } from "../state/jobs.js";
-import { clearModelConfiguration, loadModelConfiguration, modelPriority, parseModelConfiguration, saveModelPriority, } from "../state/model-config.js";
+import { acknowledgeJob, attachJobProcess, cancelJob, finishJob, getJob, heartbeatJob, JOB_HEARTBEAT_INTERVAL_MS, listJobs, markJobRunning, modelConfigurationSnapshotHash, providerConfigurationSnapshotHash, readJobPrompt, readJobRequest, updateJobExecutionWorkspace, updateJobProgress, requestJobApproval, startJob, waitForApprovalResolution, createJobLeaseProvider, appendPolicyEvent, waitForJob, approveJob, denyJobApproval, listJobApprovals, recordJobApprovalAdjudication, isTerminalJobStatus, requestJobHostAssistance, waitForHostAssistanceResolution, listJobHostRequests, resolveJobHostRequest, declineJobHostRequest, } from "../state/jobs.js";
+import { clearModelConfiguration, loadModelConfiguration, inspectModelConfigurationStorage, modelPriority, parseModelConfiguration, saveModelPriority, } from "../state/model-config.js";
+import { providerRegistryRevisionFor, resolveProviderRegistryRecoveryFile, } from "../state/provider-registry.js";
 import { clearConfiguration, resolveStateDir, loadState, saveProfile, setAvailableModels, setModelPriority, updateState, prepareConfigurationStorage, } from "../state/state.js";
 import { pruneJobs } from "../state/prune.js";
 import { createContinuation, consumeContinuation, readContinuation, } from "../onboarding/continuations.js";
@@ -118,8 +119,13 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         return modelInventory(activeDependencies.catalog, modelConfiguration, args);
     }
     if (args.command === "providers") {
+        const selectedProviders = new Set(modelPriority(modelConfiguration).map((reference) => reference.slice(0, reference.indexOf("/"))));
         return {
-            providers: describeProviders(activeDependencies.catalog, modelConfiguration),
+            providers: describeProviders(activeDependencies.catalog, modelConfiguration).map((provider) => ({
+                ...provider,
+                scope: "global",
+                selectedByProject: selectedProviders.has(provider.id),
+            })),
             registryError: activeDependencies.catalog.error?.() ?? null,
         };
     }
@@ -786,7 +792,7 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDis
         const snapshot = await getJob(cwd, request.id);
         if (snapshot.job.cancelRequestedAt)
             controller.abort();
-        const state = request.requestVersion === 4 || request.requestVersion === 5
+        const state = request.requestVersion === 4 || request.requestVersion === 5 || request.requestVersion === 6
             ? undefined
             : await loadState(cwd);
         const modelConfiguration = request.modelConfiguration
@@ -794,15 +800,23 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDis
             : await loadModelConfiguration(cwd, state.config.modelPriority);
         if (request.requestVersion === 3 ||
             request.requestVersion === 4 ||
-            request.requestVersion === 5) {
+            request.requestVersion === 5 ||
+            request.requestVersion === 6) {
             if (!request.modelConfiguration || !request.providerSnapshotHash) {
                 throw new Error("Background job is missing its provider configuration snapshot");
             }
-            if (modelConfigurationSnapshotHash(modelConfiguration) !== request.providerSnapshotHash) {
+            const providerSnapshotValid = request.requestVersion === 6
+                ? typeof request.providerRegistryRevision === "string" &&
+                    providerRegistryRevisionFor(modelConfiguration.customProviders, modelConfiguration.providerProfiles) === request.providerRegistryRevision &&
+                    providerConfigurationSnapshotHash(modelConfiguration, request.providerRegistryRevision) === request.providerSnapshotHash
+                : modelConfigurationSnapshotHash(modelConfiguration) === request.providerSnapshotHash;
+            if (!providerSnapshotValid) {
                 throw new Error("Background job provider configuration snapshot failed integrity validation");
             }
         }
-        if (request.requestVersion === 4 || request.requestVersion === 5) {
+        if (request.requestVersion === 4 ||
+            request.requestVersion === 5 ||
+            request.requestVersion === 6) {
             const expectedVersion = request.requestVersion === 4 ? 2 : 3;
             if (!request.policySnapshot || request.policySnapshot.version !== expectedVersion) {
                 throw new ProjectPolicyError({
@@ -833,10 +847,15 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDis
             stateCwd: cwd,
             host: request.host,
             rawPrompt: prompt,
-            ...(request.requestVersion !== 4 && request.requestVersion !== 5 && state?.config.profile
+            ...(request.requestVersion !== 4 &&
+                request.requestVersion !== 5 &&
+                request.requestVersion !== 6 &&
+                state?.config.profile
                 ? { profile: state.config.profile }
                 : {}),
-            ...(request.requestVersion === 4 || request.requestVersion === 5
+            ...(request.requestVersion === 4 ||
+                request.requestVersion === 5 ||
+                request.requestVersion === 6
                 ? request.projectGoal !== undefined
                     ? { projectGoal: request.projectGoal }
                     : {}
@@ -1688,6 +1707,59 @@ async function handleReadiness(args, cwd, dependencies, configurationStorage) {
         ...report,
         configurationStorage,
     };
+    const providerStorage = await inspectModelConfigurationStorage(cwd);
+    const activeReferences = new Set([
+        ...modelPriority(configuration),
+        ...Object.values(state.config.rolePolicies ?? {}).flatMap((policy) => policy?.models ?? []),
+        ...(state.config.sandboxMode === "adaptive"
+            ? (state.config.adaptivePolicy?.classifierModels ?? [])
+            : []),
+    ]);
+    const activeProviders = [
+        ...new Set([...activeReferences].map((reference) => reference.slice(0, reference.indexOf("/")))),
+    ].sort();
+    const configuredProviders = [
+        ...new Set([
+            ...configuration.customProviders.map((provider) => provider.id),
+            ...configuration.providerProfiles.map((profile) => profile.provider),
+            ...activeProviders,
+        ]),
+    ].sort();
+    report = {
+        ...report,
+        providerState: {
+            ...providerStorage,
+            activeProviders,
+            configuredProviders,
+            historicalSnapshotsExcluded: true,
+            ignoredCachedModelReferences: state.config.availableModels.filter((reference) => !available.some((model) => modelId(model) === reference)).length,
+        },
+    };
+    const catalogProviders = new Set((activeDependencies.catalog.all?.() ?? available).map((model) => model.provider));
+    const missingProviders = [
+        ...new Set([...activeReferences]
+            .map((reference) => reference.slice(0, reference.indexOf("/")))
+            .filter((provider) => !catalogProviders.has(provider))),
+    ];
+    if (missingProviders.length > 0) {
+        report = {
+            ...report,
+            status: "blocked",
+            capabilities: { readonly: "blocked", mutation: "blocked", delivery: "blocked" },
+            issues: [
+                ...report.issues,
+                {
+                    code: "provider-missing-global",
+                    stage: "connections",
+                    severity: "blocking",
+                    recoverable: true,
+                    message: `Project routing references provider connections that are missing from the global registry: ${missingProviders.join(", ")}.`,
+                    preserved: ["project routing", "historical Job snapshots"],
+                    nextActions: [{ action: "configure", label: "Choose replacement providers" }],
+                },
+            ],
+        };
+    }
     if (configurationStorage.migrationStatus !== "none") {
         const blocked = configurationStorage.migrationStatus === "blocked";
         const conflict = configurationStorage.migrationStatus === "conflict";
@@ -1737,6 +1809,26 @@ async function handleReadiness(args, cwd, dependencies, configurationStorage) {
                     message: "A previous configuration save could not be fully rolled back.",
                     preserved: ["recovery journal", "existing credentials and configuration"],
                     nextActions: [{ action: "doctor", label: "Inspect configuration recovery" }],
+                },
+            ],
+        };
+    }
+    const providerRecoveryJournal = resolveProviderRegistryRecoveryFile();
+    if (await fs.stat(providerRecoveryJournal).catch(() => undefined)) {
+        report = {
+            ...report,
+            status: "blocked",
+            capabilities: { readonly: "blocked", mutation: "blocked", delivery: "blocked" },
+            issues: [
+                ...report.issues,
+                {
+                    code: "provider-registry-recovery-required",
+                    stage: "recovery",
+                    severity: "blocking",
+                    recoverable: true,
+                    message: "A global provider registry transaction could not be fully rolled back.",
+                    preserved: ["global provider recovery journal", "existing project routing"],
+                    nextActions: [{ action: "doctor", label: "Inspect provider recovery" }],
                 },
             ],
         };

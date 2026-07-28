@@ -199,7 +199,10 @@ Git 初始化是 Host 的前置流程，不是 Web UI 的設定項目。Configur
 
 沒有偵測到可用服務時，連線清單會維持空白。自訂 endpoint 必須先選擇 API protocol，再載入模型。Provider ID 維持內部管理；endpoint 與 Pi catalog 都無法證實的模型限制會保持自動判斷。
 
-儲存會區分設定結構與 model 的即時健康狀態。既有且未變更的 route 若暫時不可用，會保留並標示為 degraded，因此無關的專案設定仍可儲存；新增或變更的 route 則必須通過可用性與必要驗證。移除 provider 或 custom model 前會顯示對路由的影響，並清除受影響的 fallback／role／classifier 引用；有既有 fallback 時會提升它，但不會靜默刪除已儲存 credential。若沒有可存活的 fallback，必須先選擇替代的 primary。
+Provider 定義與非秘密 connection profile 會儲存在 Plugin 自己管理的 user-global `providers.json`；專案的 `model.json` 只保留 primary／fallback routing。Plugin 不會接管 Pi 的 `~/.pi/agent/models.json`。開啟 Configuration 時會把 legacy 專案 provider 遷移到全域 registry；`status` 與 `doctor` 仍維持唯讀。若 legacy ID 與全域定義衝突，Web 會要求選擇使用全域版本，或以新的 canonical ID 匯入。
+使用全域版本會撤銷該 provider ID 既有的 credential 並要求重新驗證；以 canonical ID 匯入則不會複製 credential。
+
+儲存會區分設定結構與 model 的即時健康狀態。既有且未變更的 route 若暫時不可用，會保留並標示為 degraded，因此無關的專案設定仍可儲存；新增或變更的 route 則必須通過可用性與必要驗證。移除 provider 或 custom model 前會顯示對路由的影響，並清除受影響的 fallback／role／classifier 引用；有既有 fallback 時會提升它。Custom provider 與 credential 只會在最後按下 Save 時一併全域刪除；歷史 Job snapshot 維持不可變，且不會參與目前 provider readiness。若沒有可存活的 fallback，必須先選擇替代的 primary。
 
 ### 模型供應商連線
 
@@ -216,7 +219,7 @@ Radius 也使用相同的有限時間 OAuth 流程，並支援 API Key；它的 
 
 自訂 endpoint 可選 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages，而且一個連線只使用一種協定。載入模型與 **Verify API** 是兩個不同動作；`/models` 成功不代表 generation、tools 或 reasoning 可以執行。沒有 model-list endpoint 時，可以手動輸入模型 ID，但不會因此標示為已驗證。
 
-建立連線草稿後，編輯設定、替換憑證、驗證 API、登出與從專案移除會維持為不同操作。秘密欄位留白代表保留既有憑證；瀏覽器不會讀回已儲存的秘密。憑證會留在 user-scoped、Pi 相容的 `CredentialStore`，不會進入 project state。
+建立連線草稿後，編輯設定、替換憑證、驗證 API、built-in provider 登出與 custom provider 全域刪除會維持為不同操作。秘密欄位留白代表保留既有憑證；瀏覽器不會讀回已儲存的秘密。憑證會留在 user-scoped、Pi 相容的 `CredentialStore`，不會進入 project state。
 
 ### 重新設定
 

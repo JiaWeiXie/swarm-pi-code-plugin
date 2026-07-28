@@ -20,6 +20,7 @@ import {
   discoverConfigurationEndpoint,
   discoverLocalConfigurationEndpoints,
   loadConfigurationView,
+  resolveConfigurationProviderMigration,
   saveConfigurationSubmission,
   saveProjectProfileSubmission,
   signOutProvider,
@@ -157,6 +158,35 @@ export async function startConfigurationServer(
           issues: view.issues ?? [],
           health: view.health ?? { status: "ready", checkedAt: new Date().toISOString() },
         });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/providers/migration-resolve") {
+        assertJsonRequest(request, origin);
+        const body = (await readJsonBody(request)) as {
+          providerId?: unknown;
+          strategy?: unknown;
+          baseProviderRevision?: unknown;
+        };
+        if (
+          typeof body.providerId !== "string" ||
+          typeof body.baseProviderRevision !== "string" ||
+          (body.strategy !== "use-global" && body.strategy !== "import-new")
+        ) {
+          throw new HttpError(400, "Invalid provider migration resolution");
+        }
+        json(
+          response,
+          200,
+          await resolveConfigurationProviderMigration(
+            cwd,
+            {
+              providerId: body.providerId,
+              strategy: body.strategy,
+              baseProviderRevision: body.baseProviderRevision,
+            },
+            env,
+          ),
+        );
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/save-profile") {

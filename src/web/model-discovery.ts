@@ -137,6 +137,7 @@ export async function discoverEndpoint(
     ? probeAnthropic(context)
     : probeOpenAi(context));
   const id = stableCustomProviderId(normalizedRoot, request.protocol);
+  assertProviderIdAvailable(id, options.reservedProviderIds);
   const secretHeader =
     authMethod === "custom-header" && request.headerName
       ? [{ name: request.headerName, secretRef: providerHeaderSecretRef(id, request.headerName) }]
@@ -203,6 +204,7 @@ async function discoverLocalEndpoint(
       const result = await probe(context);
       const root = normalizeProtocolRoot(result.baseUrl, "openai-chat-completions");
       const id = stableCustomProviderId(root, "openai-chat-completions");
+      assertProviderIdAvailable(id, options.reservedProviderIds);
       return {
         adapter:
           result.adapter === "lm-studio" || result.adapter === "ollama"
@@ -225,6 +227,17 @@ async function discoverLocalEndpoint(
     }
   }
   throw bestDiscoveryError(errors);
+}
+
+function assertProviderIdAvailable(
+  providerId: string,
+  reservedProviderIds: Iterable<string> | undefined,
+): void {
+  if (!reservedProviderIds || !new Set(reservedProviderIds).has(providerId)) return;
+  throw new EndpointDiscoveryError(
+    "unsupported",
+    `Provider identifier ${providerId} is already configured`,
+  );
 }
 
 async function probeLmStudio(context: ProbeContext): Promise<ProbeResult> {

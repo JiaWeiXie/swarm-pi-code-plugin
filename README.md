@@ -270,13 +270,25 @@ Custom endpoints select their API protocol before model discovery. Provider
 IDs remain internal, and model limits stay automatic when the endpoint and Pi
 catalog do not establish them.
 
+Provider definitions and non-secret connection profiles are user-global and
+stored in the plugin-owned `providers.json`; project `model.json` files contain
+only primary/fallback routing. The plugin never takes ownership of Pi's
+`~/.pi/agent/models.json`. Opening Configuration migrates legacy project
+providers into the global registry, while `status` and `doctor` remain
+read-only. A conflicting legacy ID must be resolved in the browser by using the
+global definition or importing the legacy endpoint under a new canonical ID.
+Using the global definition revokes that provider ID's existing credential and
+requires verification; canonical import never copies the credential.
+
 Saving distinguishes configuration structure from live model health. An unchanged
 saved route that is temporarily unavailable is retained and reported as degraded,
 so unrelated project settings can still save; a new or changed route must pass
 availability and required verification. Removing a provider or custom model shows
 its routing impact, removes affected fallback/role/classifier references, promotes
-an existing fallback when possible, and never silently deletes the stored
-credential. A replacement primary is required when no fallback survives.
+an existing fallback when possible, and deletes a custom provider plus its
+credential globally only at final Save. A replacement primary is required when
+no fallback survives. Historical Job snapshots remain immutable and are excluded
+from current provider readiness.
 
 ### Provider connections
 
@@ -307,7 +319,7 @@ reasoning work. If a server has no model-list endpoint, model IDs can be entered
 manually without being marked verified.
 
 After a connection is staged, configuration, credential replacement, API
-verification, sign-out, and project removal remain separate actions. Leaving a
+verification, built-in sign-out, and global custom-provider deletion remain separate actions. Leaving a
 secret field blank keeps the saved credential; no existing secret is returned
 to the browser.
 

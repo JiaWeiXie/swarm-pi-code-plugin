@@ -44,6 +44,7 @@ import {
 } from "./state.js";
 import { canonicalStateFile, stateObservers, type StateObserverSource } from "./state-observer.js";
 import type { ModelConfiguration } from "./model-config.js";
+import { providerRegistryRevisionFor } from "./provider-registry.js";
 import { appendTelemetryAttempts } from "../telemetry/store.js";
 
 export const JOB_HEARTBEAT_INTERVAL_MS = 15_000;
@@ -79,7 +80,7 @@ export interface JobStart {
 }
 
 export interface JobRequest {
-  requestVersion?: 1 | 2 | 3 | 4 | 5;
+  requestVersion?: 1 | 2 | 3 | 4 | 5 | 6;
   id: string;
   host: Host;
   kind: TaskKind;
@@ -107,6 +108,7 @@ export interface JobRequest {
   orchestrationProfile?: "independent" | "shared-recon";
   modelConfiguration?: ModelConfiguration;
   providerSnapshotHash?: string;
+  providerRegistryRevision?: string;
   workerToken: string;
   createdAt: string;
 }
@@ -159,8 +161,11 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
   const createdAt = new Date().toISOString();
   const sandboxMode = input.sandboxMode ?? "strict";
   const directory = await jobDirectory(cwd, id);
-  const providerSnapshotHash = input.modelConfiguration
-    ? modelConfigurationSnapshotHash(input.modelConfiguration)
+  const providerRegistryRevision = input.modelConfiguration
+    ? providerRegistryRevisionFor(
+        input.modelConfiguration.customProviders,
+        input.modelConfiguration.providerProfiles,
+      )
     : undefined;
   if (
     (input.policySnapshot?.version === 2 || input.policySnapshot?.version === 3) &&
@@ -170,15 +175,21 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       `Policy snapshot version ${input.policySnapshot.version} requires modelConfiguration`,
     );
   }
+  const requestVersion =
+    input.policySnapshot?.version === 3
+      ? 6
+      : input.policySnapshot?.version === 2
+        ? 4
+        : input.modelConfiguration
+          ? 3
+          : 2;
+  const providerSnapshotHash = input.modelConfiguration
+    ? requestVersion === 6
+      ? providerConfigurationSnapshotHash(input.modelConfiguration, providerRegistryRevision!)
+      : modelConfigurationSnapshotHash(input.modelConfiguration)
+    : undefined;
   const request: JobRequest = {
-    requestVersion:
-      input.policySnapshot?.version === 3
-        ? 5
-        : input.policySnapshot?.version === 2
-          ? 4
-          : input.modelConfiguration
-            ? 3
-            : 2,
+    requestVersion,
     id,
     host: input.host,
     kind: input.kind,
@@ -212,6 +223,7 @@ export async function startJob(cwd: string, input: JobStart): Promise<JobHandle>
       ? { modelConfiguration: structuredClone(input.modelConfiguration) }
       : {}),
     ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
+    ...(providerRegistryRevision ? { providerRegistryRevision } : {}),
     workerToken,
     createdAt,
   };
@@ -261,15 +273,26 @@ export function modelConfigurationSnapshotHash(configuration: ModelConfiguration
   return createHash("sha256").update(canonicalJson(configuration)).digest("hex");
 }
 
+export function providerConfigurationSnapshotHash(
+  configuration: ModelConfiguration,
+  providerRegistryRevision: string,
+): string {
+  return createHash("sha256")
+    .update(canonicalJson({ configuration, providerRegistryRevision }))
+    .digest("hex");
+}
+
 function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (Array.isArray(value))
+    return `[${value.map((entry) => (entry === undefined ? "null" : canonicalJson(entry))).join(",")}]`;
   if (typeof value === "object" && value !== null) {
     return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, nested]) => nested !== undefined)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
       .join(",")}}`;
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? "null";
 }
 
 export async function attachJobProcess(

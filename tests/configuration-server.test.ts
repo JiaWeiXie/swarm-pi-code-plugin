@@ -15,6 +15,7 @@ import { createFileCredentialStore } from "../src/pi/credentials.js";
 import { loadState, resolveStateDir, resolveStateFile, updateState } from "../src/state/state.js";
 import {
   defaultModelConfiguration,
+  loadModelConfiguration,
   resolveModelConfigurationFile,
   saveModelConfiguration,
 } from "../src/state/model-config.js";
@@ -24,9 +25,11 @@ import {
   loadConfigurationView,
   saveConfigurationSubmission,
   saveProjectProfileSubmission,
+  resolveConfigurationProviderMigration,
   signOutProvider,
   verifyProviderConnection,
 } from "../src/web/configuration-service.js";
+import { loadProviderRegistry, saveProviderRegistry } from "../src/state/provider-registry.js";
 import { startConfigurationServer } from "../src/web/configuration-server.js";
 import { renderConfigurationPage } from "../src/web/ui.js";
 import { appendTelemetryAttempts } from "../src/telemetry/store.js";
@@ -39,6 +42,7 @@ function fixture() {
     ...process.env,
     SWARM_PI_CODE_PLUGIN_AUTH_FILE: path.join(privateDir, "auth.json"),
     SWARM_PI_CODE_PLUGIN_MODELS_FILE: path.join(privateDir, "models.json"),
+    SWARM_PI_CODE_PLUGIN_USER_STATE_DIR: path.join(privateDir, "state"),
     SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST: "1",
   };
   const customProviders = [
@@ -164,6 +168,9 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   assert.doesNotMatch(html, /Number\(\$\("context-budget"\)\.value\) \|\| 0/);
   assert.match(html, /draft\.baseRevision === bootRevision/);
   assert.match(html, /baseRevision:bootRevision/);
+  assert.match(html, /baseProviderRevision:boot\.providerRegistryRevision/);
+  assert.match(html, /Global provider connections/);
+  assert.match(html, /Delete globally/);
   assert.match(html, /Saved model unavailable/);
   assert.match(html, /New or changed primary and required Adaptive classifier routes/);
   assert.match(html, /invalid response/);
@@ -199,17 +206,21 @@ test("configuration view retains models referenced only by saved role and classi
   assert.ok(unavailable, "the pinned Pi catalog should expose an unavailable model");
   const selected = modelId(unavailable);
 
-  await updateState(workspace, (state) => {
-    state.config.rolePolicies = { planner: { models: [selected], thinkingLevel: "max" } };
-    state.config.adaptivePolicy = {
-      classifierModels: [selected],
-      classifierThinkingLevel: "max",
-      approvalPolicy: "deny",
-      trustedDomains: [],
-      rules: [],
-      diagnostics: false,
-    };
-  });
+  await updateState(
+    workspace,
+    (state) => {
+      state.config.rolePolicies = { planner: { models: [selected], thinkingLevel: "max" } };
+      state.config.adaptivePolicy = {
+        classifierModels: [selected],
+        classifierThinkingLevel: "max",
+        approvalPolicy: "deny",
+        trustedDomains: [],
+        rules: [],
+        diagnostics: false,
+      };
+    },
+    env,
+  );
 
   const first = await loadConfigurationView(workspace, env);
   assert.equal(first.models.find((model) => model.id === selected)?.available, false);
@@ -219,9 +230,13 @@ test("configuration view retains models referenced only by saved role and classi
   assert.equal(first.adaptivePolicy?.classifierThinkingLevel, "max");
   assert.match(first.configurationRevision ?? "", /^[a-f0-9]{24}$/);
 
-  await updateState(workspace, (state) => {
-    state.config.rolePolicies = { planner: { models: [selected], thinkingLevel: "high" } };
-  });
+  await updateState(
+    workspace,
+    (state) => {
+      state.config.rolePolicies = { planner: { models: [selected], thinkingLevel: "high" } };
+    },
+    env,
+  );
   const second = await loadConfigurationView(workspace, env);
   assert.notEqual(second.configurationRevision, first.configurationRevision);
 });
@@ -291,44 +306,48 @@ test("project-only page starts from the guided project setup", () => {
 });
 
 test("project profile save validates scope and does not create model configuration", async () => {
-  const { workspace } = fixture();
+  const { workspace, env } = fixture();
   fs.mkdirSync(path.join(workspace, "src"));
-  const profile = await saveProjectProfileSubmission(workspace, {
-    profile: {
-      goal: "Ship a dependable project setup flow",
-      dirs: ["src"],
-      tasks: ["implementation", "code-review"],
+  const profile = await saveProjectProfileSubmission(
+    workspace,
+    {
+      profile: {
+        goal: "Ship a dependable project setup flow",
+        dirs: ["src"],
+        tasks: ["implementation", "code-review"],
+      },
+      sandboxMode: "strict",
+      decisionMode: "power",
+      hostAssistance: {
+        enabled: true,
+        mode: "on",
+        contextClasses: ["workspace", "docs", "web"],
+        privateConnector: "deny",
+        maxRequests: 6,
+        maxFanOut: 3,
+        reviewMode: "host-first",
+        autoApprovalScope: "read-only",
+        autoApproveDiscoveryGates: true,
+      },
+      contextBudget: 6,
+      advisor: { enabled: true, targets: ["discover", "plan"], maxRequests: 3, maxPerspectives: 3 },
+      doctrine: "first-principles-qds-v1",
+      hostActions: {
+        enabled: true,
+        allowedActionClasses: ["local-mutation", "draft"],
+        remoteActionsEnabled: false,
+        maxUses: 1,
+        maxCost: 2,
+        ttlMs: 900_000,
+      },
     },
-    sandboxMode: "strict",
-    decisionMode: "power",
-    hostAssistance: {
-      enabled: true,
-      mode: "on",
-      contextClasses: ["workspace", "docs", "web"],
-      privateConnector: "deny",
-      maxRequests: 6,
-      maxFanOut: 3,
-      reviewMode: "host-first",
-      autoApprovalScope: "read-only",
-      autoApproveDiscoveryGates: true,
-    },
-    contextBudget: 6,
-    advisor: { enabled: true, targets: ["discover", "plan"], maxRequests: 3, maxPerspectives: 3 },
-    doctrine: "first-principles-qds-v1",
-    hostActions: {
-      enabled: true,
-      allowedActionClasses: ["local-mutation", "draft"],
-      remoteActionsEnabled: false,
-      maxUses: 1,
-      maxCost: 2,
-      ttlMs: 900_000,
-    },
-  });
+    env,
+  );
 
   assert.equal(profile.goal, "Ship a dependable project setup flow");
   assert.deepEqual(profile.dirs, ["src"]);
   assert.deepEqual(profile.tasks, ["implementation", "code-review"]);
-  const saved = await loadState(workspace);
+  const saved = await loadState(workspace, { env });
   assert.equal(saved.config.sandboxMode, "strict");
   assert.equal(saved.config.decisionMode, "power");
   assert.equal(saved.config.hostAssistance?.maxFanOut, 3);
@@ -339,7 +358,7 @@ test("project profile save validates scope and does not create model configurati
   assert.equal(saved.config.advisor?.enabled, true);
   assert.equal(saved.config.doctrine, "first-principles-qds-v1");
   assert.equal(saved.config.hostActions?.remoteActionsEnabled, false);
-  assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
+  assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace, env)), false);
   await assert.rejects(
     () =>
       saveProjectProfileSubmission(workspace, {
@@ -356,28 +375,36 @@ test("project profile save validates scope and does not create model configurati
 });
 
 test("whole-repository project setup omits dirs while explicit empty dirs remain deny-all", async () => {
-  const { workspace } = fixture();
-  const wholeRepository = await saveProjectProfileSubmission(workspace, {
-    goal: "Analyze the whole repository",
-    tasks: ["analysis"],
-  });
+  const { workspace, env } = fixture();
+  const wholeRepository = await saveProjectProfileSubmission(
+    workspace,
+    {
+      goal: "Analyze the whole repository",
+      tasks: ["analysis"],
+    },
+    env,
+  );
 
   assert.equal(Object.hasOwn(wholeRepository, "dirs"), false);
-  assert.equal(Object.hasOwn((await loadState(workspace)).config.profile!, "dirs"), false);
+  assert.equal(Object.hasOwn((await loadState(workspace, { env })).config.profile!, "dirs"), false);
   assert.deepEqual(
     (await compileEffectiveProjectPolicy({ cwd: workspace, profile: wholeRepository })).roots.read,
     ["."],
   );
 
-  const denyAll = await saveProjectProfileSubmission(workspace, {
-    goal: "Pause repository access",
-    dirs: [],
-    tasks: ["analysis"],
-  });
+  const denyAll = await saveProjectProfileSubmission(
+    workspace,
+    {
+      goal: "Pause repository access",
+      dirs: [],
+      tasks: ["analysis"],
+    },
+    env,
+  );
 
   assert.equal(Object.hasOwn(denyAll, "dirs"), true);
   assert.deepEqual(denyAll.dirs, []);
-  assert.deepEqual((await loadState(workspace)).config.profile?.dirs, []);
+  assert.deepEqual((await loadState(workspace, { env })).config.profile?.dirs, []);
   assert.deepEqual(
     (await compileEffectiveProjectPolicy({ cwd: workspace, profile: denyAll })).roots.read,
     [],
@@ -491,22 +518,26 @@ test("project saves enforce workflow bounds, cross-field rules, and supported ta
 
 test("legacy Host Assistance inherit is projected explicitly without mutating durable state", async () => {
   const { workspace, env } = fixture();
-  await updateState(workspace, (state) => {
-    state.config.hostAssistance = {
-      enabled: true,
-      mode: "inherit",
-      contextClasses: ["workspace"],
-      privateConnector: "ask",
-      maxRequests: 4,
-      maxFanOut: 2,
-      reviewMode: "user-only",
-      autoApprovalScope: "context-only",
-      autoApproveDiscoveryGates: false,
-    };
-  });
+  await updateState(
+    workspace,
+    (state) => {
+      state.config.hostAssistance = {
+        enabled: true,
+        mode: "inherit",
+        contextClasses: ["workspace"],
+        privateConnector: "ask",
+        maxRequests: 4,
+        maxFanOut: 2,
+        reviewMode: "user-only",
+        autoApprovalScope: "context-only",
+        autoApproveDiscoveryGates: false,
+      };
+    },
+    env,
+  );
   const view = await loadConfigurationView(workspace, env);
   assert.equal(view.hostAssistance.mode, "on");
-  assert.equal((await loadState(workspace)).config.hostAssistance?.mode, "inherit");
+  assert.equal((await loadState(workspace, { env })).config.hostAssistance?.mode, "inherit");
   assert.deepEqual(view.workflowBounds, WORKFLOW_BOUNDS);
 });
 
@@ -565,8 +596,8 @@ test("configuration service stores credentials outside model and state files", a
     env,
     { credentialVault },
   );
-  const modelFile = await resolveModelConfigurationFile(workspace);
-  const stateFile = await resolveStateFile(workspace);
+  const modelFile = await resolveModelConfigurationFile(workspace, env);
+  const stateFile = await resolveStateFile(workspace, env);
   const authFile = path.join(privateDir, "auth.json");
 
   assert.equal(view.configuration.primary, "local-test/test-model");
@@ -576,9 +607,11 @@ test("configuration service stores credentials outside model and state files", a
   assert.doesNotMatch(fs.readFileSync(stateFile, "utf8"), new RegExp(secret));
   assert.doesNotMatch(JSON.stringify(view), new RegExp(secret));
   assert.equal(fs.statSync(authFile).mode & 0o777, 0o600);
-  assert.deepEqual((await loadState(workspace)).config.modelPriority, ["local-test/test-model"]);
+  assert.deepEqual((await loadState(workspace, { env })).config.modelPriority, [
+    "local-test/test-model",
+  ]);
   assert.equal(
-    (await loadState(workspace)).config.profile?.goal,
+    (await loadState(workspace, { env })).config.profile?.goal,
     "Maintain a guided setup experience",
   );
   assert.deepEqual(view.directoryOptions, ["src"]);
@@ -586,12 +619,16 @@ test("configuration service stores credentials outside model and state files", a
 
 test("sign out removes credentials for built-in and configured custom providers only", async () => {
   const { workspace, env, customProviders } = fixture();
-  await saveModelConfiguration(workspace, {
-    primary: "local-test/test-model",
-    fallbacks: [],
-    customProviders,
-    providerProfiles: [],
-  });
+  await saveModelConfiguration(
+    workspace,
+    {
+      primary: "local-test/test-model",
+      fallbacks: [],
+      customProviders,
+      providerProfiles: [],
+    },
+    env,
+  );
   const auth = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
   await auth.modify("local-test", async () => ({ type: "api_key", key: "custom-secret" }));
   await auth.modify("openai", async () => ({ type: "api_key", key: "openai-secret" }));
@@ -683,6 +720,8 @@ test("provider deletion reconciles primary, role, classifier, profiles, and prio
     },
     env,
   );
+  const auth = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  await auth.modify("remove-me", async () => ({ type: "api_key", key: "remove-secret" }));
 
   const saved = await saveConfigurationSubmission(
     workspace,
@@ -703,6 +742,7 @@ test("provider deletion reconciles primary, role, classifier, profiles, and prio
   assert.deepEqual((await loadState(workspace, { env })).config.modelPriority, [
     "survivor/fallback-model",
   ]);
+  assert.equal(await auth.read("remove-me"), undefined);
 });
 
 test("provider deletion requires an explicit replacement primary when no fallback survives", async () => {
@@ -733,6 +773,47 @@ test("provider deletion requires an explicit replacement primary when no fallbac
     (error: unknown) =>
       error instanceof ConfigurationSaveError && error.code === "primary-selection-required",
   );
+});
+
+test("global providers are shared across workspaces and deletion removes the credential", async () => {
+  const { workspace: firstWorkspace, env } = fixture();
+  const secondWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-web-config-"));
+  const provider = localProvider("shared-provider", ["shared-model"]);
+  await saveModelConfiguration(
+    firstWorkspace,
+    {
+      primary: "shared-provider/shared-model",
+      fallbacks: [],
+      customProviders: [provider],
+      providerProfiles: [],
+    },
+    env,
+  );
+  const auth = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  await auth.modify("shared-provider", async () => ({
+    type: "api_key",
+    key: "shared-secret",
+  }));
+
+  const secondView = await loadConfigurationView(secondWorkspace, env);
+  assert.equal(secondView.configuration.customProviders[0]?.id, "shared-provider");
+  await saveConfigurationSubmission(
+    secondWorkspace,
+    {
+      baseRevision: secondView.configurationRevision,
+      baseProviderRevision: secondView.providerRegistryRevision,
+      primary: null,
+      fallbacks: [],
+      customProviders: [],
+      providerProfiles: [],
+    },
+    env,
+  );
+
+  const firstReloaded = await loadModelConfiguration(firstWorkspace, [], env);
+  assert.equal(firstReloaded.primary, "shared-provider/shared-model");
+  assert.deepEqual(firstReloaded.customProviders, []);
+  assert.equal(await auth.read("shared-provider"), undefined);
 });
 
 test("custom model removal clears stale role references and uses the surviving primary for Adaptive", async () => {
@@ -810,6 +891,101 @@ test("stale configuration revisions receive a typed conflict", async () => {
       error.code === "configuration-revision-conflict" &&
       view.configurationRevision !== "stale-revision",
   );
+});
+
+test("stale provider registry revisions receive a typed conflict", async () => {
+  const { workspace, env } = fixture();
+  await assert.rejects(
+    () =>
+      saveConfigurationSubmission(
+        workspace,
+        {
+          baseRevision: "also-stale-configuration-revision",
+          baseProviderRevision: "stale-provider-revision",
+          primary: null,
+          fallbacks: [],
+          customProviders: [],
+        },
+        env,
+      ),
+    (error: unknown) =>
+      error instanceof ConfigurationSaveError &&
+      error.code === "provider-registry-revision-conflict",
+  );
+});
+
+test("use-global migration preserves unrelated providers and revokes the conflicted credential", async () => {
+  const { workspace, env } = fixture();
+  const providerId = "conflicted-provider";
+  const globalProvider = {
+    ...localProvider(providerId, ["legacy-model"]),
+    name: "Global endpoint",
+    baseUrl: "https://global.example.test/v1",
+    requiresApiKey: true,
+    auth: { method: "api-key" as const, secretRef: `auth:${providerId}` },
+  };
+  const globalProfile = {
+    id: providerId,
+    provider: providerId,
+    name: globalProvider.name,
+    connectionKind: "custom" as const,
+    auth: globalProvider.auth,
+    runtimeApi: "openai-completions" as const,
+    readiness: "verified" as const,
+    settings: {},
+    headers: [],
+    verifiedAt: "2026-07-28T00:00:00.000Z",
+    verifiedModel: `${providerId}/legacy-model`,
+  };
+  await saveProviderRegistry(
+    {
+      customProviders: [globalProvider],
+      providerProfiles: [globalProfile],
+    },
+    env,
+  );
+  const legacyProvider = {
+    ...globalProvider,
+    name: "Legacy endpoint",
+    baseUrl: "https://legacy.example.test/v1",
+  };
+  const unrelated = localProvider("unrelated-provider", ["other-model"]);
+  const modelFile = await resolveModelConfigurationFile(workspace, env);
+  fs.mkdirSync(path.dirname(modelFile), { recursive: true });
+  fs.writeFileSync(
+    modelFile,
+    `${JSON.stringify({
+      version: 1,
+      primary: `${providerId}/legacy-model`,
+      fallbacks: ["unrelated-provider/other-model"],
+      customProviders: [legacyProvider, unrelated],
+      providerProfiles: [],
+      updatedAt: null,
+    })}\n`,
+  );
+  const auth = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
+  await auth.modify(providerId, async () => ({ type: "api_key", key: "legacy-secret" }));
+  const view = await loadConfigurationView(workspace, env);
+  assert.equal(view.providerMigrationConflict?.providerId, providerId);
+
+  await resolveConfigurationProviderMigration(
+    workspace,
+    {
+      providerId,
+      strategy: "use-global",
+      baseProviderRevision: view.providerRegistryRevision!,
+    },
+    env,
+  );
+
+  const registry = await loadProviderRegistry(env);
+  assert.ok(registry.customProviders.some((provider) => provider.id === "unrelated-provider"));
+  assert.equal(
+    registry.providerProfiles.find((profile) => profile.provider === providerId)?.readiness,
+    "blocked",
+  );
+  assert.equal(await auth.read(providerId), undefined);
+  assert.equal(JSON.parse(fs.readFileSync(modelFile, "utf8")).version, 2);
 });
 
 test("configuration server returns typed revision conflicts with a reload action", async () => {
@@ -1191,7 +1367,7 @@ test("cancel closes the setup session without creating model.json", async () => 
     (await server.completion).configurationStorage.stateFile,
     await resolveStateFile(workspace, env),
   );
-  assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
+  assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace, env)), false);
 });
 
 test("project-only server saves profile without changing model configuration", async () => {
@@ -1222,8 +1398,11 @@ test("project-only server saves profile without changing model configuration", a
   const completion = await server.completion;
   assert.equal(completion.status, "saved");
   assert.equal(completion.configurationStorage.migrationStatus, "none");
-  assert.deepEqual((await loadState(workspace)).config.profile?.tasks, ["planning", "analysis"]);
-  assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace)), false);
+  assert.deepEqual((await loadState(workspace, { env })).config.profile?.tasks, [
+    "planning",
+    "analysis",
+  ]);
+  assert.equal(fs.existsSync(await resolveModelConfigurationFile(workspace, env)), false);
 });
 
 test("local dashboard serves a token-protected detailed telemetry report", async () => {

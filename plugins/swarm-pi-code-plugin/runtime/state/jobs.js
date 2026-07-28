@@ -4,6 +4,7 @@ import path from "node:path";
 import { hostContextCharacterLimit } from "../host-assistance/context-allowance.js";
 import { loadState, resolveStateDir, resolveStateFile, updateState, } from "./state.js";
 import { canonicalStateFile, stateObservers } from "./state-observer.js";
+import { providerRegistryRevisionFor } from "./provider-registry.js";
 import { appendTelemetryAttempts } from "../telemetry/store.js";
 export const JOB_HEARTBEAT_INTERVAL_MS = 15_000;
 export const JOB_STALE_AFTER_MS = 60_000;
@@ -14,21 +15,27 @@ export async function startJob(cwd, input) {
     const createdAt = new Date().toISOString();
     const sandboxMode = input.sandboxMode ?? "strict";
     const directory = await jobDirectory(cwd, id);
-    const providerSnapshotHash = input.modelConfiguration
-        ? modelConfigurationSnapshotHash(input.modelConfiguration)
+    const providerRegistryRevision = input.modelConfiguration
+        ? providerRegistryRevisionFor(input.modelConfiguration.customProviders, input.modelConfiguration.providerProfiles)
         : undefined;
     if ((input.policySnapshot?.version === 2 || input.policySnapshot?.version === 3) &&
         !input.modelConfiguration) {
         throw new Error(`Policy snapshot version ${input.policySnapshot.version} requires modelConfiguration`);
     }
+    const requestVersion = input.policySnapshot?.version === 3
+        ? 6
+        : input.policySnapshot?.version === 2
+            ? 4
+            : input.modelConfiguration
+                ? 3
+                : 2;
+    const providerSnapshotHash = input.modelConfiguration
+        ? requestVersion === 6
+            ? providerConfigurationSnapshotHash(input.modelConfiguration, providerRegistryRevision)
+            : modelConfigurationSnapshotHash(input.modelConfiguration)
+        : undefined;
     const request = {
-        requestVersion: input.policySnapshot?.version === 3
-            ? 5
-            : input.policySnapshot?.version === 2
-                ? 4
-                : input.modelConfiguration
-                    ? 3
-                    : 2,
+        requestVersion,
         id,
         host: input.host,
         kind: input.kind,
@@ -62,6 +69,7 @@ export async function startJob(cwd, input) {
             ? { modelConfiguration: structuredClone(input.modelConfiguration) }
             : {}),
         ...(providerSnapshotHash ? { providerSnapshotHash } : {}),
+        ...(providerRegistryRevision ? { providerRegistryRevision } : {}),
         workerToken,
         createdAt,
     };
@@ -109,16 +117,22 @@ export async function startJob(cwd, input) {
 export function modelConfigurationSnapshotHash(configuration) {
     return createHash("sha256").update(canonicalJson(configuration)).digest("hex");
 }
+export function providerConfigurationSnapshotHash(configuration, providerRegistryRevision) {
+    return createHash("sha256")
+        .update(canonicalJson({ configuration, providerRegistryRevision }))
+        .digest("hex");
+}
 function canonicalJson(value) {
     if (Array.isArray(value))
-        return `[${value.map(canonicalJson).join(",")}]`;
+        return `[${value.map((entry) => (entry === undefined ? "null" : canonicalJson(entry))).join(",")}]`;
     if (typeof value === "object" && value !== null) {
         return `{${Object.entries(value)
+            .filter(([, nested]) => nested !== undefined)
             .sort(([left], [right]) => left.localeCompare(right))
             .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
             .join(",")}}`;
     }
-    return JSON.stringify(value);
+    return JSON.stringify(value) ?? "null";
 }
 export async function attachJobProcess(cwd, jobId, workerToken, pid) {
     const updatedAt = new Date().toISOString();

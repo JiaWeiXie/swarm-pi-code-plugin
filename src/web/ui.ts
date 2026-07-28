@@ -70,10 +70,18 @@ export function renderConfigurationPage(
 
     <main class="workspace">
       <div id="registry-warning" class="notice warning" hidden></div>
+      <div id="provider-migration-conflict" class="notice warning" hidden>
+        <strong>Global provider conflict</strong>
+        <p id="provider-migration-message"></p>
+        <div class="section-actions">
+          <button id="provider-migration-use-global" class="secondary-button" type="button">Use global definition</button>
+          <button id="provider-migration-import-new" class="primary-button" type="button">Import with a new ID</button>
+        </div>
+      </div>
 
       <section id="connections-screen" class="screen">
         <div class="screen-heading">
-          <div><h1>AI connections</h1><p>Services available to this project.</p></div>
+          <div><h1>AI connections</h1><p>Global services shared by every Swarm Pi project for this user.</p></div>
           <button id="open-connection" class="primary-button" type="button">Add connection</button>
         </div>
         <div id="connection-empty" class="hero-empty" hidden>
@@ -269,9 +277,8 @@ export function renderConfigurationPage(
 
       <section id="review-screen" class="screen" hidden>
         <div class="screen-heading"><div><h1 id="review-title">Review setup</h1><p>Confirm what Swarm Pi will use in this project.</p></div></div>
-        <div class="review-section full-only"><h2>Primary model</h2><div id="review-primary" class="review-value"></div></div>
-        <div class="review-section full-only"><h2>Fallback order</h2><div id="review-fallbacks" class="review-list"></div></div>
-        <div class="review-section full-only"><h2>Connections</h2><div id="review-connections" class="review-list"></div></div>
+        <div class="review-section full-only"><h2>Current project routing</h2><div id="review-primary" class="review-value"></div><div id="review-fallbacks" class="review-list"></div></div>
+        <div class="review-section full-only"><h2>Global provider connections</h2><p>These connections are shared by every Swarm Pi project for this user.</p><div id="review-connections" class="review-list"></div></div>
         <div class="review-section full-only"><h2>Connection test</h2><div class="review-value">New or changed primary and required Adaptive classifier routes receive a minimal READY request before settings are saved. Unchanged unavailable routes remain visible as health warnings.</div></div>
         <div class="review-section"><h2>Project goal</h2><div id="review-goal" class="review-value review-text"></div></div>
         <div class="review-section"><h2>Working area</h2><div id="review-directories" class="review-list"></div></div>
@@ -895,7 +902,7 @@ const clientScript = String.raw`
       if (authMethod === "api-key" || authMethod === "oauth" || authMethod === "custom-header") {
         const signout = document.createElement("button"); signout.type = "button"; signout.className = "secondary-button"; signout.textContent = "Sign out"; signout.addEventListener("click", () => signOutConnection(item.id)); actions.append(signout);
       }
-      const remove = document.createElement("button"); remove.type = "button"; remove.className = "danger-button"; remove.textContent = "Remove"; remove.addEventListener("click", () => removeConnection(item.id));
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "danger-button"; remove.textContent = "Delete globally"; remove.addEventListener("click", () => removeConnection(item.id));
       actions.append(remove);
       list.append(row);
     }
@@ -1281,7 +1288,7 @@ const clientScript = String.raw`
     $("connections-screen").hidden = state.phase !== 1; $("models-screen").hidden = state.phase !== 2; $("roles-screen").hidden = state.phase !== 3; $("safety-screen").hidden = state.phase !== 4; $("project-screen").hidden = state.phase !== 5; $("review-screen").hidden = state.phase !== 6;
     $("cancel-button").hidden = state.phase !== initialPhase; $("back-button").hidden = state.phase === initialPhase; $("next-button").hidden = state.phase === 6; $("save-button").hidden = state.phase !== 6;
     $("next-button").textContent = state.phase === 1 ? "Choose models" : state.phase === 2 ? "Configure roles" : state.phase === 3 ? "Execution safety" : state.phase === 4 ? "Workspace" : "Review";
-    $("next-button").disabled = setupMode === "full" && ((usableModels().length === 0 && !state.primary) || (state.phase === 2 && !state.primary));
+    $("next-button").disabled = Boolean(boot.providerMigrationConflict) || (setupMode === "full" && ((usableModels().length === 0 && !state.primary) || (state.phase === 2 && !state.primary)));
     $("save-button").textContent = setupMode === "project" ? "Save project setup" : "Save configuration";
     const warning = $("registry-warning"); warning.hidden = !boot.registryError; warning.textContent = boot.registryError ? "Pi model registry: " + boot.registryError : "";
     persistDraft();
@@ -1539,7 +1546,7 @@ const clientScript = String.raw`
     const item = connection(id); if (!item) return;
     const removed = state.models.filter(model => model.provider === id).map(model => model.id);
     if (!reconcileLocalRemovedReferences(removed, "removing " + item.name)) return;
-    if (!confirm("Remove " + item.name + " from this project? Stored credentials are not deleted.")) return;
+    if (!confirm("Delete " + item.name + " globally? This removes the provider and its stored credential for every Swarm Pi project. Historical Job snapshots are retained.")) return;
     state.customProviders = state.customProviders.filter(provider => provider.id !== id); state.providerProfiles = state.providerProfiles.filter(profile => profile.provider !== id); state.connections = state.connections.filter(connection => connection.id !== id); state.models = state.models.filter(model => model.provider !== id); delete state.credentialDrafts[id]; render();
   }
   async function verifyConnection(id, chosenModelId) {
@@ -1562,6 +1569,20 @@ const clientScript = String.raw`
     catch { throw new Error("The local setup server returned an invalid response. Your saved configuration was not confirmed; reload and try again."); }
     if (!response.ok) { const error = new Error(payload.error || "Request failed"); error.code = payload.code; error.stage = payload.stage; error.path = payload.path; error.nextActions = payload.nextActions; throw error; } return payload;
   }
+  async function resolveProviderMigration(strategy) {
+    const conflict = boot.providerMigrationConflict;
+    if (!conflict) return;
+    const status = $("connection-status");
+    status.className = "inline-status";
+    status.textContent = "Resolving global provider conflict...";
+    try {
+      await post("/api/providers/migration-resolve", {providerId:conflict.providerId,strategy,baseProviderRevision:boot.providerRegistryRevision});
+      location.reload();
+    } catch (error) {
+      status.className = "inline-status error";
+      status.textContent = error.message;
+    }
+  }
   function setBusy(button, busy, label) { button.disabled = busy; if (label) button.textContent = busy ? label : button.dataset.defaultLabel || button.textContent; }
   async function findLocal() {
     const status = $("connection-status"); status.className = "inline-status"; status.textContent = "Looking for local AI apps...";
@@ -1574,6 +1595,14 @@ const clientScript = String.raw`
   }
 
   $("open-connection").addEventListener("click", () => openDialog("cloud"));
+  const migration = boot.providerMigrationConflict;
+  $("provider-migration-conflict").hidden = !migration;
+  if (migration) {
+    $("provider-migration-message").textContent = "Legacy project provider " + migration.providerId + " differs from the global definition. Using the global definition signs out its existing credential; importing with a new ID requires fresh verification.";
+    $("provider-migration-import-new").hidden = !migration.canImportAsNew;
+  }
+  $("provider-migration-use-global").addEventListener("click", () => resolveProviderMigration("use-global"));
+  $("provider-migration-import-new").addEventListener("click", () => resolveProviderMigration("import-new"));
   $("empty-connect").addEventListener("click", () => openDialog("cloud"));
   $("find-local").addEventListener("click", findLocal); $("empty-local").addEventListener("click", findLocal);
   $("cloud-tab").addEventListener("click", () => { state.dialogMode = "cloud"; renderDialog(); });
@@ -1665,7 +1694,7 @@ const clientScript = String.raw`
         decisionMode:state.decisionMode,hostAssistance:state.hostAssistance,contextBudget:state.contextBudget,
         advisor:state.advisor,doctrine:state.doctrine,hostActions:state.hostActions,
       };
-      const saved = setupMode === "project" ? await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution}) : await post("/api/save", {baseRevision:bootRevision,primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id})),profile,sandboxMode:state.sandboxMode,...execution});
+      const saved = setupMode === "project" ? await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution}) : await post("/api/save", {baseRevision:bootRevision,baseProviderRevision:boot.providerRegistryRevision,primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id})),profile,sandboxMode:state.sandboxMode,...execution});
       const degraded = saved.health?.status === "degraded";
       showCompletion(setupMode === "project" ? "Project setup saved" : degraded ? "Configuration saved with model health warnings" : "Configuration saved", degraded ? "The structure was saved, but one or more unchanged saved models are currently unavailable. Reconnect or replace them before running work that needs those routes." : "Swarm Pi will use these project settings for delegated work. You can close this tab.", true);
     } catch (error) { if (error.stage === "models") setPhase(2); else if (error.stage === "roles") setPhase(3); else if (error.stage === "execution-safety") setPhase(4); status.className = "save-status error"; status.textContent = error.message; button.disabled = false; }

@@ -131,7 +131,13 @@ Approval and notification state changes are coupled. An approve or deny operatio
 
 The bundled Claude Code SessionStart hook is recovery-only: it invokes `jobs watch --emit ndjson --once` and injects a concise pending-event summary into the new Host session. Claude Code loads the standard `hooks/hooks.json` path automatically, so the Claude manifest must not reference the same file again. The hook does not replace the managed relay, wake a shell command that is already blocked, acknowledge notifications, or approve requests. The Codex manifest does not declare hooks.
 
-New jobs durably snapshot the submitted non-secret provider/model configuration. Do not recreate or edit a job request to apply later settings changes; submit a new job instead. Credentials remain live AuthStorage references, so a queued job may fail after sign-out or rotation and must never retry without authentication.
+New jobs durably snapshot the submitted non-secret provider/model configuration
+and the user-global provider-registry revision. Current routing comes from the
+project routing file plus the global registry; cached model inventory and older
+Job snapshots are never current-provider evidence. Do not recreate or edit a job
+request to apply later settings changes; submit a new job instead. Credentials
+remain live AuthStorage references, so a queued job may fail after sign-out or
+rotation and must never retry without authentication.
 
 ## Finish Reliably
 

@@ -52,9 +52,12 @@ repository instructions, or a supervisor approval.
 | Browser or job artifact leaks a credential | opaque draft IDs, CredentialStore-only secrets, response and journal redaction |
 | OAuth flow outlives setup | bounded polling, AbortSignal, timeout, cancel and server-dispose cleanup |
 | Literal header triggers Pi config syntax | controlled allowlist, control-character rejection, literal escaping |
-| Settings change during a background job | immutable provider/model snapshot, PolicySnapshot v3, request v5 hashes |
-| Stale setup tab restores a removed provider or model route | configuration revision conflict, server-side reference reconciliation, explicit reload |
-| Provider removal silently deletes a reusable credential | project connection removal is separate from CredentialStore sign-out |
+| Settings change during a background job | immutable provider/model snapshot, global registry revision, PolicySnapshot v3, request v6 hashes |
+| Stale setup tab restores a removed provider or model route | project and provider-registry revision conflicts, server-side reference reconciliation, explicit reload |
+| Global provider edit races another project | shared cross-process transaction lock, fixed credential/registry/project lock order, optimistic revision, atomic rename, rollback journal |
+| Historical endpoint is mistaken for the active provider | current routing is authoritative, stale cache count is diagnostic only, Job snapshots are explicitly excluded |
+| Provider deletion leaves a reusable credential | final Save deletes the custom provider definition and credential in one rollback-protected transaction |
+| Legacy conflict rebinds a credential to another endpoint | use-global resolution revokes the provider-ID credential and blocks the profile; canonical import rekeys metadata without copying credential data |
 | Credential is revoked after submission | resolve current CredentialStore at execution and fail explicitly |
 | Background mutation conflicts with host | job-owned worktree and branch, no automatic integration |
 | Logs expose source or secrets | redacted summaries by default, mode 0600 artifacts, bounded diagnostics |

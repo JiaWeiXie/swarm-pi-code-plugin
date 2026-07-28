@@ -22,6 +22,7 @@ async function makeFixture(configured, projectOnly = false) {
     SWARM_PI_CODE_PLUGIN_DATA_DIR: ".screenshot-state",
     SWARM_PI_CODE_PLUGIN_AUTH_FILE: path.join(privateDir, "auth.json"),
     SWARM_PI_CODE_PLUGIN_MODELS_FILE: path.join(privateDir, "models.json"),
+    SWARM_PI_CODE_PLUGIN_USER_STATE_DIR: path.join(privateDir, "state"),
     SWARM_PI_CODE_PLUGIN_SKIP_SMOKE_TEST: "1",
   };
   if (configured) {
@@ -169,6 +170,7 @@ async function main() {
       "full",
       async (page) => {
         for (let index = 0; index < 5; index += 1) await page.locator("#next-button").click();
+        await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
       },
       path.join(OUTPUT, "06-review.png"),
     );

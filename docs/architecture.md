@@ -334,22 +334,27 @@ ephemeral port, uses a random per-session token, rejects non-loopback and
 cross-origin writes, applies a restrictive CSP, limits request and response
 sizes, and shuts down after save, close, or timeout.
 
-Full setup saves model configuration, role policy, execution safety, and project
-profile together. Project-only setup starts at **Roles**, pre-populates the
-existing settings, and writes only shared state. Neither flow deletes jobs or
-global Pi credentials. A save carries the configuration revision that was loaded
-by the browser, so a stale setup tab cannot restore a provider another session
-removed. Explicit provider/model removal reconciles project routing references;
-it removes no credential and never rewrites submitted Job snapshots. Existing
+Full setup saves a plugin-owned user-global provider registry together with
+project routing, role policy, execution safety, and project profile.
+Project-only setup starts at **Roles**, pre-populates the existing settings, and
+writes only shared project state. Neither flow deletes Jobs. A save carries both
+the project and provider-registry revisions loaded by the browser, so a stale
+setup tab cannot restore a provider another session removed. Explicit custom
+provider removal deletes its global credential and reconciles current-project
+routing references; it never rewrites submitted Job snapshots. Existing
 unavailable routes are represented as degraded health, while new or changed
 routes remain subject to required availability and smoke verification.
+All registry writers participate in the same cross-process transaction lock;
+Configuration then acquires credential, registry-file, and project-state locks
+in a fixed order and keeps rollback inside that boundary.
 
-New jobs use request version 5. They embed the submitted non-secret model and
-provider configuration plus an integrity hash and PolicySnapshot v3. The
+New jobs use request version 6. They embed the submitted non-secret model and
+provider configuration, a registry revision derived from that snapshot, an
+integrity hash covering both, and PolicySnapshot v3. The
 policy snapshot contains the effective project policy, Decision Mode, Host
 Assistance, Advisor, doctrine metadata, and context budget. Workers use those
 snapshots even when settings change later, while resolving credentials at
-execution time so revocation remains effective. Requests v1-v4 remain readable
+execution time so revocation remains effective. Requests v1-v5 remain readable
 with their original semantics.
 
 Host Action policy is stored in current workspace configuration and checked
