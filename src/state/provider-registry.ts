@@ -10,6 +10,13 @@ const REGISTRY_DIRECTORY_MODE = 0o700;
 const REGISTRY_FILE_MODE = 0o600;
 const LOCK_STALE_MS = 30_000;
 const LOCK_TIMEOUT_MS = 5_000;
+const PROVIDER_PROFILE_NON_CONNECTION_FIELDS = new Set([
+  "name",
+  "readiness",
+  "discoveredAt",
+  "verifiedAt",
+  "verifiedModel",
+]);
 const providerRegistryTransactionContext = new AsyncLocalStorage<Set<string>>();
 
 export interface ProviderRegistryV1 {
@@ -164,7 +171,11 @@ export async function mergeLegacyProviderRegistry(
   }
   for (const profile of providerProfiles) {
     const existing = profiles.get(profile.provider);
-    if (existing && canonicalJson(existing) !== canonicalJson(profile)) {
+    if (
+      existing &&
+      providerProfileConnectionConfiguration(existing) !==
+        providerProfileConnectionConfiguration(profile)
+    ) {
       throw new ProviderRegistryConflictError(profile.provider, "provider-profile");
     }
     if (!existing) {
@@ -180,6 +191,16 @@ export async function mergeLegacyProviderRegistry(
     },
     env,
     current.revision,
+  );
+}
+
+function providerProfileConnectionConfiguration(profile: ProviderProfile): string {
+  return canonicalJson(
+    Object.fromEntries(
+      Object.entries(profile).filter(
+        ([field]) => !PROVIDER_PROFILE_NON_CONNECTION_FIELDS.has(field),
+      ),
+    ),
   );
 }
 

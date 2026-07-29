@@ -227,7 +227,7 @@ test("the full-access runner runs bash without the plugin sandbox and strips plu
       { command: `printf '%s' "$SWARM_PI_CODE_PLUGIN_OPENAI_API_KEY" > '${marker}'` },
       undefined,
       undefined,
-      {} as never,
+      undefined as never,
     );
     assert.equal(fs.existsSync(marker), true);
     assert.equal(fs.readFileSync(marker, "utf8"), "");

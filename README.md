@@ -282,7 +282,11 @@ stored in the plugin-owned `providers.json`; project `model.json` files contain
 only primary/fallback routing. The plugin never takes ownership of Pi's
 `~/.pi/agent/models.json`. Opening Configuration migrates legacy project
 providers into the global registry, while `status` and `doctor` remain
-read-only. A conflicting legacy ID must be resolved in the browser by using the
+read-only. A legacy profile whose connection contract matches the global entry
+migrates automatically even when its display name or discovery/verification
+state differs; the current global state and credential remain authoritative.
+Differences in authentication, protocol, runtime adapter, settings, headers, or
+endpoint remain conflicts and must be resolved in the browser by using the
 global definition or importing the legacy endpoint under a new canonical ID.
 Using the global definition revokes that provider ID's existing credential and
 requires verification; canonical import never copies the credential.
@@ -299,7 +303,7 @@ from current provider readiness.
 
 ### Provider connections
 
-The setup form is driven by the Pi v0.81.1 provider catalog. OpenAI uses the
+The setup form is driven by the Pi v0.82.1 provider catalog. OpenAI uses the
 Responses adapter, Anthropic uses Messages, and mixed providers retain Pi's
 per-model adapter. Cloud providers show only their required project, region,
 resource, account, or deployment fields. The catalog includes Qwen Token Plan
@@ -879,7 +883,10 @@ mise run build
 
 ### Plugin versions
 
-Version 0.16.0 adds the diff-only `lean` review profile: three concurrent
+Version 0.22.0 upgrades the pinned Pi SDK and provider catalog to 0.82.1,
+verifies the embedded runtime/session/custom-tool APIs, and automatically
+migrates legacy provider profiles when only display or verification state
+differs from the global registry. Version 0.16.0 adds the diff-only `lean` review profile: three concurrent
 candidate perspectives, deterministic six-candidate selection, independent
 validator sessions, supported-only simplification findings, and durable audit
 summary/telemetry. Version 0.15.3 keeps the managed-relay worker parser in the TypeScript source,
@@ -989,7 +996,7 @@ validating the packaged plugin.
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
 - [Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.81.1`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.82.1`
 - [Node.js](https://nodejs.org/)
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)

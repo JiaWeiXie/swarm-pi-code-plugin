@@ -188,7 +188,7 @@ not expose a network listener beyond loopback or accept raw telemetry input.
 - model source and runtime adapter support.
 
 Coverage tests compare the Registry with every provider exposed by the Pi
-v0.81.1 model catalog. A newly added Pi provider fails CI until it is classified; the
+v0.82.1 model catalog. A newly added Pi provider fails CI until it is classified; the
 UI never guesses that an unknown provider uses a simple API-key form.
 
 The plugin initializes `ModelRuntime` from the configured auth and model files
@@ -212,7 +212,7 @@ Built-in examples include:
 | Cloudflare | managed or Chat-compatible | API key | account and optional gateway IDs |
 
 Azure Microsoft Entra identity is shown only as a capability notice because the
-Pi v0.81.1 runtime cannot execute it. It is never marked ready.
+Pi v0.82.1 runtime cannot execute it. It is never marked ready.
 
 ## Wire Protocols
 
@@ -441,6 +441,11 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 
 - Missing `providerProfiles` load as an empty list.
 - Legacy custom providers infer auth and wire protocol from existing fields.
+- Legacy profiles with the same connection contract merge into the global
+  registry even when their display name, readiness, discovery timestamp, or
+  verification result differs. The current global health state wins.
+- Authentication, protocol, runtime adapter, settings, headers, and endpoint
+  differences remain explicit migration conflicts.
 - Existing custom IDs are not rewritten.
 - Existing explicit Sandbox modes are preserved; missing legacy modes remain
   Strict, and normalization never selects `full-access`.
@@ -456,7 +461,7 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 
 ## Acceptance Criteria
 
-- Every Pi v0.81.1 provider is explicitly classified by the Registry.
+- Every Pi v0.82.1 provider is explicitly classified by the Registry.
 - ChatGPT subscription and OpenAI API-key connections remain separate.
 - Browser responses, localStorage, state, model config, and jobs contain no
   credential values.

@@ -124,7 +124,7 @@ test(
             { command: "printf blocked > readonly.txt" },
             undefined,
             undefined,
-            {} as never,
+            undefined as never,
           ),
         /exited with code|operation not permitted|permission denied/i,
       );
@@ -145,7 +145,7 @@ test(
         { command: 'printf allowed > written.txt; test -z "$OPENAI_API_KEY"' },
         undefined,
         undefined,
-        {} as never,
+        undefined as never,
       );
       assert.equal(fs.readFileSync(path.join(workspace, "written.txt"), "utf8"), "allowed");
       await assert.rejects(
@@ -155,7 +155,7 @@ test(
             { command: "sleep 2; printf late > late.txt", timeout: 0.05 },
             undefined,
             undefined,
-            {} as never,
+            undefined as never,
           ),
         /timed out/i,
       );
@@ -168,7 +168,7 @@ test(
             { command: `printf blocked > ${shellQuote(outside)}` },
             undefined,
             undefined,
-            {} as never,
+            undefined as never,
           ),
         /exited with code|operation not permitted|permission denied/i,
       );
@@ -200,7 +200,7 @@ test(
         { command: "git status --porcelain=v1 --untracked-files=all" },
         undefined,
         undefined,
-        {} as never,
+        undefined as never,
       );
       assert.equal(
         execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {

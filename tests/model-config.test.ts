@@ -125,6 +125,117 @@ test("Configuration migrates only legacy model providers into the global registr
   assert.equal((await loadProviderRegistry(env)).customProviders[0]?.id, "local-openai");
 });
 
+test("legacy migration accepts matching provider connections with different verification state", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-model-profile-state-"));
+  const env = {
+    ...process.env,
+    SWARM_PI_CODE_PLUGIN_USER_STATE_DIR: fs.mkdtempSync(
+      path.join(os.tmpdir(), "swarm-pi-provider-profile-state-"),
+    ),
+  };
+  const connection = {
+    id: "openai-codex",
+    provider: "openai-codex",
+    name: "ChatGPT Plus/Pro",
+    connectionKind: "builtin" as const,
+    auth: {
+      method: "oauth" as const,
+      secretRef: "auth:openai-codex",
+    },
+    runtimeApi: "openai-codex-responses" as const,
+    readiness: "verified" as const,
+    settings: {},
+    headers: [],
+  };
+  const globalProfile = {
+    ...connection,
+    verifiedAt: "2026-07-29T03:30:30.286Z",
+    verifiedModel: "openai-codex/gpt-5.6-terra",
+  };
+  await saveProviderRegistry(
+    {
+      customProviders: [],
+      providerProfiles: [globalProfile],
+    },
+    env,
+  );
+  const file = await resolveModelConfigurationFile(workspace, env);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    `${JSON.stringify({
+      version: 1,
+      primary: "openai-codex/gpt-5.4",
+      fallbacks: [],
+      customProviders: [],
+      providerProfiles: [
+        {
+          ...connection,
+          name: "OpenAI Codex",
+          verifiedAt: "2026-07-11T14:24:13.016Z",
+          verifiedModel: "openai-codex/gpt-5.4-mini",
+        },
+      ],
+      updatedAt: null,
+    })}\n`,
+  );
+
+  const migrated = await prepareProviderRegistryForConfiguration(workspace, [], env);
+
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).version, 2);
+  assert.equal(migrated.primary, "openai-codex/gpt-5.4");
+  assert.deepEqual((await loadProviderRegistry(env)).providerProfiles, [globalProfile]);
+});
+
+test("legacy migration rejects different provider profile connection settings", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-model-profile-conflict-"));
+  const env = {
+    ...process.env,
+    SWARM_PI_CODE_PLUGIN_USER_STATE_DIR: fs.mkdtempSync(
+      path.join(os.tmpdir(), "swarm-pi-provider-profile-conflict-"),
+    ),
+  };
+  const profile = {
+    id: customProvider.id,
+    provider: customProvider.id,
+    name: customProvider.name,
+    connectionKind: "custom" as const,
+    auth: {
+      method: "api-key" as const,
+      secretRef: `auth:${customProvider.id}`,
+    },
+    runtimeApi: "openai-completions" as const,
+    readiness: "configured" as const,
+    settings: { region: "global" },
+    headers: [],
+  };
+  await saveProviderRegistry(
+    {
+      customProviders: [customProvider],
+      providerProfiles: [profile],
+    },
+    env,
+  );
+  const file = await resolveModelConfigurationFile(workspace, env);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    `${JSON.stringify({
+      version: 1,
+      primary: "local-openai/org/model-name",
+      fallbacks: [],
+      customProviders: [customProvider],
+      providerProfiles: [{ ...profile, settings: { region: "legacy" } }],
+      updatedAt: null,
+    })}\n`,
+  );
+
+  await assert.rejects(
+    () => prepareProviderRegistryForConfiguration(workspace, [], env),
+    ProviderRegistryConflictError,
+  );
+});
+
 test("legacy migration and stale saves never overwrite global provider conflicts", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-model-conflict-"));
   const env = {

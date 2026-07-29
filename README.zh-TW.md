@@ -205,14 +205,14 @@ Git 初始化是 Host 的前置流程，不是 Web UI 的設定項目。Configur
 
 沒有偵測到可用服務時，連線清單會維持空白。自訂 endpoint 必須先選擇 API protocol，再載入模型。Provider ID 維持內部管理；endpoint 與 Pi catalog 都無法證實的模型限制會保持自動判斷。
 
-Provider 定義與非秘密 connection profile 會儲存在 Plugin 自己管理的 user-global `providers.json`；專案的 `model.json` 只保留 primary／fallback routing。Plugin 不會接管 Pi 的 `~/.pi/agent/models.json`。開啟 Configuration 時會把 legacy 專案 provider 遷移到全域 registry；`status` 與 `doctor` 仍維持唯讀。若 legacy ID 與全域定義衝突，Web 會要求選擇使用全域版本，或以新的 canonical ID 匯入。
+Provider 定義與非秘密 connection profile 會儲存在 Plugin 自己管理的 user-global `providers.json`；專案的 `model.json` 只保留 primary／fallback routing。Plugin 不會接管 Pi 的 `~/.pi/agent/models.json`。開啟 Configuration 時會把 legacy 專案 provider 遷移到全域 registry；`status` 與 `doctor` 仍維持唯讀。若 legacy profile 的連線契約與全域項目相同，即使顯示名稱或 discovery／verification 狀態不同，也會自動遷移，並保留目前的全域狀態與 credential。Authentication、protocol、runtime adapter、settings、headers 或 endpoint 不同才屬於衝突；Web 會要求選擇使用全域版本，或以新的 canonical ID 匯入。
 使用全域版本會撤銷該 provider ID 既有的 credential 並要求重新驗證；以 canonical ID 匯入則不會複製 credential。
 
 儲存會區分設定結構與 model 的即時健康狀態。既有且未變更的 route 若暫時不可用，會保留並標示為 degraded，因此無關的專案設定仍可儲存；新增或變更的 route 則必須通過可用性與必要驗證。移除 provider 或 custom model 前會顯示對路由的影響，並清除受影響的 fallback／role／classifier 引用；有既有 fallback 時會提升它。Custom provider 與 credential 只會在最後按下 Save 時一併全域刪除；歷史 Job snapshot 維持不可變，且不會參與目前 provider readiness。若沒有可存活的 fallback，必須先選擇替代的 primary。
 
 ### 模型供應商連線
 
-設定表單由 Pi v0.81.1 provider catalog 驅動。OpenAI API 固定使用 Responses adapter，Anthropic 使用 Messages；混合型 provider 則保留 Pi 的 per-model adapter。Cloud provider 只會顯示實際需要的 project、region、resource、account 或 deployment 欄位。Catalog 包含 Qwen Token Plan 與 Qwen Token Plan China 的 OpenAI-compatible API Key provider。
+設定表單由 Pi v0.82.1 provider catalog 驅動。OpenAI API 固定使用 Responses adapter，Anthropic 使用 Messages；混合型 provider 則保留 Pi 的 per-model adapter。Cloud provider 只會顯示實際需要的 project、region、resource、account 或 deployment 欄位。Catalog 包含 Qwen Token Plan 與 Qwen Token Plan China 的 OpenAI-compatible API Key provider。
 
 Plugin 啟動時使用本機 catalog snapshot，不會隱含刷新遠端模型 metadata 或憑證。需要最新清單時，請明確執行：
 
@@ -506,7 +506,7 @@ mise run build
 
 ### Plugin 版號
 
-0.16.0 加入只檢查 diff 的 `lean` review profile：三個並行候選觀點、可預測地最多選出六項候選、獨立 validator session、只公開 supported 的簡化 finding，以及可持久化的 audit summary／telemetry。0.15.3 將 managed-relay worker parser 維持在 TypeScript source，補上必填 job 與
+0.22.0 將固定的 Pi SDK 與 provider catalog 升級至 0.82.1，驗證 embedded runtime／session／custom-tool API，並在 legacy provider profile 只與全域 registry 的顯示或 verification state 不同時自動遷移。0.16.0 加入只檢查 diff 的 `lean` review profile：三個並行候選觀點、可預測地最多選出六項候選、獨立 validator session、只公開 supported 的簡化 finding，以及可持久化的 audit summary／telemetry。0.15.3 將 managed-relay worker parser 維持在 TypeScript source，補上必填 job 與
 worker-token 配對的 regression coverage，並重新產生 packaged runtime。0.15.0 將固定的 Pi SDK 升級至 0.81.1，加入 Qwen Token Plan provider capability，
 記錄累積的 Pi session usage，並保留自動重試次數。0.14.0 加入本機 lifecycle telemetry persistence、
 有界詳細報告與 token 保護的
@@ -589,7 +589,7 @@ codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.81.1`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.82.1`
 - [Node.js](https://nodejs.org/)
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)
