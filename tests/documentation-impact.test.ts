@@ -35,6 +35,14 @@ function run(cwd: string, args: string[]) {
   return spawnSync(process.execPath, [checker, ...args], { cwd, encoding: "utf8" });
 }
 
+function runHookInstaller(cwd: string, args: string[] = []) {
+  return spawnSync(process.execPath, [installer, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, CI: "" },
+  });
+}
+
 function withBaseline(cwd: string): void {
   fs.mkdirSync(path.join(cwd, "docs/assets/setup"), { recursive: true });
   fs.copyFileSync(screenshot, path.join(cwd, "docs/assets/setup/01-empty-connections.png"));
@@ -130,18 +138,15 @@ test("broken and unreferenced setup images are reported", () => {
 
 test("hook installer is local, idempotent, and refuses a different hooks path", () => {
   const cwd = fixture();
-  const first = spawnSync(process.execPath, [installer], { cwd, encoding: "utf8" });
+  const first = runHookInstaller(cwd);
   assert.equal(first.status, 0);
   assert.equal(git(cwd, ["config", "--local", "--get", "core.hooksPath"]), ".githooks");
-  const second = spawnSync(process.execPath, [installer], { cwd, encoding: "utf8" });
+  const second = runHookInstaller(cwd);
   assert.equal(second.status, 0);
   git(cwd, ["config", "--local", "core.hooksPath", ".other-hooks"]);
-  const conflict = spawnSync(process.execPath, [installer], { cwd, encoding: "utf8" });
+  const conflict = runHookInstaller(cwd);
   assert.equal(conflict.status, 2);
-  const uninstall = spawnSync(process.execPath, [installer, "--uninstall"], {
-    cwd,
-    encoding: "utf8",
-  });
+  const uninstall = runHookInstaller(cwd, ["--uninstall"]);
   assert.equal(uninstall.status, 2);
 });
 

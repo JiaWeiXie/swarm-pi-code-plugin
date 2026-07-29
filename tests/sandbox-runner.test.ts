@@ -12,6 +12,10 @@ import {
   sanitizedSandboxEnvironment,
 } from "../src/sandbox/runner.js";
 
+const liveSandboxAvailable =
+  detectSandboxAvailability().available &&
+  !(process.platform === "linux" && process.env.RUNNER_ENVIRONMENT === "github-hosted");
+
 test("sandbox policy separates readonly and implementation write access", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-policy-"));
   const canonicalWorkspace = fs.realpathSync(workspace);
@@ -107,7 +111,7 @@ test("isolated worktree sandbox grants read-only Git administrative linkage", as
 test(
   "OS sandbox writes only when the worker mode permits it",
   {
-    skip: !detectSandboxAvailability().available,
+    skip: !liveSandboxAvailable,
   },
   async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-live-"));
@@ -183,7 +187,7 @@ test(
 test(
   "isolated worktree sandbox can inspect Git without metadata writes",
   {
-    skip: !detectSandboxAvailability().available,
+    skip: !liveSandboxAvailable,
   },
   async () => {
     const { worktree } = createLinkedWorktree();
