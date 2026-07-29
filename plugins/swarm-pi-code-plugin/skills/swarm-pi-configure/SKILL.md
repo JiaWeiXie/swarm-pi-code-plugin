@@ -1,11 +1,12 @@
 ---
 name: swarm-pi-configure
-description: Open the full guided local setup for Pi providers, credentials, models, role routing, and shared project delegation policy from Codex or Claude Code. Use for first setup, recovery, provider or model changes, and full reconfiguration; use swarm-pi-project when provider connections must remain untouched.
+description: Configure Pi providers, credentials, models, role routing, and shared project policy in the guided local setup. Use for first setup, recovery, provider or model changes, or full reconfiguration; use swarm-pi-project when provider connections must stay unchanged.
 ---
 
 # Configure Swarm Pi Code Plugin
 
-Read the [compact Skill Control Loop](../../references/skill-control-loop.md) and the [Configuration Addendum](../../references/host-protocol-configuration.md). Load the full [cross-host control protocol](../../references/host-protocol.md) for the State storage write boundary.
+Follow the [Skill Control Loop](../../references/skill-control-loop.md) and read
+the [Configuration Addendum](../../references/host-protocol-configuration.md).
 
 Route arguments before opening the browser:
 
@@ -13,19 +14,24 @@ Route arguments before opening the browser:
 - When the arguments are exactly `--json`, run `$RUNNER init --host "$HOST" --json`, return the storage status, and stop.
 - Otherwise continue with guided setup. Pass `--no-open` only when supplied exactly; treat `--reconfigure` as editing current values without deleting Job history.
 
-1. Run `$RUNNER status --json`. If `workspace.git` is false, ask whether to run only `git init` at the exact reported root. On approval, verify no non-terminal Jobs, run only that command, and require a Git-backed status; never add, commit, configure identity, or modify project files. Keep `--reset` and exact `--json` non-interactive. Stop and preserve both paths on migration conflict or active-job block.
-2. Start `$RUNNER configure --host "$HOST"`, adding `--continuation <id>` only when recovering a saved request. If the browser can load but save reports `EPERM` under `.git/swarm-pi-code-plugin/`, follow the write-boundary recovery exactly: preserve the draft, relaunch with Host approval outside the outer sandbox, and give the user the new loopback URL. Do not change Pi Sandbox mode or edit stored files to work around it.
-3. Keep setup active through provider fields, protocol selection, subscription OAuth, models, roles, Sandbox and approval policy (including the five Sandbox modes, among them the opt-in `full-access` and `autopilot` modes), Decision Mode, Host Assistance, Discovery gates, context budget, Advisor, doctrine metadata, Host Actions, workspace, and review. Never request an API key or OAuth code in the Host conversation.
-4. Treat ChatGPT Plus/Pro as the separate `openai-codex` subscription connection. Treat model discovery and **Verify API** as distinct; a loaded model list is not proof of verification.
-5. Treat custom provider definitions and profiles as user-global. Final Save
-   commits their diff to the plugin-owned global registry together with project
-   routing; deleting a custom provider also deletes its CredentialStore entry.
-   Conflict resolution is revision-guarded: using the global definition revokes
-   the provider-ID credential, while canonical import never copies credentials.
-   Never infer the active provider from `state.config.availableModels` or Job
-   history.
-6. After save, run `$RUNNER doctor --smoke-test --json`, `$RUNNER roles list --json`, and `$RUNNER status --json`. Report readiness, `providerState`, `configurationStorage.directory`, `modelConfigurationFile`, `stateFile`, and migration status; resume a continuation once.
-
-The browser restores only non-sensitive drafts. Secrets enter the setup server's in-memory vault and reach Pi AuthStorage only after verification; `model.json` and runtime state remain outside the checked-out worktree.
-
-New configurations use Adaptive, Host-first, Reversible, and Discovery gate review; the opt-in `full-access` mode (which removes the plugin's own OS sandbox) and the opt-in Autopilot mode (which keeps Lenient's OS-sandbox isolation but auto-runs routine shell unattended) are never defaults. Preserve existing saved Sandbox modes. Keep legacy Host Assistance policies User-only until the user resaves them; never imply that reconfiguration changes an active Job's immutable snapshot.
+1. Run `$RUNNER status --json`. When `workspace.git` is false, offer only
+   `git init` at the reported root. Approval requires no non-terminal Jobs; the
+   result must be Git-backed, with project files, identity, index, and history
+   unchanged. Migration conflict or an active-job block preserves both paths and
+   stops setup.
+2. Start `$RUNNER configure --host "$HOST"`, adding `--continuation <id>` only
+   for recovery. A save-time `EPERM` under `.git/swarm-pi-code-plugin/` triggers
+   the [State storage write boundary](../../references/host-protocol.md#state-storage-write-boundary):
+   preserve the draft, obtain Host approval, relaunch outside the outer sandbox,
+   and provide the new loopback URL.
+3. Keep setup active through connections, protocol, subscription OAuth, model
+   discovery and verification, roles, execution safety, Decision Mode, Host
+   Assistance, Discovery gates, context budget, Advisor, doctrine metadata,
+   Host Actions, workspace, and review. Credentials stay inside the setup UI.
+   ChatGPT Plus/Pro is the separate `openai-codex` connection.
+4. After Save, run `$RUNNER doctor --smoke-test --json`,
+   `$RUNNER roles list --json`, and `$RUNNER status --json`; resume a
+   continuation exactly once when present.
+5. Complete only when the smoke test and role routing are reported together with
+   readiness, `providerState`, configuration directory, model file, state file,
+   and migration status.

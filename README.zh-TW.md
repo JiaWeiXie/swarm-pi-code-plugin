@@ -120,6 +120,12 @@ $swarm-pi-setup
 
 Claude Code commands 與 Codex skills 是相同 workflows 的兩種 Host 入口。請使用上表中對應 Host 的名稱，並以自然語言描述請求；Host 會準備 runner 輸入、驗證 Pi 證據，並把需要使用者決定的事項保留在 Host 邊界。
 
+每個公開 Skill 都遵循同一個精簡 control loop：把一個請求路由到一個
+workflow、建立一份 immutable policy snapshot、保留原始請求、延續 typed
+durable state，並驗證一個 terminal result。Skill 本體只保留該 workflow
+專屬步驟，最後以可觀察的完成條件收束。Resource-aware command planning、
+configuration 與 discovery 等分支 reference，只會在進入對應分支時載入。
+
 #### 設定 Workflows
 
 | Skill | 適用情境與應提供資訊 | 限制與授權邊界 |

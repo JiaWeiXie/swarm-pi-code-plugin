@@ -57,7 +57,9 @@ test("plugin package contains both host adapters and a self-contained runner", (
     const file = path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md");
     assert.equal(fs.existsSync(file), true, `missing Codex skill: ${skill}`);
     const source = fs.readFileSync(file, "utf8");
-    assert.match(source, /cross-host control protocol/i);
+    assert.match(source, /Follow the \[Skill Control Loop\]/);
+    assert.match(source, /Complete only when/i, `missing completion criterion: ${skill}`);
+    assert.ok(source.split("\n").length <= 50, `public Skill should stay compact: ${skill}`);
     assert.equal(
       fs.existsSync(path.join(path.dirname(file), "agents/openai.yaml")),
       true,
@@ -95,9 +97,9 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(implementation, /explicit mutation intent/i);
   assert.match(implementation, /safe-dirty/i);
   assert.match(implementation, /isolated-snapshot/i);
-  assert.match(implementation, /host-owned verification/i);
+  assert.match(implementation, /Host-owned\s+verification/i);
   assert.match(implementation, /--execution-mode supervised/);
-  assert.match(implementation, /background only.*mechanical-executor/i);
+  assert.match(implementation, /Background is reserved[\s\S]*mechanical-executor/i);
   assert.match(implementation, /mechanical-executor/);
   assert.match(implementation, /deliverable: false/);
   assert.match(implementation, /workspace-unborn-head/);
@@ -108,20 +110,19 @@ test("plugin package contains both host adapters and a self-contained runner", (
     "utf8",
   );
   assert.match(orchestration, /EvidencePack/);
-  assert.match(orchestration, /source job ID/i);
+  assert.match(orchestration, /source\s+Job ID/i);
   assert.match(
     orchestration,
-    /must not independently repeat expensive full builds or test suites/i,
+    /One Host-owned\s+bounded verification supplies any dynamic evidence/i,
   );
-  assert.match(orchestration, /resource-aware bounded verification/i);
+  assert.match(orchestration, /Resource-Aware Execution/i);
 
   for (const skill of ["implement", "setup", "scaffold", "discover"]) {
     const source = fs.readFileSync(
       path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
       "utf8",
     );
-    assert.match(source, /resource-aware/i, `missing resource-aware guidance: ${skill}`);
-    assert.match(source, /sequential/i, `missing sequential execution guidance: ${skill}`);
+    assert.match(source, /Resource-Aware Execution/i, `missing resource pointer: ${skill}`);
   }
 
   for (const skill of [
@@ -140,7 +141,6 @@ test("plugin package contains both host adapters and a self-contained runner", (
       path.join(pluginRoot, "skills", `swarm-pi-${skill}`, "SKILL.md"),
       "utf8",
     );
-    assert.match(source, /cross-host control protocol/i);
     assert.match(source, /Skill Control Loop/);
   }
   // The wrapper commands were removed: each capability is a single short-named
@@ -153,28 +153,37 @@ test("plugin package contains both host adapters and a self-contained runner", (
   const protocolPath = path.join(pluginRoot, "references/host-protocol.md");
   assert.equal(fs.existsSync(protocolPath), true);
   const protocol = fs.readFileSync(protocolPath, "utf8");
-  assert.match(protocol, /## Skill Control Loop/);
+  assert.match(protocol, /\[Skill Control Loop\]/);
   assert.match(protocol, /State storage write boundary/);
-  assert.match(protocol, /capabilities\.mutation/);
   assert.match(protocol, /EvidencePack/);
   assert.match(protocol, /wait-timeout-ms 15000/);
   assert.match(protocol, /Host Assistance and Discovery/);
   assert.match(protocol, /UNTRUSTED_HOST_CONTEXT/);
-  assert.match(protocol, /Resource-Aware Command Execution/i);
-  assert.match(protocol, /commands, not as a limit on Pi sessions or orchestration perspectives/i);
-  assert.match(
-    protocol,
-    /do not let separate sessions or perspectives duplicate the same full build or test suite/i,
-  );
-  assert.match(
-    protocol,
-    /adds no capability approval, resource lease, runtime classifier, or hard execution gate/i,
-  );
   assert.match(protocol, /Only the model handling the active Codex or Claude Code turn/i);
   assert.match(protocol, /HostAdjudicationReceipt/);
   assert.match(protocol, /--adjudication-file/);
   assert.match(protocol, /timeout, hook, watcher, background process, or replay may only notify/i);
   assert.match(protocol, /Strict mode cannot gain a capability/i);
+
+  const controlLoop = fs.readFileSync(
+    path.join(pluginRoot, "references/skill-control-loop.md"),
+    "utf8",
+  );
+  assert.match(controlLoop, /one request,\s*one workflow,\s*one immutable policy snapshot/i);
+  assert.match(controlLoop, /capability-specific/i);
+  assert.match(controlLoop, /wait-timeout-ms 15000/);
+  assert.match(controlLoop, /terminal result shown to the user/i);
+
+  const resourceExecution = fs.readFileSync(
+    path.join(pluginRoot, "references/resource-aware-execution.md"),
+    "utf8",
+  );
+  assert.match(resourceExecution, /smallest relevant target/i);
+  assert.match(resourceExecution, /Run expensive stages sequentially/i);
+  assert.match(
+    resourceExecution,
+    /grants no capability, lease, approval, or\s+delivery authority/i,
+  );
 
   for (const skill of ["implement", "setup", "scaffold"]) {
     const source = fs.readFileSync(
@@ -202,15 +211,15 @@ test("plugin package contains both host adapters and a self-contained runner", (
 
   const workerAgent = fs.readFileSync(path.join(pluginRoot, "agents/pi-worker.md"), "utf8");
   assert.match(workerAgent, /swarm-pi-orchestrate/);
-  assert.match(workerAgent, /host-protocol/);
+  assert.match(workerAgent, /compact control loop/i);
 
   const configure = fs.readFileSync(
     path.join(pluginRoot, "skills/swarm-pi-configure/SKILL.md"),
     "utf8",
   );
   assert.match(configure, /\$RUNNER configure --host "\$HOST"/);
-  assert.match(configure, /model\.json/);
-  assert.match(configure, /Never request an API key/i);
+  assert.match(configure, /model file/i);
+  assert.match(configure, /Credentials stay inside the setup UI/i);
   assert.match(configure, /outer sandbox/i);
   assert.match(configure, /State storage write boundary/);
   assert.doesNotMatch(configure, /Ask for a replacement project goal/i);
@@ -220,7 +229,7 @@ test("plugin package contains both host adapters and a self-contained runner", (
     "utf8",
   );
   assert.match(project, /\$RUNNER configure --host "\$HOST" --section project/);
-  assert.match(project, /workflow is repeatable/i);
+  assert.match(project, /repeatable workflow/i);
   // The init command's --reset/--json routing folded into the configure skill.
   assert.match(configure, /--reset/);
   assert.match(configure, /exactly `--json`/);

@@ -21,6 +21,7 @@ import {
   jobDirectory,
   listJobHostRequests,
   modelConfigurationSnapshotHash,
+  providerConfigurationSnapshotHash,
   readJobRequest,
 } from "../state/jobs.js";
 import type { JobRequest } from "../state/jobs.js";
@@ -372,7 +373,14 @@ function parsePolicyEvents(
 
 function verifyProviderSnapshot(request: JobRequest): { hash: string; verified: true } | null {
   if (!request.providerSnapshotHash || !request.modelConfiguration) return null;
-  if (modelConfigurationSnapshotHash(request.modelConfiguration) !== request.providerSnapshotHash) {
+  const computed =
+    request.requestVersion === 6 && request.providerRegistryRevision
+      ? providerConfigurationSnapshotHash(
+          request.modelConfiguration,
+          request.providerRegistryRevision,
+        )
+      : modelConfigurationSnapshotHash(request.modelConfiguration);
+  if (computed !== request.providerSnapshotHash) {
     throw new Error("Audit export failed provider snapshot integrity validation.");
   }
   return { hash: request.providerSnapshotHash, verified: true };

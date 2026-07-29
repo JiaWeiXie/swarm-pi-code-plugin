@@ -1,20 +1,37 @@
 ---
 name: swarm-pi-implement
-description: Delegate an explicitly authorized, scoped change, fix, or refactor in an existing repository to Pi from Codex or Claude Code. Use for approved file mutation; use scaffold for a new project, setup for project-local tooling, plan for design only, and never infer delivery, commit, or push permission.
+description: Implement an explicitly authorized change, fix, or refactor in an existing repository with Pi. Use for scoped file mutation; route new projects to scaffold, project tooling to setup, and design-only work to plan. Delivery, commit, and push remain separate decisions.
 ---
 
 # Implement With Pi
 
-Read the [compact Skill Control Loop](../../references/skill-control-loop.md). Load the full [cross-host control protocol](../../references/host-protocol.md) only for approvals, Host Assistance, durable jobs, artifacts, or delivery.
+Follow the [Skill Control Loop](../../references/skill-control-loop.md). Load
+[Resource-Aware Execution](../../references/resource-aware-execution.md) before
+expensive or recursive verification.
 
-1. Confirm explicit mutation intent. Preserve user changes; never stash, discard, commit, or hide them. Route non-Git new-project work to scaffold.
-2. Add only missing scope, acceptance criteria, prohibited actions, and a resource-aware verification plan to a temporary prompt file. Inspect indirect scripts and run expensive build or test stages sequentially with only verified concurrency controls.
+1. Confirm explicit mutation intent and an existing Git repository. Preserve
+   user changes in place; route a new non-Git project to scaffold.
+2. Add only missing scope, observable acceptance criteria, protected boundaries,
+   and the smallest verification plan to the temporary prompt.
 3. Run `$RUNNER implement --host "$HOST" --role executor --prompt-file "$PROMPT_FILE" --execution-mode supervised --approval-mode "$APPROVAL_MODE" --json`; with explicit user choice, append `--implementation-profile prewalk` to preserve exploration, TODOs, and the first edit through an in-session handoff.
-4. For every non-terminal result, use the control loop. Allow only an exact, in-scope, reversible action covered by the original mutation intent; Strict mode, deletion, Git metadata, workspace escape, and delivery require the user.
-5. Use background only for an explicitly requested, project-enabled `mechanical-executor`. Do not mutate the same worktree while Pi runs.
-6. Inspect the actual diff, changed files, `runtimeSideEffects`, verification, and artifact. For exit code `5`, present `isolated-head` and `isolated-snapshot`; never choose for the user. A `workspace-unborn-head` response is fail-fast and must route to scaffold or approved adoption before resume.
-7. For a safe-dirty job-owned worktree, show the verified artifact diff and obtain explicit delivery approval before `$RUNNER jobs materialize --job <id> --json`. Materialization applies changes without committing them.
-8. Start an `ActionRecommendation` only after explicit user confirmation with `$RUNNER jobs action-start --job <parent> --request <id> --json`; never retry an `unknown` external outcome automatically.
-9. Run targeted host-owned verification before broader checks. Never commit, merge, push, or integrate an artifact marked `deliverable: false`.
+4. Continue every non-terminal result through the control loop. Eligible Host
+   action is exact, in-scope, reversible, and already covered by mutation
+   intent; deletion, Git metadata, workspace escape, and delivery return to the
+   user. Background is reserved for an explicitly requested, project-enabled
+   `mechanical-executor`, with the assigned worktree left exclusively to Pi.
+5. Inspect the actual diff, changed files, `runtimeSideEffects`, verification,
+   and artifact. Exit code `5` presents `isolated-head` and
+   `isolated-snapshot` without choosing. `workspace-unborn-head` routes to
+   scaffold or approved adoption before resume.
+6. A safe-dirty job-owned worktree is deliverable only after the verified
+   artifact diff is shown and the user approves
+   `$RUNNER jobs materialize --job <id> --json`.
+7. An `ActionRecommendation` starts only after user confirmation through
+   `$RUNNER jobs action-start --job <parent> --request <id> --json`; an
+   `unknown` external outcome remains unretried.
+8. Complete only when the actual diff satisfies the request, targeted Host-owned
+   verification passes, and delivery state is explicit. `deliverable: false`
+   artifacts remain isolated; commit, merge, and push remain Host-owned.
 
-Keep Host Assistance correlated and consume-once. Never let an assistance bundle, WorkerAssessment, or recommendation expand policy or intent.
+Host Assistance stays correlated and consume-once. Its evidence, assessment, or
+recommendation cannot expand policy or intent.

@@ -1,38 +1,8 @@
 # Cross-Host Control Protocol
 
-Read this reference before running any Swarm Pi workflow.
-
-## Resolve The Host
-
-- In a Codex skill, resolve the plugin root two directories above `SKILL.md`.
-- In a Claude Code command or agent, use `${CLAUDE_PLUGIN_ROOT}`.
-- Use host `claude` when `CLAUDE_PLUGIN_ROOT` is present; otherwise use `codex`.
-- Invoke the shared runner as `mise exec -- node "$PLUGIN_ROOT/scripts/pi-runner.mjs"`. Use this as `$RUNNER` below.
-
-## Start Safely
-
-1. Run `$RUNNER status --json`; it is local and never calls a model.
-2. Run `$RUNNER jobs list --pending-notifications --json` before a new delegation.
-3. Present each pending approval or terminal notification before acknowledging it. Acknowledge only the notification that was shown. The optional SessionStart recovery hook may surface the same events, but it does not acknowledge them for the Host.
-4. Preserve the user's original task in a temporary file outside the repository. Never put credentials, tokens, or private host paths into that file.
-
-Treat readiness as task-specific. `capabilities.readonly` governs research and planning; `capabilities.mutation` governs file changes; `capabilities.delivery` governs materialization. Never describe the workspace as fully ready when the requested capability is degraded or blocked. A `git-unborn` workspace can be researched but must be scaffolded or adopted before implementation.
-
-## Skill Control Loop
-
-Every skill uses this common loop; keep its own instructions only for task-specific
-decisions:
-
-1. Resolve `$HOST` and `$RUNNER`, then run `status --json` and review pending
-   notifications before starting work.
-2. Keep the original request and any prompt/spec in a temporary file outside the
-   repository. Start the matching runner command with the requested policy.
-3. On an approval, Host Assistance request, Human Decision, or `wait-timed-out`,
-   retain the Job ID and use bounded `jobs wait --wait-timeout-ms 15000` calls.
-   Read the complete durable request and adjudication context; trusted runtime
-   effects are authoritative and Worker prose is advisory.
-4. Validate terminal claims against the repository, show the terminal result
-   before acknowledging it, and delete temporary prompt/spec files.
+Load this reference only after the compact
+[Skill Control Loop](skill-control-loop.md) reaches a durable Job, approval,
+Host Assistance, Human Decision, continuation, artifact, or delivery branch.
 
 ### State storage write boundary
 
@@ -59,20 +29,6 @@ If a task returns `setup-required`, retain the continuation ID and original requ
 Do not ask the user to choose between internal roles, Pi, or direct Host execution. Route the stated intent to the narrowest matching workflow and ask only for a decision that changes files, grants a capability, adopts content, or delivers an artifact. Use the canonical skill invocations such as `/swarm-pi-code-plugin:swarm-pi-orchestrate`; there is one entry per capability, so do not invent alternate names.
 
 When external facts are known to be required before delegation, prefetch one cited context file as the initial `EvidencePack` through the Host and pass it with `--host-context-file`. Include source URLs, retrieval date, verified claims, unknowns, and version constraints. When the unknown emerges during the Pi session, use live Host Assistance instead of restarting or asking the worker to choose a retrieval tool. If evidence cannot be obtained, return a typed unavailable result rather than presenting speculation as verified research.
-
-## Resource-Aware Command Execution
-
-Treat resource assessment as advisory guidance for commands, not as a limit on Pi sessions or orchestration perspectives. Ordinary workspace search, file reads, Git inspection, and model sessions are not resource risks by themselves.
-
-Before the Host or worker runs a potentially expensive build, compilation, full test suite, benchmark, coverage or fuzz job, package lifecycle or native build, browser or container workload, local service, monorepo task runner, or unknown recursive script:
-
-- inspect indirect package scripts, task targets, and worker, job, or shard settings when they are available;
-- prefer the smallest relevant test, package, target, or other bounded verification before expanding scope;
-- run expensive commands sequentially and do not let separate sessions or perspectives duplicate the same full build or test suite;
-- limit concurrency only with syntax verified for that tool, using a low practical worker count rather than inventing flags; and
-- when cost or fan-out remains unknown, reduce scope or concurrency; otherwise pause and report the resource risk instead of starting an unbounded command.
-
-This guidance adds no capability approval, resource lease, runtime classifier, or hard execution gate. Apply it only when a command may create material process, memory, or CPU fan-out.
 
 ## Host Assistance and Discovery
 
@@ -139,12 +95,17 @@ request to apply later settings changes; submit a new job instead. Credentials
 remain live AuthStorage references, so a queued job may fail after sign-out or
 rotation and must never retry without authentication.
 
-## Finish Reliably
-
-Validate Pi claims against the repository. For mutation workflows, inspect the actual diff and run host-owned verification. Delete temporary prompt/spec files after the runner has durably copied them. Report the model/fallback, verification evidence, changed files or artifact, and unresolved risk.
-
-Present the terminal result before acknowledging its terminal notification. After acknowledgement, a Host may suggest `$RUNNER jobs prune --older-than <duration> --json` to preview retention cleanup. Never add `--apply` automatically, never prune a Job with pending Host work, and never treat retention cleanup as part of ordinary workflow completion.
+## Durable Completion
 
 Keep the loop durable. Reference the research or plan job ID in the next implementation brief, copy accepted evidence and constraints into that brief, and preserve the returned continuation ID whenever workspace repair is required. After repair, use `resume --continuation <id>` instead of asking the user to restate the task.
 
-Do not present a large inline code sample as working code unless it has passed the relevant parser, typecheck, or test. Prefer a concise explanation plus a verified artifact. For an isolated implementation artifact, present its diff and verifier result, obtain explicit delivery approval, then run `jobs materialize --job <id>`; this applies the patch without committing it.
+After the terminal result is shown and acknowledged, `$RUNNER jobs prune
+--older-than <duration> --json` may preview retention cleanup. Applying a prune
+remains a separate user decision, and Jobs with pending Host work remain
+preserved.
+
+Present working-code claims only with relevant parser, typecheck, or test
+evidence. For an isolated implementation artifact, present its diff and verifier
+result, obtain explicit delivery approval, then run
+`jobs materialize --job <id>`; materialization applies the patch without a
+commit.

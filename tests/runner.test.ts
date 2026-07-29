@@ -1510,13 +1510,13 @@ test("lean review runs a two-round readonly panel and persists its profile", asy
           peakActive = Math.max(peakActive, active);
           await new Promise<void>((resolve) => setTimeout(resolve, 5));
           active -= 1;
-          const output = prompt.includes("round 1")
-            ? candidates
-            : JSON.stringify({
+          const output = prompt.includes("[PERSPECTIVE]\nlean:validator")
+            ? JSON.stringify({
                 outcome: "supported",
                 behaviorEvidence: "The replacement keeps the exported value unchanged.",
                 verification: "npm run typecheck",
-              });
+              })
+            : candidates;
           listener?.({
             type: "message_update",
             assistantMessageEvent: { type: "text_delta", delta: output },

@@ -1,15 +1,20 @@
 ---
 name: swarm-pi-ask
-description: Delegate one focused repository question, explanation, or evidence check to a read-only Pi scout from Codex or Claude Code. Use for a second grounded analysis pass; use review for diff findings, plan for change design, orchestrate for multiple perspectives, and never use ask for edits.
+description: Answer one focused repository question with a read-only Pi scout. Use for a grounded second analysis pass; route diff findings to review, change design to plan, multiple perspectives to orchestrate, and edits to implement.
 ---
 
 # Ask Pi
 
-Read the [compact Skill Control Loop](../../references/skill-control-loop.md). The full cross-host control protocol is loaded only for typed approval or durable-job handling.
+Follow the [Skill Control Loop](../../references/skill-control-loop.md).
 
-1. Write one self-contained question with repository scope, required evidence, freshness constraints, and the uncertainty to resolve.
+1. Frame one self-contained question with repository scope, required evidence,
+   freshness, and the exact uncertainty to resolve.
 2. Run `$RUNNER ask --host "$HOST" --role scout --prompt-file "$PROMPT_FILE" --execution-mode "$EXECUTION_MODE" --approval-mode "$APPROVAL_MODE" --json`.
-3. For every non-terminal result, use the control loop. An active Host may resolve only eligible public read-only context within the immutable snapshot; otherwise ask the user.
-4. Validate the answer against repository evidence, identify unsupported claims, and report uncertainty or failure plainly.
+3. Continue every non-terminal result through the control loop. Active Host
+   review is limited to eligible public read-only context inside the immutable
+   snapshot.
+4. Complete only when every material claim is tied to repository evidence or
+   marked unsupported, unknown, or failed.
 
-Keep this workflow read-only. Do not turn the answer into a plan, review, or file change without routing to the matching workflow.
+This workflow is read-only. A later plan, review, or edit is a new routed
+request.

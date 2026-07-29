@@ -1,4 +1,4 @@
 interface:
   display_name: "Swarm Pi Configure"
-  short_description: "Configure providers, models, and Pi project policy"
-  default_prompt: "Use $swarm-pi-configure to configure Pi providers, models, and project policy."
+  short_description: "Configure Pi connections, models, and project policy"
+  default_prompt: "Use $swarm-pi-configure to open the complete guided Pi configuration."

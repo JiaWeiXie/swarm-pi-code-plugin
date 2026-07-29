@@ -1,4 +1,4 @@
 interface:
   display_name: "Swarm Pi Review"
-  short_description: "Review and simplify a Git diff"
-  default_prompt: "Use $swarm-pi-review to review this Git diff; use lean for simplification."
+  short_description: "Review a Git diff for defects or simplification"
+  default_prompt: "Use $swarm-pi-review to review this Git diff with the standard or lean profile."

@@ -1,4 +1,4 @@
 interface:
   display_name: "Swarm Pi Plan"
-  short_description: "Draft a decision-ready change plan with Pi"
-  default_prompt: "Use $swarm-pi-plan to produce a decision-ready plan for this repository change."
+  short_description: "Produce a decision-ready repository plan"
+  default_prompt: "Use $swarm-pi-plan to produce a repository-grounded, decision-ready change plan."

@@ -1,4 +1,4 @@
 interface:
   display_name: "Swarm Pi Discover"
-  short_description: "Research and test unresolved claims with Pi"
-  default_prompt: "Use $swarm-pi-discover to investigate this unresolved claim with gated evidence."
+  short_description: "Test an unresolved claim through gated discovery"
+  default_prompt: "Use $swarm-pi-discover to resolve this unknown through research, experiment, and convergence."

@@ -1,4 +1,4 @@
 interface:
   display_name: "Swarm Pi Implement"
-  short_description: "Implement an approved repository change with Pi"
-  default_prompt: "Use $swarm-pi-implement to make this explicitly approved repository change."
+  short_description: "Implement one approved repository change"
+  default_prompt: "Use $swarm-pi-implement to deliver this explicitly approved repository change and verification."

@@ -124,3 +124,25 @@ test("worker prompt has a versioned stable prefix and request last", () => {
   assert.ok(projectSection.includes("Project policy abc123:"));
   assert.equal(projectSection.includes("Directories in scope:"), false);
 });
+
+test("worker task contracts state observable completion evidence", () => {
+  const expected: Record<Parameters<typeof buildWorkerPrompt>[0]["kind"], RegExp> = {
+    ask: /material claim.*file and line.*unknowns/i,
+    review: /impact, evidence, location.*smallest safe response/i,
+    plan: /observable verification.*risk or rollback/i,
+    implement: /inspected diff and targeted verification/i,
+    orchestrate: /claims to evidence.*uncertainty and conflicts/i,
+    scaffold: /every staged file and verification result/i,
+    setup: /every change and verification result/i,
+    discover: /fixed schema-gated sequence.*Human Decision gates/i,
+  };
+  for (const [kind, pattern] of Object.entries(expected)) {
+    const prompt = buildWorkerPrompt({
+      host: "codex",
+      kind: kind as Parameters<typeof buildWorkerPrompt>[0]["kind"],
+      prompt: "Request body.",
+    });
+    assert.match(prompt, pattern, `missing task contract: ${kind}`);
+    assert.ok(prompt.endsWith("[REQUEST]\nRequest body."));
+  }
+});

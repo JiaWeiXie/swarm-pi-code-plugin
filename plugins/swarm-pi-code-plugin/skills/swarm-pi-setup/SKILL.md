@@ -1,15 +1,25 @@
 ---
 name: swarm-pi-setup
-description: Configure project-local dependencies, build, test, lint, and development tooling through Pi's supervised environment-engineer role from Codex or Claude Code. Use for reproducible repository tooling changes; use implement for product code, scaffold for new projects, and never perform global provisioning or deployment.
+description: Set up reproducible project-local dependencies, build, test, lint, and development tooling with Pi's supervised environment engineer. Use for repository tooling changes; route product code to implement and new projects to scaffold. Global provisioning and deployment stay out of scope.
 ---
 
 # Configure A Development Environment With Pi
 
-Read the [compact Skill Control Loop](../../references/skill-control-loop.md). The full cross-host control protocol is loaded only for typed approval or durable-job handling.
+Follow the [Skill Control Loop](../../references/skill-control-loop.md). Load
+[Resource-Aware Execution](../../references/resource-aware-execution.md) before
+install, build, test, or recursive tooling commands.
 
-1. Write the exact project-local setup request, allowed package manager, lifecycle-script policy, prohibited global actions, and a resource-aware verification plan to a temporary prompt file. Inspect indirect scripts and keep install, build, test, and verification stages sequential.
+1. Write the exact project-local request, allowed package manager,
+   lifecycle-script policy, Host-only boundaries, and sequential verification
+   plan to the temporary prompt.
 2. Run `$RUNNER setup --host "$HOST" --role environment-engineer --prompt-file "$PROMPT_FILE" --execution-mode supervised --approval-mode "$APPROVAL_MODE" --workspace-strategy auto --json`.
-3. For every non-terminal result, use the control loop.
-4. For exit code `5`, present isolated HEAD, isolated snapshot, scaffold, or adoption inspection without choosing, committing, stashing, deleting, or hiding files.
-5. Allow only an exact, project-local, fully reversible action already covered by setup intent, with exact targets, rollback, and verification. Ask the user about unknown lifecycle scripts, uncertain network targets, native builds, or partially reversible changes. Keep global installs, host provisioning, deployment, and Git delivery denied.
-6. Inspect all changes and fresh worker evidence, then run targeted host-owned verification.
+3. Continue every non-terminal result through the control loop.
+4. Exit code `5` presents isolated HEAD, isolated snapshot, scaffold, or adoption
+   inspection as a user decision, with existing files and Git state preserved.
+5. Eligible automatic action is exact, project-local, fully reversible, already
+   covered by setup intent, and paired with rollback and verification. Unknown
+   lifecycle scripts, uncertain network targets, native builds, or partial
+   reversibility return to the user. Global installs, Host provisioning,
+   deployment, and Git delivery remain outside the role ceiling.
+6. Complete only when every changed file is accounted for, fresh worker evidence
+   is inspected, and targeted Host-owned verification passes.

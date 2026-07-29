@@ -93,6 +93,27 @@ file, ignored-file, network, process, or external side effect exists. A
 background mechanical executor that needs escalation pauses for supervisor
 review rather than switching to a broader role automatically.
 
+## Prompt Contracts
+
+Worker prompts use a versioned, cache-stable hierarchy:
+`[PROMPT]` → `[HOST]` → `[TASK]` → optional role context → `[PROJECT]` →
+`[REQUEST]`. The user-controlled request stays last, while the stable prefix
+contains the task contract and immutable project-policy rendering.
+
+Prompt version 3 gives every public task an observable completion contract:
+claims cite evidence or remain unknown; findings include impact, location, and
+the smallest safe response; plan steps name verification and rollback;
+mutation tasks account for the actual diff and fresh verification. Role and
+safety boundaries use positive target behavior where possible, while hard
+authorization ceilings remain explicit.
+
+Host-facing Skills use the same information hierarchy. The compact
+`skill-control-loop.md` is the single source for routing, readiness, temporary
+request storage, durable continuation, and terminal verification. Each
+`SKILL.md` contains only workflow-specific steps and an explicit completion
+criterion. Configuration, Discovery, cross-host durable control, and
+resource-aware execution sit behind branch-specific context pointers.
+
 ## Policy Resolution
 
 Every proposed action is evaluated in this order:
@@ -218,6 +239,9 @@ Scoped-tool `ProjectPolicyError` denials are also recorded there and increment
 redacted Host Assistance records and WorkerAssessments, runtime
 `effectAssessment` and classifier-normalization evidence, approval receipts,
 and lease principals/constraints.
+Audit integrity recomputes request v6 provider snapshots from the submitted
+model configuration plus its provider-registry revision; legacy requests retain
+their model-configuration-only hash semantics.
 Postflight failure is reported in the terminal result and is not necessarily a
 separate policy event.
 

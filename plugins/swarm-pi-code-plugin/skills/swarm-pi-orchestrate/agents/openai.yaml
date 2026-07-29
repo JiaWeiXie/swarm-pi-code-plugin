@@ -1,4 +1,4 @@
 interface:
   display_name: "Swarm Pi Orchestrate"
-  short_description: "Compare bounded Pi perspectives on a decision"
-  default_prompt: "Use $swarm-pi-orchestrate to compare bounded read-only perspectives on this decision."
+  short_description: "Reconcile bounded perspectives on a decision"
+  default_prompt: "Use $swarm-pi-orchestrate to reconcile bounded read-only perspectives on this decision."

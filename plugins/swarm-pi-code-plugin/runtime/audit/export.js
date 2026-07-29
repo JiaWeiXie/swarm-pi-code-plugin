@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { policySnapshotHash } from "../orchestration/roles.js";
-import { getJob, jobDirectory, listJobHostRequests, modelConfigurationSnapshotHash, readJobRequest, } from "../state/jobs.js";
+import { getJob, jobDirectory, listJobHostRequests, modelConfigurationSnapshotHash, providerConfigurationSnapshotHash, readJobRequest, } from "../state/jobs.js";
 import { resolveStateDir } from "../state/state.js";
 const MAX_AUDIT_SOURCE_BYTES = 32 * 1024 * 1024;
 const SAFE_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -286,7 +286,10 @@ function parsePolicyEvents(raw, roots, counter) {
 function verifyProviderSnapshot(request) {
     if (!request.providerSnapshotHash || !request.modelConfiguration)
         return null;
-    if (modelConfigurationSnapshotHash(request.modelConfiguration) !== request.providerSnapshotHash) {
+    const computed = request.requestVersion === 6 && request.providerRegistryRevision
+        ? providerConfigurationSnapshotHash(request.modelConfiguration, request.providerRegistryRevision)
+        : modelConfigurationSnapshotHash(request.modelConfiguration);
+    if (computed !== request.providerSnapshotHash) {
         throw new Error("Audit export failed provider snapshot integrity validation.");
     }
     return { hash: request.providerSnapshotHash, verified: true };

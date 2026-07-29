@@ -1,4 +1,4 @@
 interface:
   display_name: "Swarm Pi Scaffold"
-  short_description: "Design and stage a verified new project with Pi"
-  default_prompt: "Use $swarm-pi-scaffold to design, stage, and verify this new project."
+  short_description: "Design, stage, and verify a new project"
+  default_prompt: "Use $swarm-pi-scaffold to produce and materialize a verified new-project scaffold."

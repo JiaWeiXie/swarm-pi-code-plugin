@@ -11,7 +11,7 @@ export function createPrewalkController(options) {
     let switched = false;
     const tool = {
         name: "update_todo",
-        description: "Maintain 1-8 concise implementation TODOs; each requires a verification condition.",
+        description: "Record 1-8 concrete implementation TODOs; each has an observable verification condition.",
         parameters: {
             type: "object",
             additionalProperties: false,

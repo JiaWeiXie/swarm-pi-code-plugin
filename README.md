@@ -155,6 +155,13 @@ workflows. Use the name shown above for your Host and describe the request in
 plain language; the Host prepares the runner inputs, validates Pi's evidence,
 and keeps user decisions at the Host boundary.
 
+Every public Skill follows one compact control loop: route one request to one
+workflow, snapshot one policy, preserve the request, continue typed durable
+states, and verify one terminal result. Skill bodies contain only
+workflow-specific steps and end with an observable completion criterion.
+Branch-only references, including resource-aware command planning,
+configuration, and discovery, load only when that branch is reached.
+
 #### Configuration workflows
 
 | Skill | Use it for and provide | Limits and authorization boundaries |
