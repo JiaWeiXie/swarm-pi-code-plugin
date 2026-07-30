@@ -286,7 +286,7 @@ function parsePolicyEvents(raw, roots, counter) {
 function verifyProviderSnapshot(request) {
     if (!request.providerSnapshotHash || !request.modelConfiguration)
         return null;
-    const computed = request.requestVersion === 6 && request.providerRegistryRevision
+    const computed = (request.requestVersion ?? 0) >= 6 && request.providerRegistryRevision
         ? providerConfigurationSnapshotHash(request.modelConfiguration, request.providerRegistryRevision)
         : modelConfigurationSnapshotHash(request.modelConfiguration);
     if (computed !== request.providerSnapshotHash) {

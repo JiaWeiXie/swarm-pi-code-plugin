@@ -144,7 +144,9 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   assert.match(html, /id="decision-mode"/);
   assert.match(html, /id="host-assistance-mode"/);
   assert.match(html, /id="advisor-enabled"/);
-  assert.match(html, /id="host-actions-enabled"/);
+  assert.match(html, /id="testing-preference"/);
+  assert.match(html, /id="task-hard-limits"/);
+  assert.match(html, /Host Actions 0\.5 was removed/);
   assert.match(html, /<option>max<\/option>/);
   assert.match(html, /\["off","minimal","low","medium","high","xhigh","max"\]/);
   assert.match(html, /id="host-max-requests" type="number" min="0" max="6"/);
@@ -159,7 +161,7 @@ test("configuration page starts from connections and uses the original Swarm Pi 
   assert.match(html, /guideAnchor/);
   assert.match(html, /field\.guidance/);
   assert.match(html, /id="private-connector"/);
-  assert.match(html, /Recommendation cost value \(metadata\)/);
+  assert.doesNotMatch(html, /Recommendation cost value \(metadata\)/);
   assert.match(html, /Supported task type and alias reference/);
   assert.match(html, /blank does not mean zero or default/);
   assert.match(html, /"workflowBounds"/);

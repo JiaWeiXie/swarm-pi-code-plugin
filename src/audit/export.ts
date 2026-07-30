@@ -374,7 +374,7 @@ function parsePolicyEvents(
 function verifyProviderSnapshot(request: JobRequest): { hash: string; verified: true } | null {
   if (!request.providerSnapshotHash || !request.modelConfiguration) return null;
   const computed =
-    request.requestVersion === 6 && request.providerRegistryRevision
+    (request.requestVersion ?? 0) >= 6 && request.providerRegistryRevision
       ? providerConfigurationSnapshotHash(
           request.modelConfiguration,
           request.providerRegistryRevision,

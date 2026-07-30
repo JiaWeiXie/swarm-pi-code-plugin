@@ -15,7 +15,7 @@ import { assessWorkspace } from "../git/worktree.js";
 import { normalizeDelegatedTaskSelections } from "../policy/project-policy.js";
 import { loadModelConfiguration, prepareProviderRegistryForConfiguration, resolveProviderRegistryMigrationConflict, modelPriority, parseModelConfiguration, saveModelConfiguration, resolveModelConfigurationFile, providerHeaderSecretRef, providerSecretRef, } from "../state/model-config.js";
 import { loadProviderRegistry, ProviderRegistryConflictError, ProviderRegistryRevisionConflictError, resolveProviderRegistryFile, resolveProviderRegistryRecoveryFile, withProviderRegistryTransaction, } from "../state/provider-registry.js";
-import { loadState, resolveStateDir, resolveStateFile, resolveWorkspaceRoot, saveProjectSettings, saveExecutionSettings, setModelPriority, updateState, defaultHostActionPolicy, } from "../state/state.js";
+import { loadState, resolveStateDir, resolveStateFile, resolveWorkspaceRoot, saveProjectSettings, saveExecutionSettings, setModelPriority, updateState, defaultHostActionPolicy, defaultExecutionTimePolicy, defaultTaskExecutionDefaults, } from "../state/state.js";
 import { discoverEndpoint, discoverLocalEndpoints, } from "./model-discovery.js";
 import { modelReferences, providerForModelReference, reconcileRemovedModelReferences, removedCustomModelReferences, removedCustomProviderIds, } from "./configuration-references.js";
 export class ConfigurationSaveError extends Error {
@@ -413,6 +413,9 @@ export async function loadConfigurationView(cwd, env = process.env) {
             contextBudget: state.config.contextBudget ?? WORKFLOW_BOUNDS.contextBudget.default,
             advisor: state.config.advisor ?? defaultAdvisorPolicy(),
             doctrine: state.config.doctrine ?? null,
+            executionTimePolicy: state.config.executionTimePolicy ?? defaultExecutionTimePolicy(),
+            taskExecutionDefaults: state.config.taskExecutionDefaults ?? defaultTaskExecutionDefaults(),
+            testingPreference: state.config.testingPreference ?? "write-tests",
             hostActions: state.config.hostActions ?? defaultHostActionPolicy(),
         }))
             .digest("hex")
@@ -424,6 +427,9 @@ export async function loadConfigurationView(cwd, env = process.env) {
         contextBudget: state.config.contextBudget ?? WORKFLOW_BOUNDS.contextBudget.default,
         advisor: structuredClone(state.config.advisor ?? defaultAdvisorPolicy()),
         doctrine: state.config.doctrine ?? null,
+        executionTimePolicy: structuredClone(state.config.executionTimePolicy ?? defaultExecutionTimePolicy()),
+        taskExecutionDefaults: structuredClone(state.config.taskExecutionDefaults ?? defaultTaskExecutionDefaults()),
+        testingPreference: state.config.testingPreference ?? "write-tests",
         hostActions: structuredClone(state.config.hostActions ?? defaultHostActionPolicy()),
         workflowBounds: structuredClone(WORKFLOW_BOUNDS),
     };
@@ -790,6 +796,9 @@ export async function saveProjectProfileSubmission(cwd, submission, env = proces
         contextBudget: current.config.contextBudget ?? 4,
         advisor: current.config.advisor ?? defaultAdvisorPolicy(),
         doctrine: current.config.doctrine ?? null,
+        executionTimePolicy: current.config.executionTimePolicy ?? defaultExecutionTimePolicy(),
+        taskExecutionDefaults: current.config.taskExecutionDefaults ?? defaultTaskExecutionDefaults(),
+        testingPreference: current.config.testingPreference ?? "write-tests",
         hostActions: current.config.hostActions ?? defaultHostActionPolicy(),
     });
     assertSandboxModeAvailable(sandboxMode);
@@ -1014,6 +1023,11 @@ function normalizeExecutionSettings(value, fallback) {
                 : (() => {
                     throw new Error("Unknown decision doctrine");
                 })(),
+        executionTimePolicy: value.executionTimePolicy ?? fallback.executionTimePolicy ?? defaultExecutionTimePolicy(),
+        taskExecutionDefaults: value.taskExecutionDefaults ??
+            fallback.taskExecutionDefaults ??
+            defaultTaskExecutionDefaults(),
+        testingPreference: value.testingPreference ?? fallback.testingPreference ?? "write-tests",
         hostActions: normalizeHostActions(value.hostActions, fallback.hostActions),
     };
 }

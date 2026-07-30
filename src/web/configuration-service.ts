@@ -16,6 +16,9 @@ import type {
   AdvisorPolicy,
   HostActionPolicy,
   DoctrineId,
+  ExecutionTimePolicy,
+  TaskExecutionDefaults,
+  TestingPreference,
 } from "../core/contracts.js";
 import {
   DEFAULT_ADAPTIVE_POLICY,
@@ -85,6 +88,8 @@ import {
   updateState,
   type SwarmProfile,
   defaultHostActionPolicy,
+  defaultExecutionTimePolicy,
+  defaultTaskExecutionDefaults,
 } from "../state/state.js";
 import {
   discoverEndpoint,
@@ -155,6 +160,11 @@ export interface ConfigurationView {
   contextBudget: number;
   advisor: AdvisorPolicy;
   doctrine: DoctrineId | null;
+  executionTimePolicy?: ExecutionTimePolicy;
+  taskExecutionDefaults?: Partial<
+    Record<import("../core/contracts.js").TaskKind, TaskExecutionDefaults>
+  >;
+  testingPreference?: TestingPreference;
   hostActions: HostActionPolicy;
   workflowBounds: typeof WORKFLOW_BOUNDS;
   issues?: ConfigurationIssue[];
@@ -219,6 +229,11 @@ export interface ConfigurationSubmission {
   contextBudget?: number | undefined;
   advisor?: AdvisorPolicy | undefined;
   doctrine?: DoctrineId | null | undefined;
+  executionTimePolicy?: ExecutionTimePolicy | undefined;
+  taskExecutionDefaults?:
+    | Partial<Record<import("../core/contracts.js").TaskKind, TaskExecutionDefaults>>
+    | undefined;
+  testingPreference?: TestingPreference | undefined;
   hostActions?: HostActionPolicy | undefined;
 }
 
@@ -239,6 +254,11 @@ export interface ProjectSettingsSubmission {
   contextBudget?: number | undefined;
   advisor?: AdvisorPolicy | undefined;
   doctrine?: DoctrineId | null | undefined;
+  executionTimePolicy?: ExecutionTimePolicy | undefined;
+  taskExecutionDefaults?:
+    | Partial<Record<import("../core/contracts.js").TaskKind, TaskExecutionDefaults>>
+    | undefined;
+  testingPreference?: TestingPreference | undefined;
   hostActions?: HostActionPolicy | undefined;
 }
 
@@ -764,6 +784,10 @@ export async function loadConfigurationView(
           contextBudget: state.config.contextBudget ?? WORKFLOW_BOUNDS.contextBudget.default,
           advisor: state.config.advisor ?? defaultAdvisorPolicy(),
           doctrine: state.config.doctrine ?? null,
+          executionTimePolicy: state.config.executionTimePolicy ?? defaultExecutionTimePolicy(),
+          taskExecutionDefaults:
+            state.config.taskExecutionDefaults ?? defaultTaskExecutionDefaults(),
+          testingPreference: state.config.testingPreference ?? "write-tests",
           hostActions: state.config.hostActions ?? defaultHostActionPolicy(),
         }),
       )
@@ -776,6 +800,13 @@ export async function loadConfigurationView(
     contextBudget: state.config.contextBudget ?? WORKFLOW_BOUNDS.contextBudget.default,
     advisor: structuredClone(state.config.advisor ?? defaultAdvisorPolicy()),
     doctrine: state.config.doctrine ?? null,
+    executionTimePolicy: structuredClone(
+      state.config.executionTimePolicy ?? defaultExecutionTimePolicy(),
+    ),
+    taskExecutionDefaults: structuredClone(
+      state.config.taskExecutionDefaults ?? defaultTaskExecutionDefaults(),
+    ),
+    testingPreference: state.config.testingPreference ?? "write-tests",
     hostActions: structuredClone(state.config.hostActions ?? defaultHostActionPolicy()),
     workflowBounds: structuredClone(WORKFLOW_BOUNDS),
   };
@@ -1273,6 +1304,9 @@ export async function saveProjectProfileSubmission(
     contextBudget: current.config.contextBudget ?? 4,
     advisor: current.config.advisor ?? defaultAdvisorPolicy(),
     doctrine: current.config.doctrine ?? null,
+    executionTimePolicy: current.config.executionTimePolicy ?? defaultExecutionTimePolicy(),
+    taskExecutionDefaults: current.config.taskExecutionDefaults ?? defaultTaskExecutionDefaults(),
+    testingPreference: current.config.testingPreference ?? "write-tests",
     hostActions: current.config.hostActions ?? defaultHostActionPolicy(),
   });
   assertSandboxModeAvailable(sandboxMode);
@@ -1557,6 +1591,11 @@ function normalizeExecutionSettings(
     contextBudget?: number | undefined;
     advisor?: AdvisorPolicy | undefined;
     doctrine?: DoctrineId | null | undefined;
+    executionTimePolicy?: ExecutionTimePolicy | undefined;
+    taskExecutionDefaults?:
+      | Partial<Record<import("../core/contracts.js").TaskKind, TaskExecutionDefaults>>
+      | undefined;
+    testingPreference?: TestingPreference | undefined;
     hostActions?: HostActionPolicy | undefined;
   },
   fallback: Pick<
@@ -1569,6 +1608,9 @@ function normalizeExecutionSettings(
     | "contextBudget"
     | "advisor"
     | "doctrine"
+    | "executionTimePolicy"
+    | "taskExecutionDefaults"
+    | "testingPreference"
     | "hostActions"
   >,
 ) {
@@ -1625,6 +1667,13 @@ function normalizeExecutionSettings(
           : (() => {
               throw new Error("Unknown decision doctrine");
             })(),
+    executionTimePolicy:
+      value.executionTimePolicy ?? fallback.executionTimePolicy ?? defaultExecutionTimePolicy(),
+    taskExecutionDefaults:
+      value.taskExecutionDefaults ??
+      fallback.taskExecutionDefaults ??
+      defaultTaskExecutionDefaults(),
+    testingPreference: value.testingPreference ?? fallback.testingPreference ?? "write-tests",
     hostActions: normalizeHostActions(value.hostActions, fallback.hostActions),
   };
 }

@@ -23,14 +23,14 @@ export async function startJob(cwd, input) {
         throw new Error(`Policy snapshot version ${input.policySnapshot.version} requires modelConfiguration`);
     }
     const requestVersion = input.policySnapshot?.version === 3
-        ? 6
+        ? 7
         : input.policySnapshot?.version === 2
             ? 4
             : input.modelConfiguration
                 ? 3
                 : 2;
     const providerSnapshotHash = input.modelConfiguration
-        ? requestVersion === 6
+        ? requestVersion >= 6
             ? providerConfigurationSnapshotHash(input.modelConfiguration, providerRegistryRevision)
             : modelConfigurationSnapshotHash(input.modelConfiguration)
         : undefined;
@@ -43,6 +43,7 @@ export async function startJob(cwd, input) {
         executionMode: input.executionMode,
         sandboxMode,
         timeoutMs: input.timeoutMs,
+        ...(input.hardRunLimitMs ? { hardRunLimitMs: input.hardRunLimitMs } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.role ? { role: input.role } : {}),
         ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
@@ -89,6 +90,12 @@ export async function startJob(cwd, input) {
             executionMode: input.executionMode,
             sandboxMode,
             timeoutMs: input.timeoutMs,
+            ...(input.hardRunLimitMs ? { hardRunLimitMs: input.hardRunLimitMs } : {}),
+            ...(input.hardRunLimitMs
+                ? { hardDeadlineAt: new Date(Date.parse(createdAt) + input.hardRunLimitMs).toISOString() }
+                : {}),
+            activeRunMs: 0,
+            waitingRunMs: 0,
             ...(input.model ? { model: input.model } : {}),
             ...(input.role ? { role: input.role } : {}),
             ...(input.policySnapshot ? { policyHash: input.policySnapshot.hash } : {}),

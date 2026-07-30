@@ -59,6 +59,9 @@ export function defaultState() {
             hostAssistance: defaultHostAssistancePolicy(),
             contextBudget: 4,
             advisor: defaultAdvisorPolicy(),
+            executionTimePolicy: defaultExecutionTimePolicy(),
+            taskExecutionDefaults: defaultTaskExecutionDefaults(),
+            testingPreference: "write-tests",
             hostActions: defaultHostActionPolicy(),
         },
         jobs: [],
@@ -404,6 +407,12 @@ function applyWorkflowSettings(config, settings) {
         config.contextBudget = Math.min(WORKFLOW_BOUNDS.contextBudget.max, Math.max(WORKFLOW_BOUNDS.contextBudget.min, Math.trunc(settings.contextBudget)));
     if (settings.advisor)
         config.advisor = normalizeAdvisorPolicy(settings.advisor);
+    if (settings.executionTimePolicy)
+        config.executionTimePolicy = normalizeExecutionTimePolicy(settings.executionTimePolicy);
+    if (settings.taskExecutionDefaults)
+        config.taskExecutionDefaults = normalizeTaskExecutionDefaults(settings.taskExecutionDefaults);
+    if (settings.testingPreference)
+        config.testingPreference = normalizeTestingPreference(settings.testingPreference);
     if (settings.hostActions)
         config.hostActions = normalizeHostActionPolicy(settings.hostActions);
     if (settings.doctrine === "first-principles-qds-v1")
@@ -425,6 +434,9 @@ export async function clearConfiguration(cwd, env = process.env) {
             hostAssistance: defaultHostAssistancePolicy(),
             contextBudget: 4,
             advisor: defaultAdvisorPolicy(),
+            executionTimePolicy: defaultExecutionTimePolicy(),
+            taskExecutionDefaults: defaultTaskExecutionDefaults(),
+            testingPreference: "write-tests",
             hostActions: defaultHostActionPolicy(),
         };
     }, env);
@@ -543,6 +555,9 @@ function normalizeState(value) {
         ? Math.min(64, Math.max(0, config.contextBudget))
         : 4;
     state.config.advisor = normalizeAdvisorPolicy(config.advisor);
+    state.config.executionTimePolicy = normalizeExecutionTimePolicy(config.executionTimePolicy);
+    state.config.taskExecutionDefaults = normalizeTaskExecutionDefaults(config.taskExecutionDefaults);
+    state.config.testingPreference = normalizeTestingPreference(config.testingPreference);
     state.config.hostActions = normalizeHostActionPolicy(config.hostActions);
     if (config.doctrine === "first-principles-qds-v1")
         state.config.doctrine = config.doctrine;
@@ -634,36 +649,135 @@ function normalizeAdvisorPolicy(value) {
 }
 export function defaultHostActionPolicy() {
     return {
-        enabled: true,
-        allowedActionClasses: ["local-mutation", "draft"],
+        // Legacy tombstone: values are retained only as auditable migration evidence.
+        enabled: false,
+        allowedActionClasses: [],
         remoteActionsEnabled: false,
-        maxUses: 1,
-        maxCost: 1,
-        ttlMs: 30 * 60_000,
+        maxUses: 0,
+        maxCost: 0,
+        ttlMs: 0,
     };
 }
-function normalizeHostActionPolicy(value) {
-    const defaults = defaultHostActionPolicy();
+export function defaultExecutionTimePolicy() {
+    return {
+        hardRunLimitMs: 60 * 60_000,
+        probeAfterIdleMs: 5 * 60_000,
+        probeIntervalMs: 60_000,
+        probeResponseDeadlineMs: 10_000,
+        consecutiveProbeFailures: 3,
+        recoveryGraceMs: 10 * 60_000,
+    };
+}
+export function defaultTaskExecutionDefaults() {
+    return {
+        ask: { hardRunLimitMs: 60 * 60_000 },
+        plan: { hardRunLimitMs: 60 * 60_000 },
+        review: { hardRunLimitMs: 60 * 60_000 },
+        implement: { hardRunLimitMs: 4 * 60 * 60_000, testingPreference: "write-tests" },
+        setup: { hardRunLimitMs: 4 * 60 * 60_000 },
+        scaffold: { hardRunLimitMs: 4 * 60 * 60_000 },
+        discover: { hardRunLimitMs: 8 * 60 * 60_000 },
+        orchestrate: { hardRunLimitMs: 8 * 60 * 60_000 },
+    };
+}
+function normalizeExecutionTimePolicy(value) {
+    const defaults = defaultExecutionTimePolicy();
     if (!value || typeof value !== "object" || Array.isArray(value))
         return defaults;
     const candidate = value;
-    const classes = Array.isArray(candidate.allowedActionClasses)
-        ? candidate.allowedActionClasses.filter((item) => ["local-mutation", "draft", "remote-write", "message", "deploy", "transaction"].includes(item))
-        : defaults.allowedActionClasses;
+    const bounded = (key, min, max) => typeof candidate[key] === "number" && Number.isFinite(candidate[key])
+        ? Math.min(max, Math.max(min, Math.trunc(candidate[key])))
+        : defaults[key];
     return {
-        enabled: candidate.enabled !== false,
-        allowedActionClasses: classes,
-        remoteActionsEnabled: candidate.remoteActionsEnabled === true,
-        maxUses: Number.isInteger(candidate.maxUses)
-            ? Math.min(100, Math.max(1, candidate.maxUses))
-            : defaults.maxUses,
-        maxCost: typeof candidate.maxCost === "number" && Number.isFinite(candidate.maxCost)
-            ? Math.max(0, candidate.maxCost)
-            : defaults.maxCost,
-        ttlMs: Number.isInteger(candidate.ttlMs)
-            ? Math.min(24 * 60 * 60_000, Math.max(60_000, candidate.ttlMs))
-            : defaults.ttlMs,
+        hardRunLimitMs: bounded("hardRunLimitMs", 60 * 60_000, 12 * 60 * 60_000),
+        probeAfterIdleMs: bounded("probeAfterIdleMs", 60_000, 60 * 60_000),
+        probeIntervalMs: bounded("probeIntervalMs", 15_000, 15 * 60_000),
+        probeResponseDeadlineMs: bounded("probeResponseDeadlineMs", 1_000, 60_000),
+        consecutiveProbeFailures: bounded("consecutiveProbeFailures", 1, 5),
+        recoveryGraceMs: bounded("recoveryGraceMs", 60_000, 60 * 60_000),
     };
+}
+function normalizeTaskExecutionDefaults(value) {
+    const defaults = defaultTaskExecutionDefaults();
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return defaults;
+    const candidate = value;
+    const result = {};
+    for (const kind of [
+        "ask",
+        "plan",
+        "review",
+        "implement",
+        "setup",
+        "scaffold",
+        "discover",
+        "orchestrate",
+    ]) {
+        const entry = candidate[kind];
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+            result[kind] = defaults[kind];
+            continue;
+        }
+        const raw = entry;
+        const fallback = defaults[kind];
+        result[kind] = {
+            ...(typeof raw.role === "string"
+                ? { role: raw.role }
+                : {}),
+            ...(typeof raw.executionMode === "string"
+                ? {
+                    executionMode: raw.executionMode,
+                }
+                : {}),
+            ...(typeof raw.sandboxMode === "string"
+                ? { sandboxMode: raw.sandboxMode }
+                : {}),
+            ...(typeof raw.thinkingLevel === "string"
+                ? {
+                    thinkingLevel: raw.thinkingLevel,
+                }
+                : {}),
+            ...(typeof raw.approvalMode === "string"
+                ? { approvalMode: raw.approvalMode }
+                : {}),
+            ...(typeof raw.hostAssistance === "string"
+                ? {
+                    hostAssistance: raw.hostAssistance,
+                }
+                : {}),
+            ...(typeof raw.workspaceStrategy === "string"
+                ? {
+                    workspaceStrategy: raw.workspaceStrategy,
+                }
+                : {}),
+            hardRunLimitMs: typeof raw.hardRunLimitMs === "number" &&
+                [60, 240, 480, 720].includes(raw.hardRunLimitMs / 60_000)
+                ? raw.hardRunLimitMs
+                : fallback.hardRunLimitMs,
+            ...(raw.reviewProfile === "standard" || raw.reviewProfile === "lean"
+                ? { reviewProfile: raw.reviewProfile }
+                : {}),
+            ...(raw.implementationProfile === "direct" || raw.implementationProfile === "prewalk"
+                ? { implementationProfile: raw.implementationProfile }
+                : {}),
+            ...(raw.orchestrationProfile === "independent" || raw.orchestrationProfile === "shared-recon"
+                ? { orchestrationProfile: raw.orchestrationProfile }
+                : {}),
+            ...(normalizeTestingPreference(raw.testingPreference) !== "write-tests" ||
+                kind === "implement"
+                ? { testingPreference: normalizeTestingPreference(raw.testingPreference) }
+                : {}),
+        };
+    }
+    return result;
+}
+function normalizeTestingPreference(value) {
+    return value === "ask" || value === "no-new-tests" ? value : "write-tests";
+}
+function normalizeHostActionPolicy(value) {
+    // Do not allow a downgrade or a legacy client payload to revive execution.
+    void value;
+    return defaultHostActionPolicy();
 }
 async function resolveGitCommonDir(cwd) {
     try {

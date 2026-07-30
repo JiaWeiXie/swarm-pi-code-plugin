@@ -1,6 +1,6 @@
 ---
 name: swarm-pi-project
-description: Configure Pi project routing, execution safety, scope, Host Assistance, Decision Mode, Advisor, doctrine, and Host Actions while preserving provider connections. Use for project-policy changes; use swarm-pi-configure for provider or authentication changes.
+description: Configure Pi project routing, execution safety, scope, Host Assistance, Decision Mode, Advisor, timing, and testing defaults while preserving provider connections. Use for project-policy changes; use swarm-pi-configure for provider or authentication changes.
 ---
 
 # Configure Swarm Pi Project Setup

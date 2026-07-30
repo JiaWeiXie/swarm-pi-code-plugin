@@ -1,11 +1,32 @@
 import { classifyProviderModel } from "../telemetry/privacy.js";
+export const DEFAULT_EXECUTION_TIME_POLICY = Object.freeze({
+    hardRunLimitMs: 60 * 60_000,
+    probeAfterIdleMs: 5 * 60_000,
+    probeIntervalMs: 60_000,
+    probeResponseDeadlineMs: 10_000,
+    consecutiveProbeFailures: 3,
+    recoveryGraceMs: 10 * 60_000,
+});
 export async function executeSession(options) {
     const startedMs = Date.now();
     const startedAt = new Date(startedMs).toISOString();
+    const policy = normalizeExecutionTimePolicy(options.executionTimePolicy, options.timeoutMs);
     let output = "";
     let terminalMessage;
     let automaticRetries = 0;
+    let activitySequence = 0;
+    let lastActivityMs = startedMs;
+    let consecutiveProbeFailures = 0;
+    let recoveryStartedMs;
+    let probing = false;
+    let interruptedReason;
     const unsubscribe = options.session.subscribe((event) => {
+        if (isTrustedActivity(event)) {
+            activitySequence += 1;
+            lastActivityMs = Date.now();
+            consecutiveProbeFailures = 0;
+            recoveryStartedMs = undefined;
+        }
         if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
             output += event.assistantMessageEvent.delta ?? "";
         }
@@ -15,13 +36,20 @@ export async function executeSession(options) {
         if (event.type === "auto_retry_start")
             automaticRetries += 1;
     });
-    let timeout;
+    let hardLimitTimer;
+    let probeTimer;
     let removeAbortListener = () => { };
     try {
         const promptOutcome = options.session.prompt(options.prompt).then(() => ({ type: "completed" }), (error) => ({ type: "error", error }));
         const interruption = new Promise((resolve) => {
-            const interrupt = (status) => {
-                void interruptSession(options.session).finally(() => resolve({ type: "interrupted", status }));
+            const interrupt = (status, terminationReason) => {
+                if (interruptedReason || status === "timed-out")
+                    interruptedReason ??= terminationReason;
+                void interruptSession(options.session).finally(() => resolve({
+                    type: "interrupted",
+                    status,
+                    ...(terminationReason ? { terminationReason } : {}),
+                }));
             };
             if (options.signal) {
                 const onAbort = () => interrupt("cancelled");
@@ -32,15 +60,59 @@ export async function executeSession(options) {
                     removeAbortListener = () => options.signal?.removeEventListener("abort", onAbort);
                 }
             }
-            if (options.timeoutMs !== undefined) {
-                timeout = setTimeout(() => interrupt("timed-out"), options.timeoutMs);
-            }
+            hardLimitTimer = setTimeout(() => interrupt("timed-out", "hard-limit-exceeded"), policy.hardRunLimitMs);
+            probeTimer = setInterval(() => {
+                if (probing || interruptedReason)
+                    return;
+                const now = Date.now();
+                if (now - lastActivityMs < policy.probeAfterIdleMs)
+                    return;
+                probing = true;
+                void runProbe(options.session, policy.probeResponseDeadlineMs)
+                    .then(async (outcome) => {
+                    const madeProgress = activitySequence > 0 && now - lastActivityMs < policy.probeAfterIdleMs;
+                    if (madeProgress || outcome === "progress") {
+                        consecutiveProbeFailures = 0;
+                        recoveryStartedMs = undefined;
+                    }
+                    else if (outcome === "unresponsive") {
+                        consecutiveProbeFailures += 1;
+                    }
+                    else {
+                        // A reachable session without new output is suspicious, but not proof that a
+                        // provider is gone. Keep the hard limit authoritative in that case.
+                        consecutiveProbeFailures = 0;
+                    }
+                    await options.onProbe?.({
+                        attemptedAt: new Date().toISOString(),
+                        activitySequence,
+                        lastActivityAt: new Date(lastActivityMs).toISOString(),
+                        outcome: madeProgress ? "progress" : outcome,
+                        consecutiveFailures: consecutiveProbeFailures,
+                    });
+                    if (consecutiveProbeFailures >= policy.consecutiveProbeFailures) {
+                        if (recoveryStartedMs === undefined)
+                            recoveryStartedMs = Date.now();
+                        else if (Date.now() - recoveryStartedMs >= policy.recoveryGraceMs) {
+                            interrupt("timed-out", "unresponsive-timeout");
+                        }
+                    }
+                })
+                    .finally(() => {
+                    probing = false;
+                });
+            }, Math.min(policy.probeIntervalMs, policy.probeAfterIdleMs));
         });
         const outcome = await Promise.race([promptOutcome, interruption]);
         const sessionStats = readSessionStats(options.session);
         if (outcome.type === "interrupted") {
             const message = outcome.status === "timed-out" ? "Pi session timed out." : "Pi session was cancelled.";
-            return withTelemetry(result(options.kind, outcome.status, options.model, message), startedMs, startedAt, options.model, undefined, sessionStats, automaticRetries);
+            const timedOut = result(options.kind, outcome.status, options.model, message);
+            if (outcome.terminationReason) {
+                timedOut.terminationReason = outcome.terminationReason;
+                timedOut.errorCode = outcome.terminationReason;
+            }
+            return withTelemetry(timedOut, startedMs, startedAt, options.model, undefined, sessionStats, automaticRetries);
         }
         if (outcome.type === "error") {
             const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
@@ -49,11 +121,66 @@ export async function executeSession(options) {
         return withTelemetry(resultFromTerminalMessage(options.kind, options.model, output.trim(), terminalMessage), startedMs, startedAt, options.model, terminalMessage, sessionStats, automaticRetries);
     }
     finally {
-        if (timeout)
-            clearTimeout(timeout);
+        if (hardLimitTimer)
+            clearTimeout(hardLimitTimer);
+        if (probeTimer)
+            clearInterval(probeTimer);
         removeAbortListener();
         unsubscribe();
         options.session.dispose();
+    }
+}
+function normalizeExecutionTimePolicy(policy, legacyTimeoutMs) {
+    const hardRunLimitMs = policy?.hardRunLimitMs ?? legacyTimeoutMs ?? DEFAULT_EXECUTION_TIME_POLICY.hardRunLimitMs;
+    return {
+        hardRunLimitMs,
+        probeAfterIdleMs: policy?.probeAfterIdleMs ?? DEFAULT_EXECUTION_TIME_POLICY.probeAfterIdleMs,
+        probeIntervalMs: policy?.probeIntervalMs ?? DEFAULT_EXECUTION_TIME_POLICY.probeIntervalMs,
+        probeResponseDeadlineMs: policy?.probeResponseDeadlineMs ?? DEFAULT_EXECUTION_TIME_POLICY.probeResponseDeadlineMs,
+        consecutiveProbeFailures: policy?.consecutiveProbeFailures ?? DEFAULT_EXECUTION_TIME_POLICY.consecutiveProbeFailures,
+        recoveryGraceMs: policy?.recoveryGraceMs ?? DEFAULT_EXECUTION_TIME_POLICY.recoveryGraceMs,
+    };
+}
+function isTrustedActivity(event) {
+    return [
+        "agent_start",
+        "agent_end",
+        "turn_start",
+        "turn_end",
+        "message_start",
+        "message_update",
+        "message_end",
+        "tool_execution_start",
+        "tool_execution_update",
+        "tool_execution_end",
+        "auto_retry_start",
+        "auto_retry_end",
+        "compaction_start",
+        "compaction_end",
+    ].includes(event.type);
+}
+async function runProbe(session, timeoutMs) {
+    if (session.probeLiveness) {
+        const result = await withTimeout(session.probeLiveness(), timeoutMs).catch(() => "unresponsive");
+        return result === "unresponsive" ? "unresponsive" : "alive";
+    }
+    if (session.isIdle === true || session.isStreaming === false)
+        return "unresponsive";
+    return "alive";
+}
+async function withTimeout(value, timeoutMs) {
+    let timer;
+    try {
+        return await Promise.race([
+            value,
+            new Promise((_resolve, reject) => {
+                timer = setTimeout(() => reject(new Error("Session probe timed out.")), timeoutMs);
+            }),
+        ]);
+    }
+    finally {
+        if (timer)
+            clearTimeout(timer);
     }
 }
 async function interruptSession(session) {

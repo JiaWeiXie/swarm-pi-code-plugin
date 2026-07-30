@@ -99,7 +99,7 @@ test("plugin package contains both host adapters and a self-contained runner", (
   assert.match(implementation, /isolated-snapshot/i);
   assert.match(implementation, /Host-owned\s+verification/i);
   assert.match(implementation, /--execution-mode supervised/);
-  assert.match(implementation, /Background is reserved[\s\S]*mechanical-executor/i);
+  assert.match(implementation, /Background is\s+reserved[\s\S]*mechanical-executor/i);
   assert.match(implementation, /mechanical-executor/);
   assert.match(implementation, /deliverable: false/);
   assert.match(implementation, /workspace-unborn-head/);
@@ -153,17 +153,13 @@ test("plugin package contains both host adapters and a self-contained runner", (
   const protocolPath = path.join(pluginRoot, "references/host-protocol.md");
   assert.equal(fs.existsSync(protocolPath), true);
   const protocol = fs.readFileSync(protocolPath, "utf8");
-  assert.match(protocol, /\[Skill Control Loop\]/);
-  assert.match(protocol, /State storage write boundary/);
-  assert.match(protocol, /EvidencePack/);
-  assert.match(protocol, /wait-timeout-ms 15000/);
-  assert.match(protocol, /Host Assistance and Discovery/);
-  assert.match(protocol, /UNTRUSTED_HOST_CONTEXT/);
-  assert.match(protocol, /Only the model handling the active Codex or Claude Code turn/i);
-  assert.match(protocol, /HostAdjudicationReceipt/);
-  assert.match(protocol, /--adjudication-file/);
-  assert.match(protocol, /timeout, hook, watcher, background process, or replay may only notify/i);
-  assert.match(protocol, /Strict mode cannot gain a capability/i);
+  assert.match(protocol, /standalone node and an internal Workflow node/i);
+  assert.match(protocol, /wait-timed-out/);
+  assert.match(protocol, /hard-run-limit-ms/);
+  assert.match(protocol, /unresponsive-timeout/);
+  assert.match(protocol, /hard-limit-exceeded/);
+  assert.match(protocol, /Host Actions 0\.5 is removed/);
+  assert.match(protocol, /host-actions-removed/);
 
   const controlLoop = fs.readFileSync(
     path.join(pluginRoot, "references/skill-control-loop.md"),

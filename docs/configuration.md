@@ -5,7 +5,8 @@ Codex. For installation and common workflows, start with the
 [README](../README.md). Runtime boundaries are documented in
 [architecture.md](architecture.md), and immutable security constraints are in
 [threat-model.md](threat-model.md). The Host Assistance and Discovery contract
-is in [host-assistance-discovery.md](host-assistance-discovery.md).
+is in [host-assistance-discovery.md](host-assistance-discovery.md). Execution
+limits and recovery are specified in [execution-time-policy.md](execution-time-policy.md).
 
 For detailed field-by-field behavior, see the
 [configuration field guide](configuration-field-guide.md) and
@@ -23,7 +24,8 @@ The six full-setup steps are:
 2. Choose the primary model and ordered fallbacks.
 3. Assign model chains and thinking levels to worker roles.
 4. Configure sandbox, classifier, approval, background behavior, Decision Mode,
-   Host Assistance, Advisor, doctrine, and isolated Host Actions.
+   Host Assistance, Advisor, doctrine, per-task execution defaults, testing,
+   and probe recovery.
 5. Review the workspace and project delegation profile.
 6. Review, smoke-test new or changed required routes, and save transactionally.
 
@@ -49,14 +51,14 @@ experiment schema gates, or delivery policy.
 The same screen configures Host context classes, User-only versus Host-first
 review, Context-only/Read-only/Reversible automatic scope, Discovery gate
 review, private-connector policy, Advisor targets/limits, doctrine metadata,
-and Host Action classes plus cost/use/expiry bounds. Selecting the Autopilot
+and the timing/testing defaults. Host Actions 0.5 is removed; legacy values are
+preserved only as a disabled migration tombstone. Selecting the Autopilot
 mode makes routine supervised shell auto-run without stopping, still inside the
 OS sandbox; under Autopilot and Full-access it also exposes the outward autonomy
 controls: `autoGitWrites` and `autoDelivery` (allow the worker shell to run `git
 commit`/`push`/`merge` and `kubectl`/`helm`/`terraform` behind a mandatory human
 approval gate), and `outwardApprovalGranularity` (`each-time` versus
-`first-then-auto`) for those git/deploy approvals. Remote Host Actions are
-off by default. The doctrine
+`first-then-auto`) for those git/deploy approvals. The doctrine
 toggle is persisted in PolicySnapshot v3, but the runtime does not yet run an
 automatic Question/Delete/Simplify convergence pass. It must not be treated as
 an active review or safety control.
@@ -94,6 +96,11 @@ named choices while retaining the numeric snapshot field for compatibility:
 | Host Assistance concurrent fan-out | `0–3` and no greater than requests | 2 |
 | Advisor consultations per Job | `0–3` | 2 |
 | Maximum Advisor perspectives | `0–4` | 3 |
+| Task hard-run limit | 1, 4, 8, or 12 hours | task-dependent |
+| Probe after idle | 1–60 minutes; cannot be disabled | 5 minutes |
+| Probe interval / response deadline | 15–900 seconds / 1–60 seconds | 60 / 10 seconds |
+| Failed probes / recovery grace | 1–5 / 1–60 minutes | 3 / 10 minutes |
+| Implement testing preference | write tests, ask, no new tests | write tests |
 
 One stored context-budget unit permits up to 8,192 returned text characters,
 with a hard 64,000-character cap. The Worker requests the smallest sufficient
@@ -173,7 +180,8 @@ not expose a network listener beyond loopback or accept raw telemetry input.
 | Context allowance | Standard | Up to 32,768 returned characters from one Host context request |
 | Advisor | off | Adds bounded read-only consultations for selected tasks when enabled |
 | Doctrine | off | Snapshotted metadata only; no automatic convergence pass yet |
-| Host Actions | local mutation and draft | Allows an explicitly confirmed isolated child; remote classes remain off |
+| Timing & Recovery | task-dependent | Hard active-time cap plus mandatory liveness probes; see [time policy](execution-time-policy.md) |
+| Implement testing | write tests | Host offers suitable methods when a choice is needed; TDD is optional |
 
 ## Provider Capability Registry
 

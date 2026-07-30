@@ -27,7 +27,8 @@ Route arguments before opening the browser:
 3. Keep setup active through connections, protocol, subscription OAuth, model
    discovery and verification, roles, execution safety, Decision Mode, Host
    Assistance, Discovery gates, context budget, Advisor, doctrine metadata,
-   Host Actions, workspace, and review. Credentials stay inside the setup UI.
+   per-task execution limits, probe recovery, testing preference, workspace,
+   and review. Credentials stay inside the setup UI.
    ChatGPT Plus/Pro is the separate `openai-codex` connection.
 4. After Save, run `$RUNNER doctor --smoke-test --json`,
    `$RUNNER roles list --json`, and `$RUNNER status --json`; resume a

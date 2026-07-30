@@ -14,21 +14,20 @@ expensive or recursive verification.
 2. Add only missing scope, observable acceptance criteria, protected boundaries,
    and the smallest verification plan to the temporary prompt.
 3. Run `$RUNNER implement --host "$HOST" --role executor --prompt-file "$PROMPT_FILE" --execution-mode supervised --approval-mode "$APPROVAL_MODE" --json`; with explicit user choice, append `--implementation-profile prewalk` to preserve exploration, TODOs, and the first edit through an in-session handoff.
-4. Continue every non-terminal result through the control loop. Eligible Host
-   action is exact, in-scope, reversible, and already covered by mutation
-   intent; deletion, Git metadata, workspace escape, and delivery return to the
-   user. Background is reserved for an explicitly requested, project-enabled
-   `mechanical-executor`, with the assigned worktree left exclusively to Pi.
-5. Inspect the actual diff, changed files, `runtimeSideEffects`, verification,
+4. Before implementation, honor the configured testing preference. If no
+   invocation-level choice exists, ask the Host to offer 2–3 fitting methods
+   (unit, integration, contract, regression, E2E, or property) plus no-new-tests.
+   TDD is optional; no-new-tests still requires relevant existing checks.
+5. Continue every non-terminal result through the control loop. Background is
+   reserved for an explicitly requested, project-enabled `mechanical-executor`,
+   with the assigned worktree left exclusively to Pi.
+6. Inspect the actual diff, changed files, `runtimeSideEffects`, verification,
    and artifact. Exit code `5` presents `isolated-head` and
    `isolated-snapshot` without choosing. `workspace-unborn-head` routes to
    scaffold or approved adoption before resume.
-6. A safe-dirty job-owned worktree is deliverable only after the verified
-   artifact diff is shown and the user approves
+7. A safe-dirty job-owned worktree is deliverable only after the verified,
+   reversible artifact diff is shown and the user approves
    `$RUNNER jobs materialize --job <id> --json`.
-7. An `ActionRecommendation` starts only after user confirmation through
-   `$RUNNER jobs action-start --job <parent> --request <id> --json`; an
-   `unknown` external outcome remains unretried.
 8. Complete only when the actual diff satisfies the request, targeted Host-owned
    verification passes, and delivery state is explicit. `deliverable: false`
    artifacts remain isolated; commit, merge, and push remain Host-owned.

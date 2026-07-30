@@ -549,6 +549,80 @@ test("session execution aborts and reports timeout", async () => {
   assert.equal(disposed, true);
 });
 
+test("execution hard limit is authoritative even while the liveness probe succeeds", async () => {
+  let aborted = false;
+  const result = await executeSession({
+    kind: "ask",
+    model: "test-provider/test-model",
+    prompt: "Keep streaming",
+    executionTimePolicy: {
+      hardRunLimitMs: 20,
+      probeAfterIdleMs: 1,
+      probeIntervalMs: 1,
+      probeResponseDeadlineMs: 5,
+      consecutiveProbeFailures: 3,
+      recoveryGraceMs: 1,
+    },
+    session: {
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {
+        await new Promise(() => {});
+      },
+      async probeLiveness() {
+        return "alive" as const;
+      },
+      async abort() {
+        aborted = true;
+      },
+      async waitForIdle() {},
+      dispose() {},
+    },
+  });
+  assert.equal(result.status, "timed-out");
+  assert.equal(result.terminationReason, "hard-limit-exceeded");
+  assert.equal(result.errorCode, "hard-limit-exceeded");
+  assert.equal(aborted, true);
+});
+
+test("repeated unresponsive probes preserve a distinct timeout reason", async () => {
+  const probes: string[] = [];
+  const result = await executeSession({
+    kind: "ask",
+    model: "test-provider/test-model",
+    prompt: "Wait for a lost transport",
+    executionTimePolicy: {
+      hardRunLimitMs: 200,
+      probeAfterIdleMs: 1,
+      probeIntervalMs: 1,
+      probeResponseDeadlineMs: 5,
+      consecutiveProbeFailures: 2,
+      recoveryGraceMs: 2,
+    },
+    onProbe: (probe) => {
+      probes.push(probe.outcome);
+    },
+    session: {
+      subscribe() {
+        return () => {};
+      },
+      async prompt() {
+        await new Promise(() => {});
+      },
+      async probeLiveness() {
+        return "unresponsive" as const;
+      },
+      async abort() {},
+      async waitForIdle() {},
+      dispose() {},
+    },
+  });
+  assert.equal(result.status, "timed-out");
+  assert.equal(result.terminationReason, "unresponsive-timeout");
+  assert.ok(probes.filter((outcome) => outcome === "unresponsive").length >= 2);
+});
+
 test("session execution aborts and reports external cancellation", async () => {
   const controller = new AbortController();
   let aborted = false;
@@ -2265,10 +2339,10 @@ test("background submission returns an accepted job without creating a Pi sessio
   const snapshot = await getJob(workspace, "jobId" in result ? result.jobId : "");
   assert.equal(snapshot.job.status, "queued");
   assert.equal(snapshot.job.pid, 424_242);
-  assert.equal(snapshot.job.timeoutMs, 30 * 60_000);
+  assert.equal(snapshot.job.timeoutMs, 60 * 60_000);
   assert.equal(snapshot.job.sandboxMode, "lenient");
   const request = await readJobRequest(workspace, "jobId" in result ? result.jobId : "");
-  assert.equal(request.requestVersion, 6);
+  assert.equal(request.requestVersion, 7);
   assert.match(request.providerRegistryRevision ?? "", /^[a-f0-9]{24}$/);
   assert.equal(request.modelConfiguration?.version, 1);
   assert.match(request.providerSnapshotHash ?? "", /^[a-f0-9]{64}$/);
@@ -2886,7 +2960,7 @@ test("background durable replay ignores a later profile change", async () => {
     { spawnWorker: async () => 555 },
   );
   const jobId = "jobId" in submit ? submit.jobId : "";
-  assert.equal((await readJobRequest(workspace, jobId)).requestVersion, 6);
+  assert.equal((await readJobRequest(workspace, jobId)).requestVersion, 7);
   // Tighten the live profile so the original task kind would now be rejected.
   await updateState(workspace, (state) => {
     state.config.profile = { tasks: [] };

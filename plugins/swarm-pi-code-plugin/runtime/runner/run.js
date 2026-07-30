@@ -203,25 +203,37 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
     const basePrompt = discoveryFrom
         ? await buildDiscoveryHandoffPrompt(cwd, discoveryFrom, submittedPrompt)
         : submittedPrompt;
-    const executionMode = args.executionMode ?? "supervised";
+    const taskDefaults = state.config.taskExecutionDefaults?.[args.command];
+    const executionMode = args.executionMode ?? taskDefaults?.executionMode ?? "supervised";
     const reviewProfile = args.command === "review"
-        ? (options.requestOverride?.reviewProfile ?? args.reviewProfile ?? "standard")
+        ? (options.requestOverride?.reviewProfile ??
+            args.reviewProfile ??
+            taskDefaults?.reviewProfile ??
+            "standard")
         : undefined;
     const implementationProfile = args.command === "implement"
-        ? (options.requestOverride?.implementationProfile ?? args.implementationProfile ?? "direct")
+        ? (options.requestOverride?.implementationProfile ??
+            args.implementationProfile ??
+            taskDefaults?.implementationProfile ??
+            "direct")
         : undefined;
     const orchestrationProfile = args.command === "orchestrate"
         ? (options.requestOverride?.orchestrationProfile ??
             args.orchestrationProfile ??
+            taskDefaults?.orchestrationProfile ??
             "independent")
         : undefined;
-    const sandboxMode = persistedSnapshot?.sandboxMode ?? state.config.sandboxMode ?? "strict";
-    const roleId = args.role ?? defaultRoleForTask(args.command);
+    const sandboxMode = persistedSnapshot?.sandboxMode ??
+        taskDefaults?.sandboxMode ??
+        state.config.sandboxMode ??
+        "strict";
+    const roleId = args.role ?? taskDefaults?.role ?? defaultRoleForTask(args.command);
     let rolePolicy = persistedSnapshot
         ? persistedSnapshot.rolePolicy
         : resolveRolePolicy(roleId, state.config.rolePolicies, modelPriority(modelConfiguration), state.config.backgroundRolePolicy);
-    if (args.thinkingLevel && !persistedSnapshot)
-        rolePolicy = { ...rolePolicy, thinkingLevel: args.thinkingLevel };
+    const requestedThinkingLevel = args.thinkingLevel ?? taskDefaults?.thinkingLevel;
+    if (requestedThinkingLevel && !persistedSnapshot)
+        rolePolicy = { ...rolePolicy, thinkingLevel: requestedThinkingLevel };
     if (roleId === "scaffolder" && executionMode === "background" && !persistedSnapshot) {
         rolePolicy = {
             ...rolePolicy,
@@ -235,7 +247,10 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
     if (effectiveProjectPolicy && options.requestOverride === undefined) {
         adaptivePolicy.rules.push(...effectiveProjectPolicy.repositoryDenyRules);
     }
-    const approvalMode = persistedSnapshot?.approvalMode ?? args.approvalMode ?? adaptivePolicy.approvalPolicy;
+    const approvalMode = persistedSnapshot?.approvalMode ??
+        args.approvalMode ??
+        taskDefaults?.approvalMode ??
+        adaptivePolicy.approvalPolicy;
     const escalationPolicy = persistedSnapshot?.escalationPolicy ??
         (roleId === "mechanical-executor"
             ? resolveRolePolicy("executor", state.config.rolePolicies, modelPriority(modelConfiguration), state.config.backgroundRolePolicy)
@@ -250,7 +265,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
                 ...(escalationPolicy ? { escalationPolicy } : {}),
                 effectiveProjectPolicy,
                 decisionMode: args.decisionMode ?? state.config.decisionMode ?? "balance",
-                hostAssistance: resolveHostAssistancePolicy(state.config.hostAssistance, args.hostAssistance),
+                hostAssistance: resolveHostAssistancePolicy(state.config.hostAssistance, args.hostAssistance ?? taskDefaults?.hostAssistance),
                 ...(state.config.advisor ? { advisor: state.config.advisor } : {}),
                 ...(state.config.doctrine ? { doctrine: state.config.doctrine } : {}),
                 contextBudget: state.config.contextBudget ?? 4,
@@ -322,8 +337,17 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         (args.specFile && args.command !== "scaffold"
             ? parseDelegationSpec(await activeDependencies.readFile(args.specFile))
             : { request: rawPrompt });
-    const timeoutMs = args.timeoutMs ?? defaultTimeoutMs(args.command);
-    let workspaceStrategy = args.workspaceStrategy ?? options.requestOverride?.workspaceStrategy ?? "auto";
+    // `--timeout-ms` remains a 0.23 compatibility alias. New requests persist the
+    // hard limit so background resumes cannot acquire a new budget.
+    const hardRunLimitMs = args.hardRunLimitMs ??
+        args.timeoutMs ??
+        taskDefaults?.hardRunLimitMs ??
+        defaultTimeoutMs(args.command);
+    const timeoutMs = hardRunLimitMs;
+    let workspaceStrategy = args.workspaceStrategy ??
+        options.requestOverride?.workspaceStrategy ??
+        taskDefaults?.workspaceStrategy ??
+        "auto";
     const target = args.target ?? options.requestOverride?.target;
     const adoptExisting = args.adoptExisting ?? options.requestOverride?.adoptExisting ?? false;
     const readiness = await inspectReadiness({
@@ -347,6 +371,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         executionMode,
         sandboxMode,
         timeoutMs,
+        hardRunLimitMs,
         ...(args.model ? { model: args.model } : {}),
         role: roleId,
         thinkingLevel: rolePolicy.thinkingLevel,
@@ -441,6 +466,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         executionMode,
         sandboxMode,
         timeoutMs,
+        hardRunLimitMs,
         ...(args.model ? { model: args.model } : {}),
         role: roleId,
         thinkingLevel: rolePolicy.thinkingLevel,
@@ -525,6 +551,7 @@ export async function runCommand(args, cwd, dependencies, options = {}) {
         requireDiscoveryGates: options.requireDiscoveryGates ?? dependencies === undefined,
         job,
         timeoutMs,
+        hardRunLimitMs,
         sandboxMode,
         policySnapshot,
         modelConfiguration,
@@ -569,7 +596,7 @@ async function waitForManagedRelay(cwd, jobId, timeoutMs, signal) {
         signal.removeEventListener("abort", abort);
     }
 }
-async function handleJobs(args, cwd, dependencies, signal) {
+async function handleJobs(args, cwd, _dependencies, _signal) {
     switch (args.jobsAction) {
         case "list":
             return { jobs: (await listJobs(cwd, args.pendingNotifications ?? false)).map(publicJob) };
@@ -637,12 +664,8 @@ async function handleJobs(args, cwd, dependencies, signal) {
                 request: await declineJobHostRequest(cwd, args.jobId, args.hostRequestId, args.declineReason),
             };
         case "action-start":
-            return runHostActionChild({
-                cwd,
-                parentJobId: args.jobId,
-                recommendationId: args.hostRequestId,
-                ...(dependencies ? { dependencies } : {}),
-                ...(signal ? { signal } : {}),
+            throw Object.assign(new Error("Host Actions 0.5 has been removed."), {
+                code: "host-actions-removed",
             });
         case "materialize": {
             const snapshot = await getJob(cwd, args.jobId);
@@ -792,7 +815,9 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDis
         const snapshot = await getJob(cwd, request.id);
         if (snapshot.job.cancelRequestedAt)
             controller.abort();
-        const state = request.requestVersion === 4 || request.requestVersion === 5 || request.requestVersion === 6
+        const state = request.requestVersion === 4 ||
+            request.requestVersion === 5 ||
+            (request.requestVersion ?? 0) >= 6
             ? undefined
             : await loadState(cwd);
         const modelConfiguration = request.modelConfiguration
@@ -801,11 +826,11 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDis
         if (request.requestVersion === 3 ||
             request.requestVersion === 4 ||
             request.requestVersion === 5 ||
-            request.requestVersion === 6) {
+            (request.requestVersion ?? 0) >= 6) {
             if (!request.modelConfiguration || !request.providerSnapshotHash) {
                 throw new Error("Background job is missing its provider configuration snapshot");
             }
-            const providerSnapshotValid = request.requestVersion === 6
+            const providerSnapshotValid = (request.requestVersion ?? 0) >= 6
                 ? typeof request.providerRegistryRevision === "string" &&
                     providerRegistryRevisionFor(modelConfiguration.customProviders, modelConfiguration.providerProfiles) === request.providerRegistryRevision &&
                     providerConfigurationSnapshotHash(modelConfiguration, request.providerRegistryRevision) === request.providerSnapshotHash
@@ -816,7 +841,7 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDis
         }
         if (request.requestVersion === 4 ||
             request.requestVersion === 5 ||
-            request.requestVersion === 6) {
+            (request.requestVersion ?? 0) >= 6) {
             const expectedVersion = request.requestVersion === 4 ? 2 : 3;
             if (!request.policySnapshot || request.policySnapshot.version !== expectedVersion) {
                 throw new ProjectPolicyError({
@@ -849,13 +874,13 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDis
             rawPrompt: prompt,
             ...(request.requestVersion !== 4 &&
                 request.requestVersion !== 5 &&
-                request.requestVersion !== 6 &&
+                (request.requestVersion ?? 0) < 6 &&
                 state?.config.profile
                 ? { profile: state.config.profile }
                 : {}),
             ...(request.requestVersion === 4 ||
                 request.requestVersion === 5 ||
-                request.requestVersion === 6
+                (request.requestVersion ?? 0) >= 6
                 ? request.projectGoal !== undefined
                     ? { projectGoal: request.projectGoal }
                     : {}
@@ -867,6 +892,7 @@ async function runBackgroundJob(args, cwd, dependencies, outerSignal, requireDis
             requireDiscoveryGates,
             job: { id: request.id, workerToken: request.workerToken },
             timeoutMs: request.timeoutMs,
+            hardRunLimitMs: request.hardRunLimitMs ?? request.timeoutMs,
             sandboxMode: request.sandboxMode ?? "strict",
             policySnapshot: request.policySnapshot ?? legacyPolicySnapshot(request, modelPriority(modelConfiguration)),
             modelConfiguration,
@@ -894,6 +920,7 @@ function requestArguments(request) {
         ...(request.model ? { model: request.model } : {}),
         executionMode: "supervised",
         timeoutMs: request.timeoutMs,
+        ...(request.hardRunLimitMs ? { hardRunLimitMs: request.hardRunLimitMs } : {}),
         ...(request.role ? { role: request.role } : {}),
         ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
         ...(request.approvalMode ? { approvalMode: request.approvalMode } : {}),
@@ -978,7 +1005,7 @@ async function runStartedJob(options) {
     const heartbeat = setInterval(() => {
         void heartbeatJob(options.stateCwd, jobId, options.job.workerToken, process.pid).catch(() => { });
     }, JOB_HEARTBEAT_INTERVAL_MS);
-    const deadline = Date.now() + options.timeoutMs;
+    const deadline = Date.now() + options.hardRunLimitMs;
     let sandboxRunner;
     let worktreeLease;
     try {
@@ -2024,6 +2051,7 @@ async function runWithFallback(options) {
                 prompt: options.prompt,
                 session,
                 timeoutMs: remainingMs,
+                executionTimePolicy: { hardRunLimitMs: remainingMs },
                 ...(options.signal ? { signal: options.signal } : {}),
             });
             last = {
@@ -2099,6 +2127,9 @@ async function runWithFallback(options) {
     }
     return { ...last, telemetry: { attempts: telemetryAttempts } };
 }
+// Kept only to make legacy persisted records inspectable while the command path
+// is removed above. It has no caller in 0.23 and can never execute.
+// oxlint-disable-next-line no-unused-vars
 async function runHostActionChild(options) {
     const parent = await getJob(options.cwd, options.parentJobId);
     if (!isTerminalJobStatus(parent.job.status))
@@ -2235,6 +2266,7 @@ async function runHostActionChild(options) {
             requireDiscoveryGates: false,
             job: child,
             timeoutMs,
+            hardRunLimitMs: Math.min(parentRequest.hardRunLimitMs ?? parentRequest.timeoutMs, timeoutMs),
             sandboxMode,
             policySnapshot: childSnapshot,
             modelConfiguration,
@@ -3753,5 +3785,9 @@ function statusResult(kind, status, output, model = null) {
     };
 }
 function defaultTimeoutMs(kind) {
-    return kind === "orchestrate" || isMutationTask(kind) ? 60 * 60_000 : 30 * 60_000;
+    if (kind === "discover" || kind === "orchestrate")
+        return 8 * 60 * 60_000;
+    if (kind === "implement" || kind === "setup" || kind === "scaffold")
+        return 4 * 60 * 60_000;
+    return 60 * 60_000;
 }

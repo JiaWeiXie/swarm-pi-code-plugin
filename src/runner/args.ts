@@ -78,6 +78,8 @@ export interface RunnerArguments {
   role?: WorkerRoleId;
   thinkingLevel?: ThinkingLevel;
   approvalMode?: ApprovalMode;
+  /** Canonical 0.23 execution budget; timeoutMs remains a compatibility alias. */
+  hardRunLimitMs?: number;
   timeoutMs?: number;
   jobsAction?: JobsAction;
   telemetryAction?: TelemetryAction;
@@ -241,7 +243,10 @@ export function parseArguments(argv: string[]): RunnerArguments {
         parsed.approvalMode = parseApprovalMode(readValue(argv, ++index, argument));
         break;
       case "--timeout-ms":
-        parsed.timeoutMs = parseDuration(readValue(argv, ++index, argument), argument);
+        parsed.timeoutMs = parseRunLimit(readValue(argv, ++index, argument), argument);
+        break;
+      case "--hard-run-limit-ms":
+        parsed.hardRunLimitMs = parseRunLimit(readValue(argv, ++index, argument), argument);
         break;
       case "--job":
         parsed.jobId = readValue(argv, ++index, argument);
@@ -615,6 +620,14 @@ function parseDuration(value: string, flag: string): number {
   const duration = Number(value);
   if (!Number.isInteger(duration) || duration < 1_000 || duration > 86_400_000) {
     throw new Error(`${flag} must be an integer from 1000 to 86400000`);
+  }
+  return duration;
+}
+
+function parseRunLimit(value: string, flag: string): number {
+  const duration = Number(value);
+  if (!Number.isInteger(duration) || duration < 1_000 || duration > 43_200_000) {
+    throw new Error(`${flag} must be an integer from 1000 to 43200000`);
   }
   return duration;
 }

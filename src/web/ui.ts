@@ -222,17 +222,29 @@ export function renderConfigurationPage(
           </div>
         </div>
         <div class="form-band">
-          <div class="form-copy"><h2>Host Actions 0.5</h2><p>Run explicitly recorded recommendations in isolated child Jobs. Remote effects remain disabled by default.</p></div>
+          <div class="form-copy"><h2>Review &amp; Testing</h2><p>Choose the default test posture for Implement. This does not force TDD.</p></div>
           <div class="form-control">
-            <label class="inline-check"><input id="host-actions-enabled" type="checkbox"> Enable isolated Host Action children</label>
-            <span class="field-hint">This does not make Workers recommend or start actions. It only permits an eligible structured recommendation to be started after explicit confirmation.</span>
-            <label>Allowed action classes</label><div id="host-action-classes" class="check-list"></div>
-            <label class="inline-check"><input id="host-actions-remote" type="checkbox"> Enable remote write, message, deploy, and transaction actions</label>
-            <label for="host-action-max-uses">Maximum uses</label><input id="host-action-max-uses" type="number" min="1" max="100">
-            <label for="host-action-max-cost">Recommendation cost value (metadata)</label><input id="host-action-max-cost" type="number" min="0" step="0.01">
-            <span class="field-hint">Stored with the isolated action-family lease. It is not currency, billing, a spend limit, or an enforced cost budget.</span>
-            <label for="host-action-ttl">Lease TTL (minutes)</label><input id="host-action-ttl" type="number" min="1" max="1440">
-            <details class="field-tips"><summary>Tips</summary><div class="field-tips-body"><p>Host Actions execute explicitly recorded recommendations in isolated child Jobs; recommendations remain inert until the Host starts an eligible child. A suggestion written only in normal Worker output cannot trigger this path.</p><p>Choose the smallest action classes, use count, and TTL. Remote classes also require the remote toggle and do not remove user confirmation for protected delivery, messaging, deployment, or transactions.</p></div></details>
+            <label for="testing-preference">Implement testing preference</label>
+            <select id="testing-preference"><option value="write-tests">Write suitable tests</option><option value="ask">Ask for a test method</option><option value="no-new-tests">No new tests</option></select>
+            <span class="field-hint">When a choice is needed, the Host offers unit, integration, contract, regression, E2E, property, and no-new-tests options. Existing checks still run when no new tests are chosen.</span>
+          </div>
+        </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Timing &amp; Recovery</h2><p>Hard limits count active work, not explicit approval, Host, or human-decision waiting.</p></div>
+          <div class="form-control">
+            <label>Hard run limit by task</label>
+            <div id="task-hard-limits" class="check-list"></div>
+            <label for="probe-after-idle">Probe after idle (minutes)</label><input id="probe-after-idle" type="number" min="1" max="60">
+            <label for="probe-interval">Probe interval (seconds)</label><input id="probe-interval" type="number" min="15" max="900">
+            <label for="probe-response-deadline">Probe response deadline (seconds)</label><input id="probe-response-deadline" type="number" min="1" max="60">
+            <label for="probe-failures">Consecutive failed probes</label><input id="probe-failures" type="number" min="1" max="5">
+            <label for="recovery-grace">Recovery grace (minutes)</label><input id="recovery-grace" type="number" min="1" max="60">
+            <span class="field-hint">A process heartbeat only proves the worker exists. Trusted stream/tool progress resets the probe. A reachable but quiet provider is shown as suspected stalled; only repeated liveness failures end the Job. The hard limit always remains authoritative.</span>
+          </div>
+        </div>
+        <div class="form-band">
+          <div class="form-copy"><h2>Summary &amp; Migration</h2><p>Host Actions 0.5 was removed in 0.23. Legacy settings are stored as a disabled audit tombstone.</p></div>
+          <div class="form-control"><span class="field-hint">Older clients may submit Host Actions fields, but they are accepted only to migrate them to disabled. Existing pending records remain evidence and never execute or auto-approve.</span></div>
           </div>
         </div>
       </section>
@@ -714,7 +726,9 @@ const clientScript = String.raw`
     contextBudget: Number.isInteger(boot.contextBudget) ? boot.contextBudget : workflowBounds.contextBudget.default,
     advisor: structuredClone(boot.advisor || {enabled:false,targets:["review","plan","orchestrate","discover"],maxRequests:workflowBounds.advisor.requests.default,maxPerspectives:workflowBounds.advisor.perspectives.default}),
     doctrine: boot.doctrine || null,
-    hostActions: structuredClone(boot.hostActions || {enabled:true,allowedActionClasses:["local-mutation","draft"],remoteActionsEnabled:false,maxUses:1,maxCost:1,ttlMs:1800000}),
+    executionTimePolicy: structuredClone(boot.executionTimePolicy || {hardRunLimitMs:3600000,probeAfterIdleMs:300000,probeIntervalMs:60000,probeResponseDeadlineMs:10000,consecutiveProbeFailures:3,recoveryGraceMs:600000}),
+    taskExecutionDefaults: structuredClone(boot.taskExecutionDefaults || {}),
+    testingPreference: boot.testingPreference || "write-tests",
     profile: {
       goal: savedProfile?.goal || "",
       scope: savedProfile?.dirs === undefined ? "all" : "selected",
@@ -734,7 +748,7 @@ const clientScript = String.raw`
     sandboxMode:boot.sandboxMode,rolePolicies:boot.rolePolicies,adaptivePolicy:boot.adaptivePolicy,
     backgroundRolePolicy:boot.backgroundRolePolicy,decisionMode:boot.decisionMode,
     hostAssistance:boot.hostAssistance,contextBudget:boot.contextBudget,advisor:boot.advisor,
-    doctrine:boot.doctrine,hostActions:boot.hostActions,
+    doctrine:boot.doctrine,executionTimePolicy:boot.executionTimePolicy,taskExecutionDefaults:boot.taskExecutionDefaults,testingPreference:boot.testingPreference,
   });
   try {
     const draft = JSON.parse(localStorage.getItem(draftKey) || "null");
@@ -749,7 +763,9 @@ const clientScript = String.raw`
       if (Number.isInteger(draft.contextBudget)) state.contextBudget = draft.contextBudget;
       if (draft.advisor) state.advisor = draft.advisor;
       if ("doctrine" in draft) state.doctrine = draft.doctrine;
-      if (draft.hostActions) state.hostActions = draft.hostActions;
+      if (draft.executionTimePolicy) state.executionTimePolicy = draft.executionTimePolicy;
+      if (draft.taskExecutionDefaults) state.taskExecutionDefaults = draft.taskExecutionDefaults;
+      if (draft.testingPreference) state.testingPreference = draft.testingPreference;
       if (["strict","adaptive","lenient","autopilot","full-access"].includes(draft.sandboxMode)) state.sandboxMode = draft.sandboxMode;
       if (draft.profile) state.profile = draft.profile;
     } else if (draft) localStorage.removeItem(draftKey);
@@ -764,7 +780,7 @@ const clientScript = String.raw`
       adaptivePolicy:state.adaptivePolicy,backgroundRolePolicy:state.backgroundRolePolicy,
       sandboxMode:state.sandboxMode,profile:state.profile,decisionMode:state.decisionMode,
       hostAssistance:state.hostAssistance,contextBudget:state.contextBudget,advisor:state.advisor,
-      doctrine:state.doctrine,hostActions:state.hostActions,
+      doctrine:state.doctrine,executionTimePolicy:state.executionTimePolicy,taskExecutionDefaults:state.taskExecutionDefaults,testingPreference:state.testingPreference,
     }));
   }
   document.addEventListener("input", persistDraft);
@@ -1130,16 +1146,20 @@ const clientScript = String.raw`
     })));
     $("advisor-max-requests").value = String(state.advisor.maxRequests);
     $("advisor-max-perspectives").value = String(state.advisor.maxPerspectives);
-    $("host-actions-enabled").checked = Boolean(state.hostActions.enabled);
-    const actionClasses = $("host-action-classes"); actionClasses.replaceChildren();
-    [["local-mutation","Local mutation"],["draft","Draft"],["remote-write","Remote write"],["message","Message"],["deploy","Deploy"],["transaction","Transaction"]].forEach(([value,label]) => actionClasses.append(checkRow({
-      value,label,checked:state.hostActions.allowedActionClasses.includes(value),
-      onChange:checked => { state.hostActions.allowedActionClasses = checked ? [...new Set([...state.hostActions.allowedActionClasses,value])] : state.hostActions.allowedActionClasses.filter(item => item !== value); },
-    })));
-    $("host-actions-remote").checked = Boolean(state.hostActions.remoteActionsEnabled);
-    $("host-action-max-uses").value = String(state.hostActions.maxUses);
-    $("host-action-max-cost").value = String(state.hostActions.maxCost);
-    $("host-action-ttl").value = String(Math.round(state.hostActions.ttlMs / 60000));
+    $("testing-preference").value = state.testingPreference;
+    const taskHardLimits = $("task-hard-limits"); taskHardLimits.replaceChildren();
+    [["ask",1],["plan",1],["review",1],["implement",4],["setup",4],["scaffold",4],["discover",8],["orchestrate",8]].forEach(([kind,defaultHours]) => {
+      const select = document.createElement("select"); select.id = "hard-limit-" + kind;
+      [1,4,8,12].forEach(hours => select.add(new Option(hours + " hours", String(hours))));
+      select.value = String(Math.round(((state.taskExecutionDefaults[kind] || {}).hardRunLimitMs || defaultHours * 3600000) / 3600000));
+      select.addEventListener("change", () => { state.taskExecutionDefaults[kind] = {...(state.taskExecutionDefaults[kind] || {}),hardRunLimitMs:Number(select.value) * 3600000}; });
+      const row = document.createElement("label"); row.className = "inline-check"; row.textContent = kind + " "; row.append(select); taskHardLimits.append(row);
+    });
+    $("probe-after-idle").value = String(Math.round(state.executionTimePolicy.probeAfterIdleMs / 60000));
+    $("probe-interval").value = String(Math.round(state.executionTimePolicy.probeIntervalMs / 1000));
+    $("probe-response-deadline").value = String(Math.round(state.executionTimePolicy.probeResponseDeadlineMs / 1000));
+    $("probe-failures").value = String(state.executionTimePolicy.consecutiveProbeFailures);
+    $("recovery-grace").value = String(Math.round(state.executionTimePolicy.recoveryGraceMs / 60000));
   }
   function validateSafety() {
     let message = "";
@@ -1149,19 +1169,20 @@ const clientScript = String.raw`
       const maxFanOut = requiredInteger("host-max-fanout", "Host Assistance fan-out", workflowBounds.hostAssistance.fanOut);
       const advisorRequests = requiredInteger("advisor-max-requests", "Advisor consultations", workflowBounds.advisor.requests);
       const advisorPerspectives = requiredInteger("advisor-max-perspectives", "Advisor perspectives", workflowBounds.advisor.perspectives);
-      const hostActionUses = requiredInteger("host-action-max-uses", "Host Action maximum uses", {min:1,max:100});
-      const hostActionCost = requiredNumber("host-action-max-cost", "Host Action recommendation cost metadata", 0);
-      const hostActionTtl = requiredInteger("host-action-ttl", "Host Action lease TTL", {min:1,max:1440});
+      const probeAfterIdle = requiredInteger("probe-after-idle", "Probe idle threshold", {min:1,max:60});
+      const probeInterval = requiredInteger("probe-interval", "Probe interval", {min:15,max:900});
+      const probeResponseDeadline = requiredInteger("probe-response-deadline", "Probe response deadline", {min:1,max:60});
+      const probeFailures = requiredInteger("probe-failures", "Consecutive probe failures", {min:1,max:5});
+      const recoveryGrace = requiredInteger("recovery-grace", "Recovery grace", {min:1,max:60});
       const rules = validatePolicyRules(JSON.parse($("policy-rules").value || "[]"));
       if (state.sandboxMode !== "strict" && state.sandboxMode !== "full-access" && !boot.sandboxAvailability.available) throw new Error(boot.sandboxAvailability.reason || "Sandbox backend is unavailable.");
       if (state.sandboxMode === "adaptive" && state.adaptivePolicy.classifierModels.length === 0) throw new Error("Choose at least one classifier model for Adaptive mode.");
       if (maxFanOut > maxRequests) throw new Error("Host Assistance fan-out cannot exceed its request limit.");
       if (state.advisor.enabled && (state.advisor.targets.length === 0 || advisorRequests < 1 || advisorPerspectives < 1)) throw new Error("Enabled Advisor requires a target, at least one consultation, and one perspective.");
-      if (state.hostActions.remoteActionsEnabled && !state.hostActions.allowedActionClasses.some(value => ["remote-write","message","deploy","transaction"].includes(value))) throw new Error("Remote Host Actions require at least one remote action class.");
       state.contextBudget = contextBudget;
       state.hostAssistance.maxRequests = maxRequests; state.hostAssistance.maxFanOut = maxFanOut;
       state.advisor.maxRequests = advisorRequests; state.advisor.maxPerspectives = advisorPerspectives;
-      state.hostActions.maxUses = hostActionUses; state.hostActions.maxCost = hostActionCost; state.hostActions.ttlMs = hostActionTtl * 60000;
+      state.executionTimePolicy.probeAfterIdleMs = probeAfterIdle * 60000; state.executionTimePolicy.probeIntervalMs = probeInterval * 1000; state.executionTimePolicy.probeResponseDeadlineMs = probeResponseDeadline * 1000; state.executionTimePolicy.consecutiveProbeFailures = probeFailures; state.executionTimePolicy.recoveryGraceMs = recoveryGrace * 60000;
       state.adaptivePolicy.rules = rules;
     } catch (error) { message = error instanceof Error ? error.message : String(error); }
     $("safety-error").hidden = !message; $("safety-error").textContent = message; return !message;
@@ -1274,7 +1295,8 @@ const clientScript = String.raw`
       "Outward boundaries: git writes " + (state.hostAssistance.autoGitWrites ? "on" : "off") + " · deployment " + (state.hostAssistance.autoDelivery ? "on" : "off") + " · granularity " + (state.hostAssistance.outwardApprovalGranularity || "each-time"),
       "Advisor: " + (state.advisor.enabled ? "on for " + state.advisor.targets.join(", ") : "off"),
       "Doctrine: " + (state.doctrine || "off"),
-      "Host Actions: " + (state.hostActions.enabled ? "isolated · " + state.hostActions.allowedActionClasses.join(", ") + (state.hostActions.remoteActionsEnabled ? " · remote enabled" : " · remote disabled") : "off"),
+      "Timing: hard limits by task · probe after " + Math.round(state.executionTimePolicy.probeAfterIdleMs / 60000) + "m · recovery grace " + Math.round(state.executionTimePolicy.recoveryGraceMs / 60000) + "m",
+      "Implement tests: " + state.testingPreference,
     ].forEach(value => { const row = document.createElement("div"); row.className = "review-item"; row.textContent = value; workflow.append(row); });
     const roleReview = $("review-roles"); roleReview.replaceChildren();
     (boot.roles || []).filter(role => !["verifier","classifier"].includes(role.role)).forEach(role => {
@@ -1675,9 +1697,8 @@ const clientScript = String.raw`
   $("context-budget").addEventListener("change", () => { state.contextBudget = Number($("context-budget").value); renderSafety(); clearSafetyError(); });
   $("private-connector").addEventListener("change", () => { state.hostAssistance.privateConnector = $("private-connector").value; });
   $("advisor-enabled").addEventListener("change", () => { state.advisor.enabled = $("advisor-enabled").checked; });
-  $("host-actions-enabled").addEventListener("change", () => { state.hostActions.enabled = $("host-actions-enabled").checked; });
-  $("host-actions-remote").addEventListener("change", () => { state.hostActions.remoteActionsEnabled = $("host-actions-remote").checked; });
-  ["context-budget","host-max-requests","host-max-fanout","advisor-max-requests","advisor-max-perspectives","host-action-max-uses","host-action-max-cost","host-action-ttl"].forEach(id => $(id).addEventListener("input", clearSafetyError));
+  $("testing-preference").addEventListener("change", () => { state.testingPreference = $("testing-preference").value; });
+  ["context-budget","host-max-requests","host-max-fanout","advisor-max-requests","advisor-max-perspectives","probe-after-idle","probe-interval","probe-response-deadline","probe-failures","recovery-grace"].forEach(id => $(id).addEventListener("input", clearSafetyError));
   $("next-button").addEventListener("click", () => {
     if (state.phase === 4 && !validateSafety()) return;
     if (state.phase === 5 && !validateProject()) return;
@@ -1692,7 +1713,7 @@ const clientScript = String.raw`
       const execution = {
         rolePolicies:state.rolePolicies,adaptivePolicy:state.adaptivePolicy,backgroundRolePolicy:state.backgroundRolePolicy,
         decisionMode:state.decisionMode,hostAssistance:state.hostAssistance,contextBudget:state.contextBudget,
-        advisor:state.advisor,doctrine:state.doctrine,hostActions:state.hostActions,
+        advisor:state.advisor,doctrine:state.doctrine,executionTimePolicy:state.executionTimePolicy,taskExecutionDefaults:state.taskExecutionDefaults,testingPreference:state.testingPreference,
       };
       const saved = setupMode === "project" ? await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution}) : await post("/api/save", {baseRevision:bootRevision,baseProviderRevision:boot.providerRegistryRevision,primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id})),profile,sandboxMode:state.sandboxMode,...execution});
       const degraded = saved.health?.status === "degraded";

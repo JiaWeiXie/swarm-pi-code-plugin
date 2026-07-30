@@ -380,6 +380,7 @@ export type JobPhase =
   | "queued"
   | "preflight"
   | "delegating"
+  | "probing"
   | "postflight"
   | "verifying"
   | "checkpointing";
@@ -669,12 +670,48 @@ export interface CapabilityLease {
 }
 
 export interface HostActionPolicy {
+  /**
+   * Legacy-only tombstone. Host Actions were retired in 0.23 and this shape is
+   * retained solely so an older saved configuration cannot re-enable them.
+   */
   enabled: boolean;
   allowedActionClasses: Array<ActionRecommendation["actionClass"]>;
   remoteActionsEnabled: boolean;
   maxUses: number;
   maxCost: number;
   ttlMs: number;
+}
+
+/**
+ * A bounded execution budget and a separate liveness probe policy. The probe
+ * never sends another model prompt; it only observes the existing session.
+ */
+export interface ExecutionTimePolicy {
+  hardRunLimitMs: number;
+  probeAfterIdleMs: number;
+  probeIntervalMs: number;
+  probeResponseDeadlineMs: number;
+  consecutiveProbeFailures: number;
+  recoveryGraceMs: number;
+}
+
+export type ExecutionTerminationReason = "unresponsive-timeout" | "hard-limit-exceeded";
+
+export type TestingPreference = "write-tests" | "ask" | "no-new-tests";
+
+export interface TaskExecutionDefaults {
+  role?: WorkerRoleId;
+  executionMode?: ExecutionMode;
+  sandboxMode?: SandboxMode;
+  thinkingLevel?: ThinkingLevel;
+  approvalMode?: ApprovalMode;
+  hostAssistance?: HostAssistanceMode;
+  workspaceStrategy?: WorkspaceStrategy;
+  hardRunLimitMs?: number;
+  reviewProfile?: "standard" | "lean";
+  implementationProfile?: "direct" | "prewalk";
+  orchestrationProfile?: "independent" | "shared-recon";
+  testingPreference?: TestingPreference;
 }
 
 export interface HostActionReceipt {
@@ -708,6 +745,7 @@ export interface WorkerRequest {
   executionMode: ExecutionMode;
   sandboxMode: SandboxMode;
   timeoutMs: number;
+  hardRunLimitMs?: number;
   model?: string;
   role?: WorkerRoleId;
   thinkingLevel?: ThinkingLevel;
@@ -748,6 +786,7 @@ export interface WorkerResult {
   fallbackUsed?: boolean;
   error?: string | null;
   errorCode?: string | null;
+  terminationReason?: ExecutionTerminationReason;
   role?: WorkerRoleId;
   requestedThinkingLevel?: ThinkingLevel;
   effectiveThinkingLevel?: ThinkingLevel;
@@ -881,7 +920,7 @@ export interface AuditJobSummary {
 }
 
 export interface AuditRequestSummary {
-  requestVersion?: 1 | 2 | 3 | 4 | 5 | 6;
+  requestVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   id: string;
   host: Host;
   kind: TaskKind;
