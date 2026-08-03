@@ -14,6 +14,10 @@ run = "npm install"
 description = "Run the Node test suite"
 run = "npm test"
 
+[tasks.test-configuration-ui]
+description = "Run the Configuration UI Playwright matrix"
+run = "npm run test:configuration-ui"
+
 [tasks.typecheck]
 description = "Type-check the TypeScript sources"
 run = "npm run typecheck"

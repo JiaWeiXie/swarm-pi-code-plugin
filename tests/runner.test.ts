@@ -491,6 +491,7 @@ test("session execution treats resolved provider errors as failures", async () =
 test("session execution classifies incomplete and aborted terminal messages", async () => {
   for (const [stopReason, expected] of [
     ["length", /before completion/i],
+    ["pending", /before completion/i],
     ["aborted", /aborted/i],
   ] as const) {
     const listeners = new Set<(event: any) => void>();

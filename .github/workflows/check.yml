@@ -80,6 +80,9 @@ jobs:
           echo "Documentation impact obligations are missing. See the JSON report above."
           exit 1
 
+      - name: Install Configuration UI browser
+        run: npm run docs:screenshots:install:ci
+
       - name: Run quality checks
         run: mise run check
 

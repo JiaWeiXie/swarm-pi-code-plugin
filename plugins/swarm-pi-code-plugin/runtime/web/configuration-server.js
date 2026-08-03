@@ -433,7 +433,7 @@ function normalizeCustomCredentialRequest(value) {
         baseUrl: requiredText(record.baseUrl, "Server URL"),
         protocol,
         authMethod,
-        ...(typeof record.secret === "string"
+        ...(typeof record.secret === "string" && (authMethod !== "none" || record.secret.length > 0)
             ? { secret: boundedTextField(record.secret, "Credential", 16_384) }
             : {}),
         ...(record.headerName === "authorization" ||

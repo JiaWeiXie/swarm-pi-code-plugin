@@ -18,6 +18,12 @@ Unless a section says otherwise:
 See the [Configuration Reference](configuration.md) for storage, transaction,
 provider protocol, and server-lifecycle details.
 
+The plugin currently pins the Pi Coding Agent SDK at `0.83.0`. When Pi reports
+the `pending` stop reason, the response is incomplete and remains fail-closed;
+it is never treated as successful output. The session adapter also accepts the
+SDK's full event-listener shape so future Pi event variants do not weaken the
+local execution boundary.
+
 Quick navigation: [operating model](#mental-model) · [safe defaults](#safe-defaults) ·
 [Providers](#provider-fields) · [Models/Roles](#model-role-keywords) ·
 [Adaptive rules](#adaptive-policy) · [Decision/Background](#workflow-keywords) ·
@@ -324,6 +330,13 @@ request semantics and endpoint identity.
 When editing, a blank Credential field keeps the saved credential. Secret
 values stay in the session-local draft vault and are never returned to the
 browser, docs, state, or model configuration.
+
+**Delete globally** is staged until a successful final Save. It removes a
+stored credential and its provider definition/profile plus stale routing
+references in one rollback transaction. Stored built-in providers remain
+deletable even when no profile was persisted; environment-managed ambient
+identities do not show a global-delete action. Reconnecting in the same setup
+session cancels the pending deletion.
 
 <a id="custom-models-endpoint"></a>
 ### Models endpoint

@@ -213,6 +213,9 @@ function resultFromTerminalMessage(kind, model, output, message) {
     if (message.stopReason === "length") {
         return result(kind, "failed", model, "Pi response ended before completion.");
     }
+    if (message.stopReason === "pending") {
+        return result(kind, "failed", model, "Pi response ended before completion.");
+    }
     if (message.stopReason === "aborted") {
         return result(kind, "failed", model, message.errorMessage ?? "Pi session was aborted.");
     }

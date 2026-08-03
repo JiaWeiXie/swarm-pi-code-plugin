@@ -124,6 +124,7 @@ export function renderConfigurationPage(
 
       <section id="roles-screen" class="screen" hidden>
         <div class="screen-heading"><div><h1>Worker roles</h1><p>Assign models and reasoning effort to each delegated responsibility.</p></div></div>
+        <div id="project-only-model-warning" class="notice warning" role="alert" hidden>Project setup needs at least one configured model. Add a global connection first, then reopen project setup.</div>
         <div id="role-policy-list" class="role-policy-list"></div>
       </section>
 
@@ -532,6 +533,7 @@ h2 { letter-spacing: 0; }
 .connection-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
 .status-pill { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: 12px; font-weight: 650; }
 .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.managed-source { color: var(--muted); font-size: 12px; font-weight: 650; white-space: nowrap; }
 .row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .row-actions button { min-height: 34px; padding: 0 11px; }
 .verify-model-select { min-height: 34px; max-width: 190px; padding: 0 8px; border: 1px solid #c8d0cd; border-radius: 6px; background: #fff; color: #26312f; font-size: 13px; }
@@ -634,6 +636,20 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 .model-editor-body { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding-top: 12px; }
 .model-editor-body .model-id { grid-column: 1 / -1; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; }
 .dialog-status { min-height: 20px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+@media (max-width: 1280px) {
+  .steps, .project-steps { gap: 8px; padding: 0 16px; }
+  .steps button { gap: 7px; font-size: 13px; white-space: nowrap; }
+  .step-line { flex: 1 1 48px; width: auto; min-width: 16px; }
+  .connection-row { grid-template-columns: 42px minmax(0, 1fr); align-items: start; }
+  .status-pill, .row-actions { grid-column: 2; }
+  .status-pill { margin-top: 2px; }
+  .row-actions { justify-content: flex-start; }
+}
+@media (max-width: 860px) {
+  .steps, .project-steps { gap: 8px; padding: 0 12px; }
+  .steps button { gap: 0; font-size: 0; }
+  .step-line { flex: 1 1 24px; min-width: 8px; }
+}
 @media (max-width: 760px) {
   .app-shell { grid-template-rows: 58px 68px minmax(0, 1fr) auto; }
   .topbar { padding: 0 16px; }
@@ -706,6 +722,7 @@ const clientScript = String.raw`
     models: structuredClone(boot.models),
     customProviders: structuredClone(boot.configuration.customProviders),
     providerProfiles: structuredClone(boot.configuration.providerProfiles || []),
+    deletedProviders: [],
     credentialDrafts: {},
     providerFieldValues: {},
     primary: boot.configuration.primary || "",
@@ -793,6 +810,7 @@ const clientScript = String.raw`
   function customProvider(id) { return state.customProviders.find(item => item.id === id); }
   function providerProfile(id) { return state.providerProfiles.find(item => item.provider === id); }
   function providerDefinition(id) { return state.providerCatalog.find(item => item.id === id); }
+  function markProviderReconnected(id) { state.deletedProviders = state.deletedProviders.filter(provider => provider !== id); }
   function endpointKey(provider) {
     try { return new URL(provider.baseUrl).toString().replace(/\/$/, "") + "|" + provider.api; }
     catch { return String(provider.baseUrl).replace(/\/$/, "") + "|" + provider.api; }
@@ -889,7 +907,9 @@ const clientScript = String.raw`
     for (const item of connections) {
       const profile = providerProfile(item.id);
       const customAuth = item.custom ? state.customProviders.find(provider => provider.id === item.id)?.auth?.method : undefined;
-      const authMethod = profile?.auth?.method || customAuth;
+      const definition = providerDefinition(item.id);
+      const authMethod = profile?.auth?.method || customAuth || (item.auth?.source === "stored" ? definition?.defaultAuthMethod : undefined);
+      const canDeleteGlobally = item.custom || item.auth?.source === "stored";
       const readiness = profile?.readiness || (item.ready ? "verified" : "blocked");
       const row = document.createElement("div");
       row.className = "connection-row";
@@ -918,8 +938,12 @@ const clientScript = String.raw`
       if (authMethod === "api-key" || authMethod === "oauth" || authMethod === "custom-header") {
         const signout = document.createElement("button"); signout.type = "button"; signout.className = "secondary-button"; signout.textContent = "Sign out"; signout.addEventListener("click", () => signOutConnection(item.id)); actions.append(signout);
       }
-      const remove = document.createElement("button"); remove.type = "button"; remove.className = "danger-button"; remove.textContent = "Delete globally"; remove.addEventListener("click", () => removeConnection(item.id));
-      actions.append(remove);
+      if (canDeleteGlobally) {
+        const remove = document.createElement("button"); remove.type = "button"; remove.className = "danger-button"; remove.textContent = "Delete globally"; remove.addEventListener("click", () => removeConnection(item.id));
+        actions.append(remove);
+      } else if (item.auth?.source === "ambient" || item.auth?.source === "env") {
+        const managed = document.createElement("span"); managed.className = "managed-source"; managed.textContent = "Managed by environment"; managed.title = "This identity is supplied outside the Pi credential store."; actions.append(managed);
+      }
       list.append(row);
     }
   }
@@ -1308,9 +1332,10 @@ const clientScript = String.raw`
     $("full-steps").hidden = setupMode !== "full"; $("project-steps").hidden = setupMode !== "project";
     renderSteps(); renderConnections(); renderPrimary(); renderFallbacks(); renderRoles(); renderSafety(); renderProject(); renderReview();
     $("connections-screen").hidden = state.phase !== 1; $("models-screen").hidden = state.phase !== 2; $("roles-screen").hidden = state.phase !== 3; $("safety-screen").hidden = state.phase !== 4; $("project-screen").hidden = state.phase !== 5; $("review-screen").hidden = state.phase !== 6;
+    $("project-only-model-warning").hidden = setupMode !== "project" || usableModels().length > 0;
     $("cancel-button").hidden = state.phase !== initialPhase; $("back-button").hidden = state.phase === initialPhase; $("next-button").hidden = state.phase === 6; $("save-button").hidden = state.phase !== 6;
     $("next-button").textContent = state.phase === 1 ? "Choose models" : state.phase === 2 ? "Configure roles" : state.phase === 3 ? "Execution safety" : state.phase === 4 ? "Workspace" : "Review";
-    $("next-button").disabled = Boolean(boot.providerMigrationConflict) || (setupMode === "full" && ((usableModels().length === 0 && !state.primary) || (state.phase === 2 && !state.primary)));
+    $("next-button").disabled = Boolean(boot.providerMigrationConflict) || (setupMode === "project" && usableModels().length === 0) || (setupMode === "full" && ((usableModels().length === 0 && !state.primary) || (state.phase === 2 && !state.primary)));
     $("save-button").textContent = setupMode === "project" ? "Save project setup" : "Save configuration";
     const warning = $("registry-warning"); warning.hidden = !boot.registryError; warning.textContent = boot.registryError ? "Pi model registry: " + boot.registryError : "";
     persistDraft();
@@ -1446,7 +1471,7 @@ const clientScript = String.raw`
     const draft = state.credentialDrafts[provider]; status.className = "dialog-status"; status.textContent = "Preparing connection...";
     const preview = await post("/api/providers/connect", {provider,authMethod,fields:readProviderFields(),credentialDraftId:draft?.id});
     if (preview.credentialDraft) state.credentialDrafts[provider] = preview.credentialDraft;
-    state.providerFieldValues[provider] = structuredClone(preview.profile.settings || {}); upsertProviderProfile(preview.profile); upsertConnection(preview.provider); upsertModels(preview.models); normalizeSelection();
+    state.providerFieldValues[provider] = structuredClone(preview.profile.settings || {}); markProviderReconnected(provider); upsertProviderProfile(preview.profile); upsertConnection(preview.provider); upsertModels(preview.models); normalizeSelection();
     document.querySelectorAll('#provider-fields input[type="password"]').forEach(input => { input.value = ""; });
     if (closeOnSuccess && $("connection-dialog").open) $("connection-dialog").close();
     status.textContent = "Connection configured."; render();
@@ -1562,6 +1587,7 @@ const clientScript = String.raw`
     const removed = previous ? previous.models.filter(model => oldId !== provider.id || !provider.models.some(next => next.id === model.id)).map(model => oldId + "/" + model.id) : [];
     if (removed.length && !reconcileLocalRemovedReferences(removed, "saving this connection")) return;
     if (matchingIndex >= 0) state.customProviders[matchingIndex] = provider; else state.customProviders.push(provider); if (oldId && oldId !== provider.id) { state.models = state.models.filter(item => item.provider !== oldId); state.connections = state.connections.filter(item => item.id !== oldId); state.providerProfiles = state.providerProfiles.filter(item => item.provider !== oldId); delete state.credentialDrafts[oldId]; }
+    markProviderReconnected(provider.id);
     upsertProviderProfile(profile); replaceProviderModels(provider); upsertConnection({id:provider.id,name:provider.name,ready:true,modelCount:provider.models.length,availableModelCount:provider.models.length,auth:{source:state.credentialDrafts[provider.id]?"runtime":provider.requiresApiKey?"stored":"local",label:state.credentialDrafts[provider.id]?"Credential pending save":provider.requiresApiKey?"Pi credential store":"No credential"},selection:null,custom:true}); normalizeSelection(); if ($("connection-dialog").open) $("connection-dialog").close(); render();
   }
   function removeConnection(id) {
@@ -1569,6 +1595,7 @@ const clientScript = String.raw`
     const removed = state.models.filter(model => model.provider === id).map(model => model.id);
     if (!reconcileLocalRemovedReferences(removed, "removing " + item.name)) return;
     if (!confirm("Delete " + item.name + " globally? This removes the provider and its stored credential for every Swarm Pi project. Historical Job snapshots are retained.")) return;
+    state.deletedProviders = [...new Set([...state.deletedProviders, id])];
     state.customProviders = state.customProviders.filter(provider => provider.id !== id); state.providerProfiles = state.providerProfiles.filter(profile => profile.provider !== id); state.connections = state.connections.filter(connection => connection.id !== id); state.models = state.models.filter(model => model.provider !== id); delete state.credentialDrafts[id]; render();
   }
   async function verifyConnection(id, chosenModelId) {
@@ -1715,7 +1742,7 @@ const clientScript = String.raw`
         decisionMode:state.decisionMode,hostAssistance:state.hostAssistance,contextBudget:state.contextBudget,
         advisor:state.advisor,doctrine:state.doctrine,executionTimePolicy:state.executionTimePolicy,taskExecutionDefaults:state.taskExecutionDefaults,testingPreference:state.testingPreference,
       };
-      const saved = setupMode === "project" ? await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution}) : await post("/api/save", {baseRevision:bootRevision,baseProviderRevision:boot.providerRegistryRevision,primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,providerProfiles:state.providerProfiles,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id})),profile,sandboxMode:state.sandboxMode,...execution});
+      const saved = setupMode === "project" ? await post("/api/save-profile", {profile,sandboxMode:state.sandboxMode,...execution}) : await post("/api/save", {baseRevision:bootRevision,baseProviderRevision:boot.providerRegistryRevision,primary:state.primary||null,fallbacks:state.fallbacks,customProviders:state.customProviders,providerProfiles:state.providerProfiles,deletedProviders:state.deletedProviders,credentialDrafts:Object.values(state.credentialDrafts).map(draft => ({provider:draft.provider,draftId:draft.id})),profile,sandboxMode:state.sandboxMode,...execution});
       const degraded = saved.health?.status === "degraded";
       showCompletion(setupMode === "project" ? "Project setup saved" : degraded ? "Configuration saved with model health warnings" : "Configuration saved", degraded ? "The structure was saved, but one or more unchanged saved models are currently unavailable. Reconnect or replace them before running work that needs those routes." : "Swarm Pi will use these project settings for delegated work. You can close this tab.", true);
     } catch (error) { if (error.stage === "models") setPhase(2); else if (error.stage === "roles") setPhase(3); else if (error.stage === "execution-safety") setPhase(4); status.className = "save-status error"; status.textContent = error.message; button.disabled = false; }

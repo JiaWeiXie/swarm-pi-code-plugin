@@ -19,6 +19,13 @@ claude plugin marketplace add https://github.com/JiaWeiXie/swarm-pi-code-plugin
 claude plugin install swarm-pi-code-plugin@swarm-pi-code-plugin
 ```
 
+For Codex:
+
+```bash
+codex plugin marketplace add https://github.com/JiaWeiXie/swarm-pi-code-plugin
+codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
+```
+
 For local development:
 
 ```bash
@@ -125,10 +132,48 @@ the user’s approval. Do not manually create runner state files.
 
 Traditional Chinese focused references are paired where available.
 
-## Inspirations
+## Built With and References
 
-The Skill structure and engineering-method emphasis were informed by
-[mattpocock/skills](https://github.com/mattpocock/skills). This repository is an
-independent implementation: it adopts ideas such as precise triggers,
-anti-triggers, evidence, stopping conditions, and focused references; it does
-not copy third-party prompts.
+- [Claude Code current documentation](https://code.claude.com/docs/en/overview)
+- [OpenAI Codex](https://developers.openai.com/codex/)
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.83.0`
+- [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime), pinned at `0.0.49`
+- [Node.js](https://nodejs.org/), `24.15.0+`
+- [TypeScript](https://www.typescriptlang.org/)
+- [mise](https://mise.jdx.dev/)
+- [Playwright](https://playwright.dev/), pinned at `1.61.0`
+- [Git worktrees](https://git-scm.com/docs/git-worktree)
+
+The original plugin concept and Host workflow were informed by
+[apoapps/swarm-code-plugin](https://github.com/apoapps/swarm-code-plugin). That
+project is a reference for architecture and delegation ideas; this repository
+is an independent rewrite and does not reuse its source code.
+
+The role orchestration and execution-safety design also draws on the following
+open-source projects and documentation:
+
+- [Nanako0129/pilotfish](https://github.com/Nanako0129/pilotfish) informed the
+  Machine, Role, and Policy separation used for role-specific model routing.
+- [Pi containerization guidance](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/containerization.md)
+  informed the isolation boundaries and the future whole-process `isolated`
+  mode direction, while [carderne/pi-sandbox](https://github.com/carderne/pi-sandbox)
+  informed the macOS Seatbelt and Linux Bubblewrap approach used by sandboxed
+  shell tools.
+- [r4vi/pi-auto-mode](https://github.com/r4vi/pi-auto-mode) and
+  [czottmann/pi-automode](https://github.com/czottmann/pi-automode) informed the
+  adaptive permission classifier, policy decisions, and approval flow.
+- [farion1231/cc-switch](https://github.com/farion1231/cc-switch) informed the
+  provider-form and protocol-selection research. This plugin uses Pi's native
+  adapters rather than CC-Switch's protocol translation proxy.
+- [mattpocock/skills](https://github.com/mattpocock/skills) informed Skill
+  triggers, anti-triggers, evidence, stopping conditions, and focused
+  references.
+
+These projects and documents are design references. This repository is an
+independent implementation: it does not load complete third-party extensions,
+copy third-party source code, or copy third-party prompts.
+
+## License
+
+This project is released under the [MIT License](LICENSE). Copyright (c) 2026
+Jason Hsieh.

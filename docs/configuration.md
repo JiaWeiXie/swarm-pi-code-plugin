@@ -32,6 +32,18 @@ The six full-setup steps are:
 Project-only setup retains Roles, Execution & Safety, Workspace, and Review. It
 does not rewrite provider credentials or model configuration.
 
+Project-only setup is fail-closed when no model is available: Roles shows an
+explicit message to configure a global connection first and does not permit
+advancing or saving. Full setup likewise keeps the next step disabled until a
+usable model exists. The setup layout switches to a compact stepper and
+two-row connection actions below 1280 CSS pixels, with the existing mobile
+rules continuing below 860, 760, and 480 pixels.
+
+This release pins the Pi Coding Agent SDK at `0.83.0`. Its session boundary
+accepts the SDK's complete event-listener shape, and a new `pending` terminal
+reason is treated as an incomplete response. Partial streams therefore remain
+fail-closed and cannot be recorded as successful model output.
+
 New workspace defaults use Adaptive Sandbox mode, Balance Decision Mode,
 Host Assistance on with Host-first review, a Reversible automatic ceiling,
 Discovery gate auto-review, Advisor off, and doctrine off. `full-access` is a
@@ -196,7 +208,7 @@ not expose a network listener beyond loopback or accept raw telemetry input.
 - model source and runtime adapter support.
 
 Coverage tests compare the Registry with every provider exposed by the Pi
-v0.82.1 model catalog. A newly added Pi provider fails CI until it is classified; the
+v0.83.0 model catalog. A newly added Pi provider fails CI until it is classified; the
 UI never guesses that an unknown provider uses a simple API-key form.
 
 The plugin initializes `ModelRuntime` from the configured auth and model files
@@ -220,7 +232,7 @@ Built-in examples include:
 | Cloudflare | managed or Chat-compatible | API key | account and optional gateway IDs |
 
 Azure Microsoft Entra identity is shown only as a capability notice because the
-Pi v0.82.1 runtime cannot execute it. It is never marked ready.
+Pi v0.83.0 runtime cannot execute it. It is never marked ready.
 
 ## Wire Protocols
 
@@ -320,6 +332,16 @@ Secrets never enter:
 Blank secret fields retain an existing credential. **Replace credential**,
 built-in **Sign out**, and **Delete globally** are distinct operations. Global
 custom-provider deletion removes the provider credential during final Save.
+
+**Delete globally** is an explicit, staged deletion intent. It is offered only
+for stored credentials and persistent custom definitions; environment-managed
+ambient identities do not expose an action they cannot fulfill. Final Save
+validates the provider, removes its credential, profile, custom definition, and
+all primary/fallback/role/classifier/verified-model references in one rollback
+transaction. A stored built-in provider is deletable even when it has no saved
+profile. Reconnecting that provider in the same setup session cancels the
+pending deletion. Unknown providers, deletion plus a replacement credential,
+and an active primary with no surviving replacement fail closed.
 
 ChatGPT Plus/Pro is the `openai-codex` subscription connection. It is not an
 OpenAI API-key option. The browser drives Pi's browser or device-code OAuth with
@@ -469,7 +491,7 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 
 ## Acceptance Criteria
 
-- Every Pi v0.82.1 provider is explicitly classified by the Registry.
+- Every Pi v0.83.0 provider is explicitly classified by the Registry.
 - ChatGPT subscription and OpenAI API-key connections remain separate.
 - Browser responses, localStorage, state, model config, and jobs contain no
   credential values.

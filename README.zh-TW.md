@@ -16,6 +16,13 @@ claude plugin marketplace add https://github.com/JiaWeiXie/swarm-pi-code-plugin
 claude plugin install swarm-pi-code-plugin@swarm-pi-code-plugin
 ```
 
+Codex 安裝方式：
+
+```bash
+codex plugin marketplace add https://github.com/JiaWeiXie/swarm-pi-code-plugin
+codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
+```
+
 本機開發：
 
 ```bash
@@ -110,8 +117,31 @@ form 與既有設定。這代表外層 Host sandbox 阻擋本機 state write；�
 - [Telemetry](docs/telemetry.md)
 - [Threat model](docs/threat-model.md)
 
-## Inspirations
+## 使用的技術與參考專案
 
-Skill 結構與工程方法參考了 [mattpocock/skills](https://github.com/mattpocock/skills)。本
-repository 是獨立實作：採納精確 trigger、anti-trigger、evidence、停止條件與 focused
-reference 的方法，不直接複製第三方提示詞。
+- [Claude Code 最新文件](https://code.claude.com/docs/en/overview)
+- [OpenAI Codex](https://developers.openai.com/codex/)
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.83.0`
+- [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime)，固定使用 `0.0.49`
+- [Node.js](https://nodejs.org/)，`24.15.0+`
+- [TypeScript](https://www.typescriptlang.org/)
+- [mise](https://mise.jdx.dev/)
+- [Playwright](https://playwright.dev/)，固定使用 `1.61.0`
+- [Git worktrees](https://git-scm.com/docs/git-worktree)
+
+本 Plugin 的原始概念與 Host workflow 參考了
+[apoapps/swarm-code-plugin](https://github.com/apoapps/swarm-code-plugin)。該專案僅作為架構與委派概念的參考；本 repository 是獨立重寫，不重用其原始碼。
+
+角色調度與執行安全設計也參考下列開源專案與文件：
+
+- [Nanako0129/pilotfish](https://github.com/Nanako0129/pilotfish)：參考 Machine、Role 與 Policy 分離，以及依角色進行模型調度的概念。
+- [Pi containerization guidance](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/containerization.md)：參考隔離邊界與未來 whole-process `isolated` 模式方向；[carderne/pi-sandbox](https://github.com/carderne/pi-sandbox) 則參考 macOS Seatbelt 與 Linux Bubblewrap 的沙盒 shell 作法。
+- [r4vi/pi-auto-mode](https://github.com/r4vi/pi-auto-mode) 與 [czottmann/pi-automode](https://github.com/czottmann/pi-automode)：參考自適應權限 classifier、政策決策與核准流程。
+- [farion1231/cc-switch](https://github.com/farion1231/cc-switch)：參考模型供應商表單與協定選擇的調查；本 Plugin 使用 Pi 原生 adapter，不使用 CC-Switch 的協定轉譯 proxy。
+- [mattpocock/skills](https://github.com/mattpocock/skills)：參考 Skill trigger、anti-trigger、evidence、停止條件與 focused reference。
+
+以上專案與文件僅為設計參考。本 repository 是獨立實作：不載入第三方完整 extension、不複製第三方 source code，也不複製第三方 prompts。
+
+## 授權
+
+本專案採用 [MIT License](LICENSE)。Copyright (c) 2026 Jason Hsieh。

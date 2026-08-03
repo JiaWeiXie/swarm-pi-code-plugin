@@ -15,6 +15,11 @@
 儲存、交易、協定與 server lifecycle 的技術細節，請參考
 [設定參考](configuration.md)。
 
+目前 Plugin 固定使用 Pi Coding Agent SDK `0.83.0`。當 Pi 回報 `pending` stop
+reason 時，代表回應尚未完成，會維持 fail-closed，絕不當成成功輸出。Session
+adapter 也接受 SDK 完整的 event listener 形狀，避免未來新增 Pi event variant
+削弱本地執行邊界。
+
 快速入口：[整體概念](#mental-model) · [安全預設](#safe-defaults) ·
 [Provider](#provider-fields) · [Model／Role](#model-role-keywords) ·
 [Adaptive rules](#adaptive-policy) · [Decision／Background](#workflow-keywords) ·
@@ -303,6 +308,12 @@ identity。
 
 編輯既有連線時，Credential 留白會保留已儲存憑證。秘密只存在當次 session 的
 draft vault，不會回傳瀏覽器，也不會進入文件、state 或 model configuration。
+
+**Delete globally** 會先保留待刪除意圖，只有最後成功 Save 才會生效。它會在同一個
+rollback transaction 中移除已儲存 credential、provider definition／profile，以及過期的
+primary、fallback、role、classifier 與 verified-model route。即使內建 provider 沒有持久化
+profile，只要 credential 是儲存來源仍可刪除；由環境管理的 ambient identity 不會顯示全域
+刪除按鈕。同一個 setup session 重新連接 provider 會取消待刪除狀態。
 
 <a id="custom-models-endpoint"></a>
 ### Models endpoint

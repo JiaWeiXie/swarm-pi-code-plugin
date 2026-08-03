@@ -17,7 +17,7 @@ import { loadModelConfiguration, prepareProviderRegistryForConfiguration, resolv
 import { loadProviderRegistry, ProviderRegistryConflictError, ProviderRegistryRevisionConflictError, resolveProviderRegistryFile, resolveProviderRegistryRecoveryFile, withProviderRegistryTransaction, } from "../state/provider-registry.js";
 import { loadState, resolveStateDir, resolveStateFile, resolveWorkspaceRoot, saveProjectSettings, saveExecutionSettings, setModelPriority, updateState, defaultHostActionPolicy, defaultExecutionTimePolicy, defaultTaskExecutionDefaults, } from "../state/state.js";
 import { discoverEndpoint, discoverLocalEndpoints, } from "./model-discovery.js";
-import { modelReferences, providerForModelReference, reconcileRemovedModelReferences, removedCustomModelReferences, removedCustomProviderIds, } from "./configuration-references.js";
+import { modelReferences, providerForModelReference, reconcileRemovedModelReferences, removedCustomModelReferences, } from "./configuration-references.js";
 export class ConfigurationSaveError extends Error {
     code;
     options;
@@ -551,6 +551,26 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
         submission.baseRevision !== current.configurationRevision) {
         throw new ConfigurationSaveError("configuration-revision-conflict", "Configuration changed in another setup session. Reload before saving.", { status: 409, path: "configurationRevision" });
     }
+    const requestedDeletedProviders = normalizeDeletedProviders(submission.deletedProviders);
+    const currentProviders = new Map(current.providers.map((provider) => [provider.id, provider]));
+    for (const provider of requestedDeletedProviders) {
+        const summary = currentProviders.get(provider);
+        if (!summary) {
+            throw new ConfigurationSaveError("unknown-provider-deletion", `Cannot delete unknown provider: ${provider}`, { status: 400, path: "deletedProviders" });
+        }
+        if (!summary.custom && summary.auth.source !== "stored") {
+            throw new ConfigurationSaveError("provider-deletion-conflict", `Provider ${provider} is managed by the environment and cannot be deleted globally.`, { status: 400, path: "deletedProviders" });
+        }
+    }
+    const draftedProviders = new Set(Array.isArray(submission.credentialDrafts)
+        ? submission.credentialDrafts
+            .filter((draft) => draft && typeof draft.provider === "string")
+            .map((draft) => draft.provider.trim())
+        : []);
+    const deletedWithDraft = requestedDeletedProviders.find((provider) => draftedProviders.has(provider));
+    if (deletedWithDraft) {
+        throw new ConfigurationSaveError("provider-deletion-conflict", `Provider ${deletedWithDraft} cannot be deleted while a replacement credential is submitted.`, { status: 400, path: "deletedProviders" });
+    }
     const profile = submission.profile
         ? await normalizeProjectProfile(cwd, submission.profile)
         : undefined;
@@ -565,19 +585,29 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
     const removedProviderIds = new Set(current.configuration.customProviders
         .map((provider) => provider.id)
         .filter((provider) => !submittedProviderIds.has(provider)));
+    const deletedProviderIds = new Set([...requestedDeletedProviders, ...removedProviderIds]);
     const submittedProfiles = submission.providerProfiles ?? current.configuration.providerProfiles;
     let candidate = parseModelConfiguration({
         version: 1,
         primary: submission.primary,
         fallbacks: submission.fallbacks,
         customProviders: submission.customProviders,
-        providerProfiles: submittedProfiles.filter((profile) => !removedProviderIds.has(profile.provider)),
+        providerProfiles: submittedProfiles.filter((profile) => !deletedProviderIds.has(profile.provider)),
         updatedAt: null,
     });
     assertNoBuiltInProviderOverride(current, candidate);
     assertProviderProfilePolicies(candidate);
     const removedReferences = removedCustomModelReferences(current.configuration, candidate);
-    const reconciled = reconcileRemovedModelReferences(candidate, execution.rolePolicies, execution.adaptivePolicy, removedReferences, removedCustomProviderIds(current.configuration, candidate));
+    const providerReferences = modelReferences(current.configuration, current.rolePolicies ?? {}, current.adaptivePolicy ?? DEFAULT_ADAPTIVE_POLICY);
+    for (const reference of modelReferences(candidate, execution.rolePolicies, execution.adaptivePolicy)) {
+        providerReferences.add(reference);
+    }
+    for (const reference of providerReferences) {
+        if (deletedProviderIds.has(providerForModelReference(reference))) {
+            removedReferences.add(reference);
+        }
+    }
+    const reconciled = reconcileRemovedModelReferences(candidate, execution.rolePolicies, execution.adaptivePolicy, removedReferences, deletedProviderIds);
     candidate = reconciled.configuration;
     execution.rolePolicies = reconciled.rolePolicies;
     execution.adaptivePolicy = reconciled.adaptivePolicy;
@@ -594,6 +624,9 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
         credential: options.credentialVault.resolve(draft.provider, draft.draftId),
     }));
     const stagingCredentials = await cloneCredentialStore(persistentCredentials);
+    for (const provider of deletedProviderIds) {
+        await stagingCredentials.delete(provider);
+    }
     for (const credential of credentials) {
         await stagingCredentials.modify(credential.provider, async () => credential.credential);
     }
@@ -672,7 +705,7 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
         const credentialSnapshots = await Promise.all([
             ...new Set([
                 ...credentials.map((credential) => credential.provider),
-                ...removedProviderIds,
+                ...deletedProviderIds,
             ]),
         ].map(async (provider) => ({
             provider,
@@ -684,7 +717,7 @@ export async function saveConfigurationSubmission(cwd, submission, env = process
             for (const credential of credentials) {
                 await persistentCredentials.modify(credential.provider, async () => credential.credential);
             }
-            for (const provider of removedProviderIds) {
+            for (const provider of deletedProviderIds) {
                 await persistentCredentials.delete(provider);
             }
             const saved = await saveModelConfiguration(cwd, candidate, env, {
@@ -1418,4 +1451,19 @@ function normalizeCredentialDrafts(value, vault) {
         byProvider.set(provider, { provider, draftId });
     }
     return [...byProvider.values()];
+}
+function normalizeDeletedProviders(value) {
+    if (value === undefined)
+        return [];
+    if (!Array.isArray(value) || value.length > 64) {
+        throw new ConfigurationSaveError("unknown-provider-deletion", "Deleted providers must be an array of at most 64 provider identifiers.", { status: 400, path: "deletedProviders" });
+    }
+    const providers = new Set();
+    for (const entry of value) {
+        if (typeof entry !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(entry)) {
+            throw new ConfigurationSaveError("unknown-provider-deletion", "Deleted provider identifiers are invalid.", { status: 400, path: "deletedProviders" });
+        }
+        providers.add(entry);
+    }
+    return [...providers];
 }

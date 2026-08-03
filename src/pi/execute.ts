@@ -34,10 +34,16 @@ interface SessionEvent {
       cacheRead?: number;
       cacheWrite?: number;
     };
-    stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted";
+    stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted" | "pending";
     errorMessage?: string;
   };
 }
+
+// Pi adds event variants over time; this boundary only reads the fields above,
+// while the bivariant callback keeps the full SDK listener assignable here.
+type SessionEventListener = {
+  bivarianceHack(event: SessionEvent): void;
+}["bivarianceHack"];
 
 interface SessionStats {
   tokens?: {
@@ -58,7 +64,7 @@ export interface RunnableSession {
     },
     options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
   ) => Promise<void>;
-  subscribe(listener: (event: SessionEvent) => void): () => void;
+  subscribe(listener: SessionEventListener): () => void;
   getSessionStats?(): SessionStats;
   abort?(): Promise<void>;
   waitForIdle?(): Promise<void>;
@@ -353,6 +359,9 @@ function resultFromTerminalMessage(
     );
   }
   if (message.stopReason === "length") {
+    return result(kind, "failed", model, "Pi response ended before completion.");
+  }
+  if (message.stopReason === "pending") {
     return result(kind, "failed", model, "Pi response ended before completion.");
   }
   if (message.stopReason === "aborted") {
