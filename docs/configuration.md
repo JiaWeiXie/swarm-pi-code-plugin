@@ -39,10 +39,11 @@ usable model exists. The setup layout switches to a compact stepper and
 two-row connection actions below 1280 CSS pixels, with the existing mobile
 rules continuing below 860, 760, and 480 pixels.
 
-This release pins the Pi Coding Agent SDK at `0.83.0`. Its session boundary
-accepts the SDK's complete event-listener shape, and a new `pending` terminal
-reason is treated as an incomplete response. Partial streams therefore remain
-fail-closed and cannot be recorded as successful model output.
+This release pins the Pi Coding Agent SDK at `0.84.2`. Its session boundary
+accepts the SDK's complete event-listener shape, and the `pending` and
+`deferred` terminal reasons are both treated as incomplete responses. Partial
+streams therefore remain fail-closed and cannot be recorded as successful model
+output.
 
 New workspace defaults use Adaptive Sandbox mode, Balance Decision Mode,
 Host Assistance on with Host-first review, a Reversible automatic ceiling,
@@ -208,7 +209,7 @@ not expose a network listener beyond loopback or accept raw telemetry input.
 - model source and runtime adapter support.
 
 Coverage tests compare the Registry with every provider exposed by the Pi
-v0.83.0 model catalog. A newly added Pi provider fails CI until it is classified; the
+v0.84.2 model catalog. A newly added Pi provider fails CI until it is classified; the
 UI never guesses that an unknown provider uses a simple API-key form.
 
 The plugin initializes `ModelRuntime` from the configured auth and model files
@@ -226,13 +227,15 @@ Built-in examples include:
 | Radius | Pi dynamic messages | Pi OAuth or API key | gateway catalog refreshed explicitly |
 | Qwen Token Plan | OpenAI Chat Completions | API key | regional token-plan endpoint |
 | Qwen Token Plan China | OpenAI Chat Completions | API key | China token-plan endpoint |
+| Qwen Token Plan Individual | OpenAI Chat Completions | API key | individual token-plan endpoint |
+| Baseten | OpenAI Chat Completions | API key | none |
 | Azure OpenAI | Azure Responses | API key | endpoint/resource, API version, deployment map |
 | Amazon Bedrock | Bedrock Converse | ambient identity | AWS profile and region |
 | Google Vertex AI | Vertex runtime | ambient identity or API key | project and location |
 | Cloudflare | managed or Chat-compatible | API key | account and optional gateway IDs |
 
 Azure Microsoft Entra identity is shown only as a capability notice because the
-Pi v0.83.0 runtime cannot execute it. It is never marked ready.
+Pi v0.84.2 runtime cannot execute it. It is never marked ready.
 
 ## Wire Protocols
 
@@ -256,6 +259,28 @@ after a successful save.
 Full generation URLs such as `/chat/completions`, `/responses`, or
 `/v1/messages` are rejected. A non-standard model-list URL is stored separately
 as `modelsEndpoint` and must use the same origin as the generation root.
+
+## Custom Model Sampling and Thinking Budget
+
+The advanced per-model editor of a custom connection exposes two Pi 0.84
+settings. They are stored as non-secret model configuration and are never
+credential material.
+
+**Sampling parameters (JSON)** must contain a JSON object. Blank means the field
+is not set, and a JSON array, `null`, or primitive is rejected without closing
+the dialog. Its keys override Pi request fields with the same name and are
+applied only by the OpenAI Chat Completions, OpenAI Responses, and Azure
+Responses adapters; every other protocol ignores them. The control is therefore
+shown only for `openai-completions` and `openai-responses` connections. Pi
+merges the model defaults under per-request options, so the plugin passes the
+object through unchanged instead of promoting individual keys.
+
+**Reserve output tokens with vLLM `thinking_token_budget`** writes
+`compat.supportsThinkingTokenBudget` and is shown only for reasoning models on
+`openai-completions` connections. On these endpoints reasoning and the answer
+share one output ceiling. When the flag is on and the default budget for the
+requested thinking level would fill that ceiling, Pi clamps the budget to
+`max(0, maxTokens - 1024)` so at least 1024 tokens remain for the answer.
 
 ## Configuration Ownership
 
@@ -321,6 +346,13 @@ Secrets remain in the Pi-compatible `CredentialStore`. A browser secret first en
 session-local `CredentialDraftVault`; the response contains only an opaque draft
 ID, provider, auth method, masked flag, and expiry. Draft IDs are bound to the
 loopback setup session and are removed after save, cancel, timeout, or expiry.
+
+Every `CredentialStore` read, list, modify, and delete accepts the Pi 0.84
+`AuthOperationOptions` cancellation signal. An aborted operation stops waiting
+for the store lock immediately instead of running out the retry ceiling, always
+releases the lock, and removes its temporary write file. The atomic rename is
+the commit point: an abort observed after it does not roll a stored credential
+back.
 
 Secrets never enter:
 
@@ -491,7 +523,7 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 
 ## Acceptance Criteria
 
-- Every Pi v0.83.0 provider is explicitly classified by the Registry.
+- Every Pi v0.84.2 provider is explicitly classified by the Registry.
 - ChatGPT subscription and OpenAI API-key connections remain separate.
 - Browser responses, localStorage, state, model config, and jobs contain no
   credential values.

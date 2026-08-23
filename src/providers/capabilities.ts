@@ -371,6 +371,9 @@ const DEFINITIONS: ProviderDefinition[] = [
   apiKeyProvider("nvidia", "NVIDIA NIM", "openai-completions", {
     wireProtocol: "openai-chat-completions",
   }),
+  apiKeyProvider("baseten", "Baseten", "openai-completions", {
+    wireProtocol: "openai-chat-completions",
+  }),
   apiKeyProvider("ant-ling", "Ant Ling", "openai-completions", {
     wireProtocol: "openai-chat-completions",
   }),
@@ -418,6 +421,10 @@ const DEFINITIONS: ProviderDefinition[] = [
     wireProtocol: "openai-chat-completions",
   }),
   apiKeyProvider("qwen-token-plan-cn", "Qwen Token Plan China", "openai-completions", {
+    category: "subscription",
+    wireProtocol: "openai-chat-completions",
+  }),
+  apiKeyProvider("qwen-token-plan-individual", "Qwen Token Plan Individual", "openai-completions", {
     category: "subscription",
     wireProtocol: "openai-chat-completions",
   }),

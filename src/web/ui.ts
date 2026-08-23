@@ -635,6 +635,8 @@ dialog::backdrop { background: rgba(23,31,29,.36); }
 .model-editor summary { font-weight: 650; cursor: pointer; overflow-wrap: anywhere; }
 .model-editor-body { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding-top: 12px; }
 .model-editor-body .model-id { grid-column: 1 / -1; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.model-editor-wide { grid-column: 1 / -1; }
+.sampling-params { min-height: 96px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; resize: vertical; }
 .dialog-status { min-height: 20px; margin-top: 12px; color: var(--muted); font-size: 13px; }
 @media (max-width: 1280px) {
   .steps, .project-steps { gap: 8px; padding: 0 16px; }
@@ -1550,16 +1552,50 @@ const clientScript = String.raw`
     $("endpoint-name").value = draft.name; $("endpoint-canonical-url").value = draft.baseUrl; $("endpoint-api").value = draft.api;
     accept.textContent = state.editingCustomIndex >= 0 ? "Save connection" : "Add connection";
     const models = $("advanced-models"); models.replaceChildren();
+    const api = draft.api, sampling = api === "openai-completions" || api === "openai-responses";
     draft.models.forEach((item, index) => {
       const details = document.createElement("details"); details.className = "model-editor"; const summary = document.createElement("summary"); summary.textContent = item.name || item.id; const body = document.createElement("div"); body.className = "model-editor-body"; const id = document.createElement("div"); id.className = "model-id"; id.textContent = item.id;
-      body.append(id, draftLimitInput(item,index,"contextWindow","Context window"), draftLimitInput(item,index,"maxTokens","Max output")); details.append(summary,body); models.append(details);
+      body.append(id, draftLimitInput(item,index,"contextWindow","Context window"), draftLimitInput(item,index,"maxTokens","Max output"));
+      if (sampling) body.append(draftSamplingParamsInput(item,index));
+      if (api === "openai-completions" && item.reasoning === true) body.append(draftThinkingBudgetInput(item,index));
+      details.append(summary,body); models.append(details);
     });
   }
   function draftLimitInput(item, index, field, label) {
     const wrap = document.createElement("div"), lab = document.createElement("label"), input = document.createElement("input"), note = document.createElement("span"); input.id = "draft-limit-" + index + "-" + field; lab.htmlFor = input.id; lab.textContent = label; input.type = "number"; input.placeholder = "Automatic"; input.value = item[field] || ""; note.className = "source-note"; note.textContent = "Source: " + sourceLabel(item.metadata?.[field]);
     input.addEventListener("change", () => { const current = state.customDraft.models[index], value = input.value ? Number(input.value) : null; current.metadata = current.metadata || {}; if (value && Number.isInteger(value) && value > 0) { current[field] = value; current.metadata[field] = "user"; } else { delete current[field]; delete current.metadata[field]; } renderCustomDraft(); }); wrap.append(lab,input,note); return wrap;
   }
-  function syncDraftFields() { if (!state.customDraft) return; state.customDraft.name = $("endpoint-name").value.trim() || state.customDraft.name; state.customDraft.baseUrl = $("endpoint-canonical-url").value.trim(); if (state.customProfileDraft) state.customProfileDraft.name = state.customDraft.name; }
+  function draftSamplingParamsInput(item, index) {
+    const wrap = document.createElement("div"), lab = document.createElement("label"), input = document.createElement("textarea"), note = document.createElement("span");
+    wrap.className = "model-editor-wide"; input.id = "draft-sampling-params-" + index; input.className = "sampling-params"; lab.htmlFor = input.id; lab.textContent = "Sampling parameters (JSON)";
+    input.rows = 4; input.placeholder = '{"temperature": 0.2, "top_p": 0.9}'; input.value = item.samplingParams ? JSON.stringify(item.samplingParams, null, 2) : "";
+    note.className = "source-note"; note.textContent = "Leave blank to use the provider defaults. Keys override Pi request fields with the same name and only apply to OpenAI-compatible adapters. Never put credentials here.";
+    wrap.append(lab,input,note); return wrap;
+  }
+  function draftThinkingBudgetInput(item, index) {
+    const wrap = document.createElement("div"), lab = document.createElement("label"), input = document.createElement("input"), note = document.createElement("span");
+    wrap.className = "model-editor-wide"; lab.className = "inline-check"; input.id = "draft-thinking-token-budget-" + index; input.type = "checkbox"; input.checked = item.compat?.supportsThinkingTokenBudget === true;
+    lab.append(input, document.createTextNode(" Reserve output tokens with vLLM thinking_token_budget"));
+    note.className = "source-note"; note.textContent = "Reasoning and the answer share the output ceiling on vLLM endpoints. Pi clamps the budget to leave at least 1024 tokens for the answer.";
+    input.addEventListener("change", () => { const current = state.customDraft.models[index]; if (input.checked) { current.compat = {...(current.compat || {}),supportsThinkingTokenBudget:true}; } else if (current.compat) { delete current.compat.supportsThinkingTokenBudget; if (Object.keys(current.compat).length === 0) delete current.compat; } });
+    wrap.append(lab,note); return wrap;
+  }
+  function parseSamplingParamsText(raw, modelId) {
+    const text = raw.trim(); if (!text) return undefined;
+    let parsed; try { parsed = JSON.parse(text); } catch { throw new Error("Sampling parameters for " + modelId + " must contain valid JSON."); }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Sampling parameters for " + modelId + " must be a JSON object.");
+    return parsed;
+  }
+  function syncDraftModelSettings() {
+    if (!state.customDraft) return;
+    state.customDraft.models.forEach((model, index) => {
+      const textarea = $("draft-sampling-params-" + index);
+      if (textarea) { const parsed = parseSamplingParamsText(textarea.value, model.id); if (parsed === undefined) delete model.samplingParams; else model.samplingParams = parsed; }
+      const checkbox = $("draft-thinking-token-budget-" + index);
+      if (checkbox) { if (checkbox.checked) { model.compat = {...(model.compat || {}),supportsThinkingTokenBudget:true}; } else if (model.compat) { delete model.compat.supportsThinkingTokenBudget; if (Object.keys(model.compat).length === 0) delete model.compat; } }
+    });
+  }
+  function syncDraftFields() { if (!state.customDraft) return; syncDraftModelSettings(); state.customDraft.name = $("endpoint-name").value.trim() || state.customDraft.name; state.customDraft.baseUrl = $("endpoint-canonical-url").value.trim(); if (state.customProfileDraft) state.customProfileDraft.name = state.customDraft.name; }
   function reconcileLocalRemovedReferences(removed, action) {
     const removedSet = new Set(removed), fallback = state.fallbacks.find(model => !removedSet.has(model));
     const primaryRemoved = state.primary && removedSet.has(state.primary), roleNames = Object.entries(state.rolePolicies).filter(([,policy]) => policy?.models?.some(model => removedSet.has(model))).map(([role]) => role), classifierRemoved = state.adaptivePolicy.classifierModels.some(model => removedSet.has(model));
@@ -1677,8 +1713,8 @@ const clientScript = String.raw`
     finally { setBusy(button,false); button.textContent = "Load models"; }
   });
   $("use-manual-models").addEventListener("click", async () => { const status = $("dialog-status"); try { await loadCustomModels(true); } catch (error) { status.className = "dialog-status error"; status.textContent = error.message; } });
-  $("accept-endpoint").addEventListener("click", () => { syncDraftFields(); if (state.customDraft && state.customProfileDraft) acceptCustom(structuredClone(state.customDraft), structuredClone(state.customProfileDraft)); });
-  ["endpoint-name","endpoint-canonical-url"].forEach(id => $(id).addEventListener("change", syncDraftFields));
+  $("accept-endpoint").addEventListener("click", () => { const status = $("dialog-status"); try { syncDraftFields(); } catch (error) { status.className = "dialog-status error"; status.textContent = error.message; return; } status.className = "dialog-status"; status.textContent = ""; if (state.customDraft && state.customProfileDraft) acceptCustom(structuredClone(state.customDraft), structuredClone(state.customProfileDraft)); });
+  ["endpoint-name","endpoint-canonical-url"].forEach(id => $(id).addEventListener("change", () => { const status = $("dialog-status"); try { syncDraftFields(); } catch (error) { status.className = "dialog-status error"; status.textContent = error.message; } }));
   $("primary-model").addEventListener("change", () => { state.primary = $("primary-model").value; renderModelDetails(); renderFallbacks(); });
   $("add-fallback").addEventListener("click", () => { const next = usableModels().find(item => item.id !== state.primary && !state.fallbacks.includes(item.id)); if (next) { state.fallbacks.push(next.id); renderFallbacks(); } });
   $("project-goal").addEventListener("input", () => { state.profile.goal = $("project-goal").value; clearProfileError(); });

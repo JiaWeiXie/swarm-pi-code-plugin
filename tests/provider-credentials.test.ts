@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 
+import { FileCredentialStore, OverlayCredentialStore } from "../src/pi/credentials.js";
 import { customProviderHeaderVariable } from "../src/pi/environment.js";
 import { CredentialDraftVault, OAuthSessionManager } from "../src/providers/credentials.js";
 
@@ -103,4 +107,31 @@ test("OAuth prompts use revision-fenced responses and cancellation", async () =>
   const cancelled = manager.cancel(started.id);
   assert.equal(cancelled.status, "cancelled");
   manager.dispose();
+});
+
+test("credential mutations abort while waiting for the store lock", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "swarm-pi-credentials-"));
+  try {
+    const authPath = path.join(root, "auth.json");
+    // A live lock directory holds every writer off, so `modify` parks in the
+    // retry wait where cancellation has to be observed.
+    await mkdir(`${authPath}.lock`);
+    const store = new OverlayCredentialStore(new FileCredentialStore(authPath), new Map());
+
+    const startedAt = Date.now();
+    await assert.rejects(
+      () =>
+        store.modify("openai", async () => ({ type: "api_key", key: "must-not-be-written" }), {
+          signal: AbortSignal.timeout(25),
+        }),
+      (error: unknown) => (error as Error).name === "AbortError",
+    );
+
+    // Without cancellation the ceiling is 100 retries x 100ms, so a fast
+    // rejection proves the wait itself aborted rather than running to timeout.
+    assert.ok(Date.now() - startedAt < 1_000);
+    await assert.rejects(() => stat(authPath), /ENOENT/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

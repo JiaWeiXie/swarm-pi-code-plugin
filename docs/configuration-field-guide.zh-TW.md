@@ -15,10 +15,10 @@
 儲存、交易、協定與 server lifecycle 的技術細節，請參考
 [設定參考](configuration.md)。
 
-目前 Plugin 固定使用 Pi Coding Agent SDK `0.83.0`。當 Pi 回報 `pending` stop
-reason 時，代表回應尚未完成，會維持 fail-closed，絕不當成成功輸出。Session
-adapter 也接受 SDK 完整的 event listener 形狀，避免未來新增 Pi event variant
-削弱本地執行邊界。
+目前 Plugin 固定使用 Pi Coding Agent SDK `0.84.2`。當 Pi 回報 `pending` 或
+`deferred` stop reason 時，代表回應尚未完成，會維持 fail-closed，絕不當成成功
+輸出。Session adapter 也接受 SDK 完整的 event listener 形狀，避免未來新增 Pi
+event variant 削弱本地執行邊界。
 
 快速入口：[整體概念](#mental-model) · [安全預設](#safe-defaults) ·
 [Provider](#provider-fields) · [Model／Role](#model-role-keywords) ·
@@ -343,12 +343,29 @@ configured，不代表 verified；Job 使用前仍應選取並驗證模型。
 - **Runtime adapter** 由 protocol 推導，只能讀取。
 - **Context window／max output** 通常留白，使用 provider metadata。Override 必須是
   正整數，而且不能證明 server 確實支援所宣告容量。
+- **Sampling parameters (JSON)** 必須是 JSON object；留白代表不設定 override。
+- **Reserve output tokens with vLLM `thinking_token_budget`** 只在 OpenAI Chat
+  Completions 連線的 reasoning model 出現。
 
 這裡的 **Context window** 是一次 model request 中「輸入 + 已產生輸出」可容納的
 token 總量；**Max output** 是其中最多可留給模型回答的 token。Token 不是字數，
 不同語言與內容的換算不同。把數值填得比 server 實際能力大，不會升級模型，反而
 可能讓長 Job 在 API 層失敗。只有 server 管理者或官方 metadata 明確提供值時才
 override；一般保持 Automatic。
+
+**Sampling parameters (JSON)** 用來傳遞 Pi 沒有建模的 provider 專屬 request
+欄位，例如 `top_k`、`min_p`、`repetition_penalty`。其中的 key 會覆蓋同名的 Pi
+request 欄位，而且只有 OpenAI Chat Completions、OpenAI Responses 與 Azure
+Responses adapter 會套用，其他 protocol 一律忽略。留白代表使用 provider 預設
+值。不要在這裡放 API key、token 或任何憑證：這個值會以非機密的 model
+configuration 形式儲存。
+
+**Reserve output tokens with vLLM `thinking_token_budget`** 會設定該 model 的
+`compat.supportsThinkingTokenBudget`。vLLM 類端點的 reasoning 與回答共用同一個
+輸出上限，沒有 budget 時一次 reasoning 就可能吃掉整個回應而不留答案。啟用後 Pi
+會送出 top-level `thinking_token_budget`；若該 thinking level 的預設 budget 會
+吃滿上限，Pi 會將它 clamp 為 `max(0, maxTokens - 1024)`，替回答保留至少 1024
+個 token。
 
 <a id="model-role-keywords"></a>
 ## Model 選擇與 Role routing keyword

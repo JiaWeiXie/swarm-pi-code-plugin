@@ -483,3 +483,92 @@ test("custom model limits can remain automatic and retain metadata provenance", 
   });
   assert.equal(withMetadata.customProviders[0]?.models[0]?.metadata?.contextWindow, "endpoint");
 });
+
+test("custom model sampling parameters and vLLM budget flag round-trip and fail closed", () => {
+  const base = {
+    version: 1,
+    primary: "local-sampling/model-a",
+    fallbacks: [],
+    updatedAt: null,
+    customProviders: [
+      {
+        id: "local-sampling",
+        name: "Local Sampling",
+        baseUrl: "http://127.0.0.1:1234/v1",
+        api: "openai-completions",
+        authHeader: false,
+        requiresApiKey: false,
+        models: [{ id: "model-a", reasoning: true }],
+      },
+    ],
+  };
+
+  const bare = parseModelConfiguration(base).customProviders[0]?.models[0];
+  assert.equal(bare?.samplingParams, undefined);
+  assert.equal(bare?.compat, undefined);
+
+  const samplingParams = {
+    temperature: 0.2,
+    top_p: 0.9,
+    extra: { nested: [1, 2, { deep: true }], flag: null },
+  };
+  const configured = parseModelConfiguration({
+    ...base,
+    customProviders: [
+      {
+        ...base.customProviders[0],
+        models: [
+          {
+            id: "model-a",
+            reasoning: true,
+            samplingParams,
+            compat: { supportsThinkingTokenBudget: true },
+          },
+        ],
+      },
+    ],
+  }).customProviders[0]?.models[0];
+  assert.deepEqual(configured?.samplingParams, samplingParams);
+  assert.notEqual(configured?.samplingParams, samplingParams);
+  assert.deepEqual(configured?.compat, { supportsThinkingTokenBudget: true });
+
+  const emptyCompat = parseModelConfiguration({
+    ...base,
+    customProviders: [
+      {
+        ...base.customProviders[0],
+        models: [{ id: "model-a", reasoning: true, compat: {} }],
+      },
+    ],
+  }).customProviders[0]?.models[0];
+  assert.equal(emptyCompat?.compat, undefined);
+
+  const reject = (model: Record<string, unknown>, pattern: RegExp): void => {
+    assert.throws(
+      () =>
+        parseModelConfiguration({
+          ...base,
+          customProviders: [{ ...base.customProviders[0], models: [model] }],
+        }),
+      pattern,
+    );
+  };
+
+  reject(
+    { id: "model-a", samplingParams: [{ temperature: 0.2 }] },
+    /samplingParams for local-sampling\/model-a must be a JSON object/,
+  );
+  reject(
+    { id: "model-a", samplingParams: null },
+    /samplingParams for local-sampling\/model-a must be a JSON object/,
+  );
+  reject(
+    { id: "model-a", samplingParams: "temperature=0.2" },
+    /samplingParams for local-sampling\/model-a must be a JSON object/,
+  );
+  reject(
+    { id: "model-a", compat: { supportsThinkingTokenBudget: "yes" } },
+    /compat\.supportsThinkingTokenBudget for local-sampling\/model-a must be a boolean/,
+  );
+  reject({ id: "model-a", compat: [] }, /compat for local-sampling\/model-a must be a JSON object/);
+});

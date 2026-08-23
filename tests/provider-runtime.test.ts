@@ -280,3 +280,53 @@ test("anthropic-messages custom providers are excluded from the OpenAI effort ma
   const model = environment.modelRuntime.getModel(provider, "claude-compat")!;
   assert.equal(model.thinkingLevelMap, undefined);
 });
+
+test("custom model sampling parameters and vLLM budget flag reach the Pi model catalog", async () => {
+  const provider = "vllm-compat-test";
+  const samplingParams = { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.05 };
+  const configuration = parseModelConfiguration({
+    version: 1,
+    primary: null,
+    fallbacks: [],
+    customProviders: [
+      {
+        id: provider,
+        name: "Local vLLM",
+        baseUrl: "http://127.0.0.1:8000/v1",
+        api: "openai-completions",
+        wireProtocol: "openai-chat-completions",
+        authHeader: false,
+        requiresApiKey: false,
+        auth: { method: "none" },
+        models: [
+          {
+            id: "qwen-tuned",
+            reasoning: true,
+            samplingParams,
+            compat: { supportsThinkingTokenBudget: true },
+          },
+          { id: "qwen-plain", reasoning: true },
+        ],
+      },
+    ],
+    providerProfiles: [],
+    updatedAt: null,
+  });
+  const environment = await createPiEnvironment(
+    configuration,
+    {},
+    { credentials: new InMemoryCredentialStore() },
+  );
+
+  const tuned = environment.modelRuntime.getModel(provider, "qwen-tuned")!;
+  assert.deepEqual(tuned.samplingParams, samplingParams);
+  // `Model<Api>["compat"]` is a union across adapters, so assert the stored
+  // object exactly: only the vLLM budget flag is set, nothing is invented.
+  assert.deepEqual(tuned.compat, { supportsThinkingTokenBudget: true });
+
+  // Models without the advanced settings keep both fields absent, so Pi applies
+  // its own adapter defaults instead of an empty override object.
+  const plain = environment.modelRuntime.getModel(provider, "qwen-plain")!;
+  assert.equal(plain.samplingParams, undefined);
+  assert.equal(plain.compat, undefined);
+});

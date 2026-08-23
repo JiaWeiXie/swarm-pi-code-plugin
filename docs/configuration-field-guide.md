@@ -18,11 +18,11 @@ Unless a section says otherwise:
 See the [Configuration Reference](configuration.md) for storage, transaction,
 provider protocol, and server-lifecycle details.
 
-The plugin currently pins the Pi Coding Agent SDK at `0.83.0`. When Pi reports
-the `pending` stop reason, the response is incomplete and remains fail-closed;
-it is never treated as successful output. The session adapter also accepts the
-SDK's full event-listener shape so future Pi event variants do not weaken the
-local execution boundary.
+The plugin currently pins the Pi Coding Agent SDK at `0.84.2`. When Pi reports
+the `pending` or `deferred` stop reason, the response is incomplete and remains
+fail-closed; it is never treated as successful output. The session adapter also
+accepts the SDK's full event-listener shape so future Pi event variants do not
+weaken the local execution boundary.
 
 Quick navigation: [operating model](#mental-model) · [safe defaults](#safe-defaults) ·
 [Providers](#provider-fields) · [Models/Roles](#model-role-keywords) ·
@@ -371,6 +371,9 @@ depending on it for a Job.
 - **Context window / max output** should stay blank to use provider metadata.
   Overrides must be positive integers and do not prove the server supports the
   declared capacity.
+- **Sampling parameters (JSON)** must be a JSON object; blank means no override.
+- **Reserve output tokens with vLLM `thinking_token_budget`** appears only for
+  reasoning models on OpenAI Chat Completions connections.
 
 The **context window** is the total token capacity for input plus generated output
 in one model request. **Max output** is the portion that may be used for the answer.
@@ -378,6 +381,22 @@ Tokens are not characters, and the conversion varies by language and content.
 Declaring numbers larger than the server really supports does not upgrade the
 model; it makes long Jobs fail at the API. Keep Automatic unless the server owner
 or authoritative metadata provides exact values.
+
+**Sampling parameters (JSON)** passes provider-specific request fields Pi does
+not model, for example `top_k`, `min_p`, or `repetition_penalty`. Its keys
+override Pi request fields with the same name and apply only to the OpenAI Chat
+Completions, OpenAI Responses, and Azure Responses adapters; other protocols
+ignore them. Blank means the provider defaults are used. Never put API keys,
+tokens, or other credentials here: this value is stored as non-secret model
+configuration.
+
+**Reserve output tokens with vLLM `thinking_token_budget`** sets the model's
+`compat.supportsThinkingTokenBudget` flag. On vLLM-style endpoints reasoning and
+the answer share one output ceiling, so an uncapped reasoning phase can consume
+the whole response and return no answer. With the flag on, Pi sends a top-level
+`thinking_token_budget`, and when the default budget for the requested thinking
+level would fill the ceiling Pi clamps it to `max(0, maxTokens - 1024)` so at
+least 1024 tokens remain for the answer.
 
 <a id="model-role-keywords"></a>
 ## Model selection and role-routing keywords

@@ -34,7 +34,9 @@ interface SessionEvent {
       cacheRead?: number;
       cacheWrite?: number;
     };
-    stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted" | "pending";
+    // `deferred` joined the Pi 0.84 StopReason union. This plugin never requests
+    // deferred responses, so it stays folded into the pending-tool-call fallback.
+    stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted" | "pending" | "deferred";
     errorMessage?: string;
   };
 }

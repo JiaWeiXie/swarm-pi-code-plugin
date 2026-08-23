@@ -121,7 +121,7 @@ form 與既有設定。這代表外層 Host sandbox 阻擋本機 state write；�
 
 - [Claude Code 最新文件](https://code.claude.com/docs/en/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.83.0`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.84.2`
 - [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime)，固定使用 `0.0.49`
 - [Node.js](https://nodejs.org/)，`24.15.0+`
 - [TypeScript](https://www.typescriptlang.org/)

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { InMemoryCredentialStore, } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 const AUTH_FILE_MODE = 0o600;
@@ -19,19 +20,19 @@ export class FileCredentialStore {
     constructor(authPath) {
         this.authPath = authPath;
     }
-    async read(providerId) {
-        const data = await this.readData();
+    async read(providerId, options) {
+        const data = await this.readData(options?.signal);
         const credential = data[providerId];
         return credential ? resolveCredential(credential) : undefined;
     }
-    async list() {
-        const data = await this.readData();
+    async list(options) {
+        const data = await this.readData(options?.signal);
         return Object.entries(data).map(([providerId, credential]) => ({
             providerId,
             type: credential.type,
         }));
     }
-    async modify(providerId, fn) {
+    async modify(providerId, fn, options) {
         return this.withLock(async (data) => {
             const current = cloneCredential(data[providerId]);
             const next = await fn(current);
@@ -39,15 +40,16 @@ export class FileCredentialStore {
                 return { result: current };
             data[providerId] = structuredClone(next);
             return { result: cloneCredential(next), write: true };
-        });
+        }, options?.signal);
     }
-    async delete(providerId) {
+    async delete(providerId, options) {
         await this.withLock(async (data) => {
             delete data[providerId];
             return { result: undefined, write: true };
-        });
+        }, options?.signal);
     }
-    async readData() {
+    async readData(signal) {
+        signal?.throwIfAborted();
         try {
             const content = await readFile(this.authPath, "utf8");
             return parseCredentialData(content);
@@ -58,10 +60,11 @@ export class FileCredentialStore {
             throw error;
         }
     }
-    async withLock(fn) {
+    async withLock(fn, signal) {
+        signal?.throwIfAborted();
         await mkdir(path.dirname(this.authPath), { recursive: true, mode: AUTH_DIRECTORY_MODE });
         const lockPath = `${this.authPath}.lock`;
-        await acquireLock(lockPath);
+        await acquireLock(lockPath, signal);
         try {
             let data = {};
             try {
@@ -71,12 +74,18 @@ export class FileCredentialStore {
                 if (!isMissing(error))
                     throw error;
             }
+            signal?.throwIfAborted();
             const outcome = await fn(data);
+            signal?.throwIfAborted();
+            // The atomic rename inside writeCredentialData is the commit point; an
+            // abort observed after it must not roll the stored credential back.
             if (outcome.write)
-                await writeCredentialData(this.authPath, data);
+                await writeCredentialData(this.authPath, data, signal);
             return outcome.result;
         }
         finally {
+            // Lock release always runs, cancelled or not, so a cancelled operation
+            // never leaves the store wedged for the next caller.
             await rm(lockPath, { recursive: true, force: true });
         }
     }
@@ -89,8 +98,8 @@ export class OverlayCredentialStore {
         this.delegate = delegate;
         this.overlays = overlays;
     }
-    async read(providerId) {
-        const credential = await this.delegate.read(providerId);
+    async read(providerId, options) {
+        const credential = await this.delegate.read(providerId, options);
         const overlay = this.overlays.get(providerId);
         if (!credential && overlay)
             return { type: "api_key", env: { ...overlay } };
@@ -100,8 +109,8 @@ export class OverlayCredentialStore {
             return credential;
         return { ...credential, env: { ...credential.env, ...overlay } };
     }
-    async list() {
-        const entries = [...(await this.delegate.list())];
+    async list(options) {
+        const entries = [...(await this.delegate.list(options))];
         const known = new Set(entries.map((entry) => entry.providerId));
         for (const providerId of this.overlays.keys()) {
             if (!known.has(providerId))
@@ -109,11 +118,11 @@ export class OverlayCredentialStore {
         }
         return entries;
     }
-    modify(providerId, fn) {
-        return this.delegate.modify(providerId, fn);
+    modify(providerId, fn, options) {
+        return this.delegate.modify(providerId, fn, options);
     }
-    delete(providerId) {
-        return this.delegate.delete(providerId);
+    delete(providerId, options) {
+        return this.delegate.delete(providerId, options);
     }
 }
 export function createFileCredentialStore(authPath) {
@@ -137,15 +146,23 @@ function parseCredentialData(content) {
     }
     return parsed;
 }
-async function writeCredentialData(authPath, data) {
+async function writeCredentialData(authPath, data, signal) {
     const temporaryPath = `${authPath}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(data, null, 2), {
-        encoding: "utf8",
-        mode: AUTH_FILE_MODE,
-    });
-    await rename(temporaryPath, authPath);
+    try {
+        signal?.throwIfAborted();
+        await writeFile(temporaryPath, JSON.stringify(data, null, 2), {
+            encoding: "utf8",
+            mode: AUTH_FILE_MODE,
+        });
+        signal?.throwIfAborted();
+        await rename(temporaryPath, authPath);
+    }
+    finally {
+        // Unconditional: a cancelled write must not leave a temp file behind.
+        await rm(temporaryPath, { force: true });
+    }
 }
-async function acquireLock(lockPath) {
+async function acquireLock(lockPath, signal) {
     for (let attempt = 0; attempt < LOCK_RETRIES; attempt += 1) {
         try {
             await mkdir(lockPath);
@@ -163,7 +180,9 @@ async function acquireLock(lockPath) {
                 if (!isMissing(statError))
                     throw statError;
             }
-            await new Promise((resolve) => setTimeout(resolve, 100));
+            // Abortable wait: cancellation surfaces immediately instead of after the
+            // full LOCK_RETRIES × 100ms ceiling.
+            await delay(100, undefined, { signal });
         }
     }
     throw new Error("Timed out waiting for the Pi credential store lock");

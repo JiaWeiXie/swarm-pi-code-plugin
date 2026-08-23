@@ -81,6 +81,12 @@ export function applyCustomProviders(registry, configuration) {
                     // so Pi's thinking levels never emit an unsupported reasoning.effort.
                     // Non-reasoning models omit it (no effort is sent for them).
                     ...(model.reasoning && effortMap ? { thinkingLevelMap: effortMap } : {}),
+                    // Pi 0.84 merges model sampling defaults under per-request options and
+                    // only OpenAI-compatible adapters apply them; pass them through as-is.
+                    ...(model.samplingParams === undefined
+                        ? {}
+                        : { samplingParams: structuredClone(model.samplingParams) }),
+                    ...(model.compat === undefined ? {} : { compat: structuredClone(model.compat) }),
                 };
             }),
         };

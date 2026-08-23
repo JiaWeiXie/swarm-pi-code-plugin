@@ -29,6 +29,33 @@ test("provider capability registry covers every provider in the pinned Pi catalo
   assert.deepEqual(providerDefinitionIds(), piProviders);
 });
 
+test("Pi 0.84 additions are registered with their exact catalog metadata", () => {
+  const baseten = getProviderDefinition("baseten")!;
+  assert.equal(baseten.name, "Baseten");
+  assert.equal(baseten.category, "common");
+  assert.deepEqual(baseten.runtimeApis, ["openai-completions"]);
+  assert.equal(baseten.wireProtocol, "openai-chat-completions");
+  assert.deepEqual(baseten.authMethods, ["api-key"]);
+  assert.equal(baseten.defaultAuthMethod, "api-key");
+  assert.equal(baseten.modelSource, "pi-catalog");
+
+  const qwenIndividual = getProviderDefinition("qwen-token-plan-individual")!;
+  assert.equal(qwenIndividual.name, "Qwen Token Plan Individual");
+  assert.equal(qwenIndividual.category, "subscription");
+  assert.deepEqual(qwenIndividual.runtimeApis, ["openai-completions"]);
+  assert.equal(qwenIndividual.wireProtocol, "openai-chat-completions");
+  assert.deepEqual(qwenIndividual.authMethods, ["api-key"]);
+  assert.equal(qwenIndividual.defaultAuthMethod, "api-key");
+  assert.equal(qwenIndividual.modelSource, "pi-catalog");
+
+  for (const definition of [baseten, qwenIndividual]) {
+    assert.deepEqual(
+      definition.fields.map((field) => field.id),
+      ["apiKey"],
+    );
+  }
+});
+
 test("subscription providers use OAuth and keep ChatGPT separate from OpenAI API keys", () => {
   const openAi = getProviderDefinition("openai")!;
   const chatGpt = getProviderDefinition("openai-codex")!;

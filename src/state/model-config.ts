@@ -66,6 +66,13 @@ export interface CustomModelMetadata {
   maxTokens?: ModelMetadataSource | undefined;
 }
 
+// Mirrors the Pi 0.84 OpenAI-completions compat flag. The property is omitted
+// rather than set to undefined so the shape stays assignable to Pi's `compat`
+// under `exactOptionalPropertyTypes`.
+export interface CustomModelCompatibility {
+  supportsThinkingTokenBudget?: boolean;
+}
+
 export interface CustomModelConfiguration {
   id: string;
   name: string;
@@ -74,6 +81,8 @@ export interface CustomModelConfiguration {
   contextWindow?: number | undefined;
   maxTokens?: number | undefined;
   metadata?: CustomModelMetadata | undefined;
+  samplingParams?: Record<string, unknown> | undefined;
+  compat?: CustomModelCompatibility | undefined;
 }
 
 export interface ProviderAuthConfiguration {
@@ -809,6 +818,11 @@ function parseCustomModel(value: unknown, provider: string): CustomModelConfigur
     contextWindow ?? 10_000_000,
   );
   const metadata = parseModelMetadata(record.metadata, provider, id);
+  const samplingParams = optionalJsonObject(
+    record.samplingParams,
+    `samplingParams for ${provider}/${id}`,
+  );
+  const compat = parseCustomModelCompatibility(record.compat, provider, id);
   return {
     id,
     name: optionalString(record.name, `name for ${provider}/${id}`) ?? id,
@@ -817,7 +831,29 @@ function parseCustomModel(value: unknown, provider: string): CustomModelConfigur
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
     ...(metadata === undefined ? {} : { metadata }),
+    ...(samplingParams === undefined ? {} : { samplingParams }),
+    ...(compat === undefined ? {} : { compat }),
   };
+}
+
+function optionalJsonObject(value: unknown, label: string): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  return structuredClone(asRecord(value, label));
+}
+
+function parseCustomModelCompatibility(
+  value: unknown,
+  provider: string,
+  model: string,
+): CustomModelCompatibility | undefined {
+  if (value === undefined) return undefined;
+  const record = asRecord(value, `compat for ${provider}/${model}`);
+  const supportsThinkingTokenBudget = optionalBoolean(
+    record.supportsThinkingTokenBudget,
+    `compat.supportsThinkingTokenBudget for ${provider}/${model}`,
+  );
+  if (supportsThinkingTokenBudget === undefined) return undefined;
+  return { supportsThinkingTokenBudget };
 }
 
 function parseModelMetadata(

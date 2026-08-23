@@ -1579,6 +1579,10 @@ test("local dashboard serves a token-protected detailed telemetry report", async
     ...env,
     SWARM_PI_CODE_PLUGIN_USER_STATE_DIR: path.join(privateDir, "state"),
   };
+  // The report filters on `recordedAt` within a rolling window, so absolute
+  // timestamps silently age out of the requested range.
+  const startedAt = new Date(Date.now() - 61_000).toISOString();
+  const finishedAt = new Date(Date.now() - 60_000).toISOString();
   await appendTelemetryAttempts(
     await resolveStateDir(workspace, dashboardEnv),
     { jobId: "job-dashboard", taskKind: "ask", role: "scout" },
@@ -1586,8 +1590,8 @@ test("local dashboard serves a token-protected detailed telemetry report", async
       {
         attempt: 1,
         automaticRetries: 2,
-        startedAt: "2026-07-16T12:00:00.000Z",
-        finishedAt: "2026-07-16T12:00:01.000Z",
+        startedAt,
+        finishedAt,
         durationMs: 1000,
         outcome: "succeeded",
         provider: "openai",

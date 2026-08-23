@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, stat, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import {
   InMemoryCredentialStore,
+  type AuthOperationOptions,
   type Credential,
   type CredentialInfo,
   type CredentialStore,
@@ -27,14 +29,14 @@ const LOCK_RETRIES = 100;
 export class FileCredentialStore implements CredentialStore {
   constructor(private readonly authPath: string) {}
 
-  async read(providerId: string): Promise<Credential | undefined> {
-    const data = await this.readData();
+  async read(providerId: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
+    const data = await this.readData(options?.signal);
     const credential = data[providerId];
     return credential ? resolveCredential(credential) : undefined;
   }
 
-  async list(): Promise<readonly CredentialInfo[]> {
-    const data = await this.readData();
+  async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
+    const data = await this.readData(options?.signal);
     return Object.entries(data).map(([providerId, credential]) => ({
       providerId,
       type: credential.type,
@@ -44,6 +46,7 @@ export class FileCredentialStore implements CredentialStore {
   async modify(
     providerId: string,
     fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+    options?: AuthOperationOptions,
   ): Promise<Credential | undefined> {
     return this.withLock(async (data) => {
       const current = cloneCredential(data[providerId]);
@@ -51,17 +54,18 @@ export class FileCredentialStore implements CredentialStore {
       if (next === undefined) return { result: current };
       data[providerId] = structuredClone(next);
       return { result: cloneCredential(next), write: true };
-    });
+    }, options?.signal);
   }
 
-  async delete(providerId: string): Promise<void> {
+  async delete(providerId: string, options?: AuthOperationOptions): Promise<void> {
     await this.withLock(async (data) => {
       delete data[providerId];
       return { result: undefined, write: true };
-    });
+    }, options?.signal);
   }
 
-  private async readData(): Promise<CredentialData> {
+  private async readData(signal?: AbortSignal): Promise<CredentialData> {
+    signal?.throwIfAborted();
     try {
       const content = await readFile(this.authPath, "utf8");
       return parseCredentialData(content);
@@ -73,10 +77,12 @@ export class FileCredentialStore implements CredentialStore {
 
   private async withLock<T>(
     fn: (data: CredentialData) => Promise<{ result: T; write?: boolean }>,
+    signal?: AbortSignal,
   ): Promise<T> {
+    signal?.throwIfAborted();
     await mkdir(path.dirname(this.authPath), { recursive: true, mode: AUTH_DIRECTORY_MODE });
     const lockPath = `${this.authPath}.lock`;
-    await acquireLock(lockPath);
+    await acquireLock(lockPath, signal);
     try {
       let data: CredentialData = {};
       try {
@@ -84,10 +90,16 @@ export class FileCredentialStore implements CredentialStore {
       } catch (error) {
         if (!isMissing(error)) throw error;
       }
+      signal?.throwIfAborted();
       const outcome = await fn(data);
-      if (outcome.write) await writeCredentialData(this.authPath, data);
+      signal?.throwIfAborted();
+      // The atomic rename inside writeCredentialData is the commit point; an
+      // abort observed after it must not roll the stored credential back.
+      if (outcome.write) await writeCredentialData(this.authPath, data, signal);
       return outcome.result;
     } finally {
+      // Lock release always runs, cancelled or not, so a cancelled operation
+      // never leaves the store wedged for the next caller.
       await rm(lockPath, { recursive: true, force: true });
     }
   }
@@ -100,8 +112,8 @@ export class OverlayCredentialStore implements CredentialStore {
     private readonly overlays: ReadonlyMap<string, Readonly<Record<string, string>>>,
   ) {}
 
-  async read(providerId: string): Promise<Credential | undefined> {
-    const credential = await this.delegate.read(providerId);
+  async read(providerId: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
+    const credential = await this.delegate.read(providerId, options);
     const overlay = this.overlays.get(providerId);
     if (!credential && overlay) return { type: "api_key", env: { ...overlay } };
     if (!credential || !overlay) return credential;
@@ -109,8 +121,8 @@ export class OverlayCredentialStore implements CredentialStore {
     return { ...credential, env: { ...credential.env, ...overlay } };
   }
 
-  async list(): Promise<readonly CredentialInfo[]> {
-    const entries = [...(await this.delegate.list())];
+  async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
+    const entries = [...(await this.delegate.list(options))];
     const known = new Set(entries.map((entry) => entry.providerId));
     for (const providerId of this.overlays.keys()) {
       if (!known.has(providerId)) entries.push({ providerId, type: "api_key" });
@@ -121,12 +133,13 @@ export class OverlayCredentialStore implements CredentialStore {
   modify(
     providerId: string,
     fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+    options?: AuthOperationOptions,
   ): Promise<Credential | undefined> {
-    return this.delegate.modify(providerId, fn);
+    return this.delegate.modify(providerId, fn, options);
   }
 
-  delete(providerId: string): Promise<void> {
-    return this.delegate.delete(providerId);
+  delete(providerId: string, options?: AuthOperationOptions): Promise<void> {
+    return this.delegate.delete(providerId, options);
   }
 }
 
@@ -154,16 +167,27 @@ function parseCredentialData(content: string): CredentialData {
   return parsed as CredentialData;
 }
 
-async function writeCredentialData(authPath: string, data: CredentialData): Promise<void> {
+async function writeCredentialData(
+  authPath: string,
+  data: CredentialData,
+  signal?: AbortSignal,
+): Promise<void> {
   const temporaryPath = `${authPath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(data, null, 2), {
-    encoding: "utf8",
-    mode: AUTH_FILE_MODE,
-  });
-  await rename(temporaryPath, authPath);
+  try {
+    signal?.throwIfAborted();
+    await writeFile(temporaryPath, JSON.stringify(data, null, 2), {
+      encoding: "utf8",
+      mode: AUTH_FILE_MODE,
+    });
+    signal?.throwIfAborted();
+    await rename(temporaryPath, authPath);
+  } finally {
+    // Unconditional: a cancelled write must not leave a temp file behind.
+    await rm(temporaryPath, { force: true });
+  }
 }
 
-async function acquireLock(lockPath: string): Promise<void> {
+async function acquireLock(lockPath: string, signal?: AbortSignal): Promise<void> {
   for (let attempt = 0; attempt < LOCK_RETRIES; attempt += 1) {
     try {
       await mkdir(lockPath);
@@ -176,7 +200,9 @@ async function acquireLock(lockPath: string): Promise<void> {
       } catch (statError) {
         if (!isMissing(statError)) throw statError;
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Abortable wait: cancellation surfaces immediately instead of after the
+      // full LOCK_RETRIES × 100ms ceiling.
+      await delay(100, undefined, { signal });
     }
   }
   throw new Error("Timed out waiting for the Pi credential store lock");

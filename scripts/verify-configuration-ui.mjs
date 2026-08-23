@@ -44,6 +44,20 @@ async function makeFixture({ configured, projectOnly }) {
     requiresApiKey: false,
     models: [{ id: "fixture-model", name: "Fixture Model", reasoning: true, input: ["text"] }],
   };
+  // A custom connection saved through the UI always carries a provider profile;
+  // the Edit dialog needs one to hydrate its profile draft.
+  const fixtureProfile = {
+    id: "fixture",
+    provider: "fixture",
+    name: "Fixture Service",
+    connectionKind: "custom",
+    auth: { method: "none" },
+    protocol: "openai-chat-completions",
+    runtimeApi: "openai-completions",
+    readiness: "configured",
+    settings: {},
+    headers: [],
+  };
   if (configured) {
     await saveModelConfiguration(
       workspace,
@@ -52,7 +66,7 @@ async function makeFixture({ configured, projectOnly }) {
         primary: "fixture/fixture-model",
         fallbacks: [],
         customProviders: [fixtureProvider],
-        providerProfiles: [],
+        providerProfiles: [fixtureProfile],
       },
       env,
     );
@@ -429,6 +443,113 @@ async function assertProjectReconfiguration(browser, viewport) {
   }
   await cleanupFixture(fixture);
 }
+async function assertPi084ProviderCatalog(browser, viewport) {
+  const fixture = await makeFixture({ configured: false, projectOnly: false });
+  const session = await openSession(browser, fixture, "full", viewport);
+  try {
+    await session.page.locator("#empty-connect").click();
+    const grouped = await session.page.locator("#cloud-provider optgroup").evaluateAll((groups) =>
+      groups.map((group) => ({
+        label: group.label,
+        options: [...group.querySelectorAll("option")].map((option) => ({
+          value: option.value,
+          text: option.textContent,
+        })),
+      })),
+    );
+    const common = grouped.find((group) => group.label === "Common");
+    const subscription = grouped.find((group) => group.label === "Subscription");
+    assert.ok(common, "Connect selector is missing the Common provider group");
+    assert.ok(subscription, "Connect selector is missing the Subscription provider group");
+    assert.ok(
+      common.options.some((option) => option.value === "baseten" && option.text === "Baseten"),
+      "Common providers are missing Baseten",
+    );
+    assert.ok(
+      subscription.options.some(
+        (option) =>
+          option.value === "qwen-token-plan-individual" &&
+          option.text === "Qwen Token Plan Individual",
+      ),
+      "Subscription providers are missing Qwen Token Plan Individual",
+    );
+
+    await session.page.locator("#cloud-provider").selectOption("baseten");
+    assert.equal(await session.page.locator("#provider-auth-method").inputValue(), "api-key");
+    assert.equal(
+      await session.page.locator("#provider-protocol").textContent(),
+      "Protocol: OpenAI Chat Completions",
+    );
+    assert.equal(await session.page.locator("#provider-field-apiKey").isVisible(), true);
+    await session.page.locator("#close-dialog").click();
+    await session.page.locator("#connection-dialog").waitFor({ state: "hidden" });
+    await assertPageHealth(session.page, `pi 0.84 provider catalog ${viewport.width}`);
+  } finally {
+    await closeSession(session);
+    await cleanupFixture(fixture);
+  }
+}
+
+async function assertCustomModelSamplingEditor(browser, viewport) {
+  const fixture = await makeFixture({ configured: true, projectOnly: false });
+  const session = await openSession(browser, fixture, "full", viewport);
+  try {
+    await session.page
+      .locator("#connection-list .connection-row button", { hasText: "Edit" })
+      .first()
+      .click();
+    await session.page.locator("#advanced-connection > summary").click();
+    await session.page.locator("#advanced-models .model-editor summary").first().click();
+
+    const textarea = session.page.locator("#draft-sampling-params-0");
+    const budget = session.page.locator("#draft-thinking-token-budget-0");
+    const status = session.page.locator("#dialog-status");
+    assert.equal(await textarea.isVisible(), true, "sampling textarea is not visible");
+    assert.equal(await budget.isVisible(), true, "vLLM budget checkbox is not visible");
+
+    await textarea.fill('{"temperature":0.2,');
+    await session.page.locator("#accept-endpoint").click();
+    assert.equal(
+      await session.page.locator("#connection-dialog").getAttribute("open"),
+      "",
+      "malformed sampling JSON closed the dialog",
+    );
+    assert.equal(
+      await status.textContent(),
+      "Sampling parameters for fixture-model must contain valid JSON.",
+    );
+
+    await textarea.fill("[1, 2]");
+    await session.page.locator("#accept-endpoint").click();
+    assert.equal(
+      await status.textContent(),
+      "Sampling parameters for fixture-model must be a JSON object.",
+    );
+
+    await textarea.fill('{"temperature":0.2,"top_p":0.9}');
+    await budget.check();
+    await session.page.locator("#accept-endpoint").click();
+    assert.equal(await status.textContent(), "", "save reported a validation error");
+    await session.page.locator("#connection-dialog").waitFor({ state: "hidden" });
+    await walkFullConfiguration(session.page, viewport, { save: true });
+  } finally {
+    await closeSession(session);
+  }
+
+  const saved = await loadModelConfiguration(fixture.workspace, [], fixture.env);
+  const model = saved.customProviders[0]?.models[0];
+  assert.deepEqual(
+    model?.samplingParams,
+    { temperature: 0.2, top_p: 0.9 },
+    "sampling parameters did not persist",
+  );
+  assert.equal(
+    model?.compat?.supportsThinkingTokenBudget,
+    true,
+    "vLLM thinking budget flag did not persist",
+  );
+  await cleanupFixture(fixture);
+}
 
 async function main() {
   const browser = await chromium.launch({ headless: true });
@@ -438,6 +559,8 @@ async function main() {
       await assertBlankProject(browser, viewport);
     }
     await completeBlankFullInitialization(browser, VIEWPORTS[0]);
+    await assertPi084ProviderCatalog(browser, VIEWPORTS[0]);
+    await assertCustomModelSamplingEditor(browser, VIEWPORTS[0]);
     for (const viewport of VIEWPORTS) {
       await assertFullReconfiguration(browser, viewport, true);
       await assertProjectReconfiguration(browser, viewport);

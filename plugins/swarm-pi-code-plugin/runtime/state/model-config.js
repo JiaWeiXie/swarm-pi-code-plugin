@@ -562,6 +562,8 @@ function parseCustomModel(value, provider) {
     const contextWindow = optionalInteger(record.contextWindow, `contextWindow for ${provider}/${id}`, 1024, 10_000_000);
     const maxTokens = optionalInteger(record.maxTokens, `maxTokens for ${provider}/${id}`, 1, contextWindow ?? 10_000_000);
     const metadata = parseModelMetadata(record.metadata, provider, id);
+    const samplingParams = optionalJsonObject(record.samplingParams, `samplingParams for ${provider}/${id}`);
+    const compat = parseCustomModelCompatibility(record.compat, provider, id);
     return {
         id,
         name: optionalString(record.name, `name for ${provider}/${id}`) ?? id,
@@ -570,7 +572,23 @@ function parseCustomModel(value, provider) {
         ...(contextWindow === undefined ? {} : { contextWindow }),
         ...(maxTokens === undefined ? {} : { maxTokens }),
         ...(metadata === undefined ? {} : { metadata }),
+        ...(samplingParams === undefined ? {} : { samplingParams }),
+        ...(compat === undefined ? {} : { compat }),
     };
+}
+function optionalJsonObject(value, label) {
+    if (value === undefined)
+        return undefined;
+    return structuredClone(asRecord(value, label));
+}
+function parseCustomModelCompatibility(value, provider, model) {
+    if (value === undefined)
+        return undefined;
+    const record = asRecord(value, `compat for ${provider}/${model}`);
+    const supportsThinkingTokenBudget = optionalBoolean(record.supportsThinkingTokenBudget, `compat.supportsThinkingTokenBudget for ${provider}/${model}`);
+    if (supportsThinkingTokenBudget === undefined)
+        return undefined;
+    return { supportsThinkingTokenBudget };
 }
 function parseModelMetadata(value, provider, model) {
     if (value === undefined)
