@@ -156,6 +156,10 @@ async function writeCredentialData(authPath, data, signal) {
         });
         signal?.throwIfAborted();
         await rename(temporaryPath, authPath);
+        // The rename above is the commit linearization point. An abort that lands
+        // after it is reported to the caller but never rolls the credential back,
+        // so a late AbortError does not mean the write was discarded.
+        signal?.throwIfAborted();
     }
     finally {
         // Unconditional: a cancelled write must not leave a temp file behind.

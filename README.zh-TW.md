@@ -33,7 +33,8 @@ mise exec -- node scripts/pi-runner.mjs configure --host codex
 
 需求為 Node.js 24.15.0 以上、支援的 Claude Code 或 Codex Host；需要 worktree-aware
 mutation 時也需要 Git repository。Credential 位於 Pi 相容的使用者儲存空間，不會進入
-repository state。
+repository state。Credential 的讀寫可取消；取消的寫入不會 commit，也不會留下
+殘缺檔案。
 
 ## Skills
 

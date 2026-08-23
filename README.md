@@ -36,7 +36,9 @@ mise exec -- node scripts/pi-runner.mjs configure --host codex
 
 Requirements: Node.js 24.15.0+, a supported Claude Code or Codex host, and a
 Git repository for worktree-aware mutation. Credentials remain in Pi-compatible
-user storage, never in repository state.
+user storage, never in repository state. Credential reads and writes are
+cancellable; a cancelled write commits nothing and leaves no partial file
+behind.
 
 ## Skills
 

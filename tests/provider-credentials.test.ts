@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -131,6 +131,46 @@ test("credential mutations abort while waiting for the store lock", async () => 
     // rejection proves the wait itself aborted rather than running to timeout.
     assert.ok(Date.now() - startedAt < 1_000);
     await assert.rejects(() => stat(authPath), /ENOENT/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("an abort inside the mutation callback commits nothing and leaves no temp file", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "swarm-pi-credentials-"));
+  try {
+    const authPath = path.join(root, "auth.json");
+    const store = new OverlayCredentialStore(new FileCredentialStore(authPath), new Map());
+    const controller = new AbortController();
+
+    await assert.rejects(
+      () =>
+        store.modify(
+          "openai",
+          async () => {
+            // Aborting here lands before the atomic rename, so the write must
+            // never reach auth.json.
+            controller.abort();
+            return { type: "api_key", key: "must-not-be-written" };
+          },
+          { signal: controller.signal },
+        ),
+      (error: unknown) => (error as Error).name === "AbortError",
+    );
+
+    await assert.rejects(() => stat(authPath), /ENOENT/);
+    assert.deepEqual(
+      (await readdir(root)).filter((entry) => entry.endsWith(".tmp")),
+      [],
+      "a cancelled write left a temporary credential file behind",
+    );
+    // The lock is released even on the cancelled path, so the next write works.
+    const written = await store.modify("openai", async () => ({
+      type: "api_key",
+      key: "written-after-cancellation",
+    }));
+    assert.equal(written?.type, "api_key");
+    assert.equal((await store.read("openai"))?.type, "api_key");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
