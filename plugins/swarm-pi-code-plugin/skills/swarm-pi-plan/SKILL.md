@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-plan
 description: Plan a decision-ready implementation, migration, or architecture change with a read-only Pi planner. Use when requirements and evidence are sufficient; route unresolved research to discover, diff findings to review, and code changes to implement.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Plan With Pi

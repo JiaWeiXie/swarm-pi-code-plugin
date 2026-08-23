@@ -43,7 +43,17 @@ const assessment: WorkerAssessment = {
   fallback: "Ask the user or continue without the file.",
 };
 
-async function adjudicate(host: Host) {
+interface HostAdjudicationOutcome {
+  decision: HostAdjudicationReceipt["decision"] | undefined;
+  assessedRisk: HostAdjudicationReceipt["assessedRisk"] | undefined;
+  constraints: string[] | undefined;
+  fingerprint: string;
+  principal: string | undefined;
+  host: Host | undefined;
+  model: string | undefined;
+}
+
+async function adjudicate(host: Host): Promise<HostAdjudicationOutcome> {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), `swarm-host-conformance-${host}-`));
   await fs.mkdir(path.join(cwd, "src"));
   await fs.writeFile(path.join(cwd, "src/example.ts"), "export const fixture = true;\n");
@@ -114,26 +124,29 @@ async function adjudicate(host: Host) {
   };
 }
 
-test("Codex and Claude apply equivalent Host-first decisions to the same fixture", async () => {
-  const codex = await adjudicate("codex");
-  const claude = await adjudicate("claude");
-  assert.deepEqual(
-    {
-      decision: codex.decision,
-      assessedRisk: codex.assessedRisk,
-      constraints: codex.constraints,
-      fingerprint: codex.fingerprint,
-      principal: codex.principal,
-    },
-    {
-      decision: claude.decision,
-      assessedRisk: claude.assessedRisk,
-      constraints: claude.constraints,
-      fingerprint: claude.fingerprint,
-      principal: claude.principal,
-    },
-  );
-  assert.equal(codex.host, "codex");
-  assert.equal(claude.host, "claude");
-  assert.notEqual(codex.model, claude.model);
+test("every supported Host applies equivalent Host-first decisions to the same fixture", async () => {
+  const hosts: Host[] = ["codex", "claude", "agent-plugin"];
+  const results = new Map<Host, HostAdjudicationOutcome>();
+  for (const host of hosts) {
+    results.set(host, await adjudicate(host));
+  }
+  const shared = (host: Host) => {
+    const result = results.get(host);
+    assert.ok(result, `missing adjudication result: ${host}`);
+    return {
+      decision: result.decision,
+      assessedRisk: result.assessedRisk,
+      constraints: result.constraints,
+      fingerprint: result.fingerprint,
+      principal: result.principal,
+    };
+  };
+  for (const host of hosts.slice(1)) {
+    assert.deepEqual(shared(host), shared("codex"), `capability lease drift: ${host}`);
+  }
+  for (const host of hosts) {
+    assert.equal(results.get(host)?.host, host);
+    assert.equal(results.get(host)?.model, `${host}/fixture-model`);
+  }
+  assert.equal(new Set(hosts.map((host) => results.get(host)?.model)).size, hosts.length);
 });

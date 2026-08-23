@@ -152,9 +152,13 @@ Check every local Markdown link and image path. Confirm command examples match
 the actual runner arguments and host manifests. Review the final diff with a
 reader's eye: the README should remain a usable guide rather than a changelog.
 
-For Codex skills, run the installed `quick_validate.py` from the skill-creator
-package against every changed skill. When source or packaged runtime behavior
-is mentioned, `mise run check-runtime-parity` is mandatory.
+For portable package and skill changes, run `mise exec -- npm run test:build`
+and then `mise exec -- node --test .test-dist/tests/manifests.test.js`, followed
+by `claude plugin validate --strict plugins/swarm-pi-code-plugin`. That pair
+checks the Agent Plugins 1.0.0 manifest, the fixed `skills/<name>/SKILL.md`
+discovery surface, skill frontmatter, local reference containment, and both host
+adapters. When source or packaged runtime behavior is mentioned,
+`mise run check-runtime-parity` is mandatory.
 
 ## 6. Maintain Research Separately
 

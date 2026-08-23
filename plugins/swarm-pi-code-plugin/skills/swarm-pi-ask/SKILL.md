@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-ask
 description: Answer one focused repository question with a read-only Pi scout. Use for a grounded second analysis pass; route diff findings to review, change design to plan, multiple perspectives to orchestrate, and edits to implement.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Ask Pi

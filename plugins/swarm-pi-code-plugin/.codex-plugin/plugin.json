@@ -1,7 +1,7 @@
 {
   "name": "swarm-pi-code-plugin",
   "version": "0.25.0+codex.20260823141537",
-  "description": "Dual-host Pi workflows with durable Host Assistance, discovery, review, and isolated implementation.",
+  "description": "Portable Pi workflows with durable Host Assistance, discovery, review, and isolated implementation.",
   "author": {
     "name": "JiaWei Xie"
   },
@@ -10,7 +10,7 @@
   "interface": {
     "displayName": "Swarm Pi Code Plugin",
     "shortDescription": "Delegate bounded, evidence-backed work to Pi.",
-    "longDescription": "Connect Codex and Claude Code to controlled Pi sessions for live Host-assisted research, schema-gated discovery, reviews, and verified isolated changes.",
+    "longDescription": "Connect compatible agent clients to controlled Pi sessions for live Host-assisted research, schema-gated discovery, reviews, and verified isolated changes.",
     "developerName": "JiaWei Xie",
     "category": "Productivity",
     "capabilities": [

@@ -7,10 +7,15 @@ one workflow, one immutable policy snapshot**.
    the brief; add only missing scope, observable completion criteria, protected
    boundaries, and one unresolved decision. A plan is a deliverable, not a
    mandatory prelude to implementation.
-2. **Resolve.** The plugin root is two directories above `SKILL.md` in Codex and
-   `${CLAUDE_PLUGIN_ROOT}` in Claude Code. Set `$HOST` to `claude` when that
-   variable exists, otherwise `codex`; set `$RUNNER` to
-   `mise exec -- node "$PLUGIN_ROOT/scripts/pi-runner.mjs"`.
+2. **Resolve.** `$PLUGIN_ROOT` is the package root: `${CLAUDE_PLUGIN_ROOT}` in
+   Claude Code, otherwise the filesystem-resolved directory two levels above the
+   loaded `SKILL.md`. Set `$HOST` to `claude` when `CLAUDE_PLUGIN_ROOT` exists,
+   to `codex` under Codex or ChatGPT, and to `agent-plugin` under any other
+   Agent Plugins-compatible client. `$RUNNER` is documentation shorthand only:
+   substitute `node "$PLUGIN_ROOT/scripts/pi-runner.mjs"` directly into each
+   command. Never store that quoted command in a shell string for later
+   expansion, and never depend on `mise` or any other tool outside the declared
+   runtime prerequisites.
 3. **Inspect.** Run `$RUNNER status --json`, then
    `$RUNNER jobs list --pending-notifications --json`. Present every pending
    approval or terminal notification before acknowledging only the item shown.

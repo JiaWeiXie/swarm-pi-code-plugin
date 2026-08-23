@@ -2,11 +2,12 @@
 
 [繁體中文](README.zh-TW.md)
 
-Swarm Pi connects Claude Code and Codex to a bounded Pi worker for grounded
-repository questions, plans, reviews, discovery, setup, scaffolding, and
-authorized implementation. The Host retains intent, approval, verification,
-and delivery. Pi never owns commit, merge, push, deployment, messaging, or
-transactions.
+Swarm Pi is a portable [Agent Plugins 1.0](https://agent-plugins.org/specification)
+package with native Claude Code and Codex adapters. Its ten Agent Skills connect
+a compatible client to a bounded Pi worker for grounded repository questions,
+plans, reviews, discovery, setup, scaffolding, and authorized implementation.
+The Host retains intent, approval, verification, and delivery. Pi never owns
+commit, merge, push, deployment, messaging, or transactions.
 
 ## Quick start
 
@@ -26,6 +27,14 @@ codex plugin marketplace add https://github.com/JiaWeiXie/swarm-pi-code-plugin
 codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 ```
 
+For any other
+[Agent Plugins-compatible client](https://agent-plugins.org/compatible-clients),
+point its local-package flow at the package root `plugins/swarm-pi-code-plugin/`.
+The client reads `plugin.json` and discovers each skill at
+`skills/<name>/SKILL.md`; a generic client exposes the ten skills by their
+frontmatter `name`. Install, enable, permissions, the outer sandbox, and the
+user interface stay under client control.
+
 For local development:
 
 ```bash
@@ -34,11 +43,14 @@ mise exec -- node scripts/pi-runner.mjs status --json
 mise exec -- node scripts/pi-runner.mjs configure --host codex
 ```
 
-Requirements: Node.js 24.15.0+, a supported Claude Code or Codex host, and a
-Git repository for worktree-aware mutation. Credentials remain in Pi-compatible
-user storage, never in repository state. Credential reads and writes are
-cancellable; a cancelled write commits nothing and leaves no partial file
-behind.
+Packaged runtime requirements: Node.js 22.19+, local shell command execution,
+first-run npm registry access, and a writable plugin directory for the exact
+pinned dependencies installed on first run. Mutation workflows additionally
+require Git for worktree-aware changes; a read-only package directory is not
+supported and fails with the existing bootstrap error. Repository development
+requires Node.js 24.15.0+. Credentials remain in Pi-compatible user storage,
+never in repository state. Credential reads and writes are cancellable; a
+cancelled write commits nothing and leaves no partial file behind.
 
 ## Skills
 
@@ -61,8 +73,10 @@ YAML or JSON.
 | `scaffold` | A reviewed new-project scaffold |
 
 Use the corresponding `swarm-pi-code-plugin:swarm-pi-*` command in Codex or
-the matching Claude command. The runner CLI remains available for Host adapters
-and diagnostics.
+the matching Claude command. Any other Agent Plugins-compatible client exposes
+the same ten skills under their frontmatter names, `swarm-pi-configure` through
+`swarm-pi-scaffold`. The runner CLI remains available for Host adapters and
+diagnostics.
 
 ## Configuration
 
@@ -136,11 +150,13 @@ Traditional Chinese focused references are paired where available.
 
 ## Built With and References
 
+- [Agent Plugins Specification 1.0.0](https://agent-plugins.org/specification)
+- [Agent Skills Specification](https://agentskills.io/specification)
 - [Claude Code current documentation](https://code.claude.com/docs/en/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
 - [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.84.2`
 - [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime), pinned at `0.0.49`
-- [Node.js](https://nodejs.org/), `24.15.0+`
+- [Node.js](https://nodejs.org/), `22.19+` for the packaged runtime and `24.15.0+` for repository development
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)
 - [Playwright](https://playwright.dev/), pinned at `1.61.0`

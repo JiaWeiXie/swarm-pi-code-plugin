@@ -2,7 +2,8 @@
 
 ## Trust Boundaries
 
-The Claude Code or Codex host and the shared runner control plane are trusted.
+The active host—Claude Code, Codex, or another Agent Plugins-compatible
+client—and the shared runner control plane are trusted.
 Model output, repository content, delegated prompts, Pi tool arguments, shell
 commands, network responses, and project-local extensions are untrusted.
 Classifier output is a policy signal, not an enforcement boundary.
@@ -108,7 +109,8 @@ perspectives; malformed or missing seals, and failures after sealing, fail with
 a fixed sanitized message and release nothing. No entries, counts, paths,
 hashes, prompts, or raw tool text are added to telemetry or results.
 
-Claude Code and Codex share notifications, delivery state, and configuration.
+Claude Code, Codex, and other Agent Plugins-compatible clients share
+notifications, delivery state, and configuration for the same project.
 Matching IDs prevent unrelated acknowledgements, but there is no general Host
 claim token for notification presentation, materialization, or configuration
 transactions. Operators must serialize delivery and settings changes until a

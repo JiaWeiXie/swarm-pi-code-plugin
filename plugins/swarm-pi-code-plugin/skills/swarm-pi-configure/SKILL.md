@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-configure
 description: Configure Pi providers, credentials, models, role routing, and shared project policy in the guided local setup. Use for first setup, recovery, provider or model changes, or full reconfiguration; use swarm-pi-project when provider connections must stay unchanged.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Configure Swarm Pi Code Plugin

@@ -11,6 +11,8 @@ const CODEX_MARKETPLACE = "swarm-pi-code-plugin-local";
 const CODEX_PLUGIN_ID = `${PLUGIN_NAME}@${CODEX_MARKETPLACE}`;
 const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const CODEX_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\+codex\.(\d{14})$/;
+const PORTABLE_MANIFEST = "plugins/swarm-pi-code-plugin/plugin.json";
+const PORTABLE_MANIFEST_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
 const VERSION_FILES = [
   "package.json",
   "package-lock.json",
@@ -18,6 +20,7 @@ const VERSION_FILES = [
   "plugins/swarm-pi-code-plugin/package-lock.json",
   "plugins/swarm-pi-code-plugin/.claude-plugin/plugin.json",
   "plugins/swarm-pi-code-plugin/.codex-plugin/plugin.json",
+  PORTABLE_MANIFEST,
   ".claude-plugin/marketplace.json",
 ];
 
@@ -165,6 +168,10 @@ function validateVersionState(state, expectedVersion) {
     state.documents.get("plugins/swarm-pi-code-plugin/.codex-plugin/plugin.json"),
     "Codex plugin manifest",
   );
+  const portableManifest = validatePortableManifest(
+    "Portable plugin manifest",
+    state.documents.get(PORTABLE_MANIFEST),
+  );
   const marketplace = requireRecord(
     state.documents.get(".claude-plugin/marketplace.json"),
     "Claude marketplace",
@@ -199,6 +206,7 @@ function validateVersionState(state, expectedVersion) {
     ["Claude plugin manifest version", claudeManifest.version],
     ["Claude marketplace metadata.version", metadata.version],
     [`Claude marketplace ${PLUGIN_NAME} version`, marketplacePlugin.version],
+    ["Portable plugin manifest version", portableManifest.version],
   ];
   for (const [label, value] of comparisons) {
     if (value !== baseVersion) {
@@ -238,6 +246,23 @@ function validateHookManifest(host, manifest) {
       `${host} plugin manifest must not declare hooks; hooks/hooks.json is loaded automatically by Claude Code.`,
     );
   }
+}
+
+function validatePortableManifest(label, manifest, expectedVersion) {
+  const document = requireRecord(manifest, label);
+  if (document.$schema !== PORTABLE_MANIFEST_SCHEMA) {
+    throw new Error(`${label} $schema must be ${PORTABLE_MANIFEST_SCHEMA}.`);
+  }
+  if (document.name !== PLUGIN_NAME) {
+    throw new Error(`${label} name must be ${PLUGIN_NAME}.`);
+  }
+  const version = requireStableVersion(document.version, `${label} version`);
+  if (expectedVersion && version !== expectedVersion) {
+    throw new Error(
+      `Version drift: ${label} version is ${JSON.stringify(version)}; expected ${expectedVersion}.`,
+    );
+  }
+  return document;
 }
 
 async function checkInstalledPlugins(current, cwd) {
@@ -292,6 +317,11 @@ async function checkInstalledPlugins(current, cwd) {
       `Codex plugin source drift: installed ${JSON.stringify(codex.source?.path)}, expected ${expectedSource}.`,
     );
   }
+  await validateInstalledPortableManifest(
+    "Codex local source",
+    installedRealSource,
+    current.baseVersion,
+  );
 }
 
 async function validateInstalledClaudePlugin(installPath, expectedVersion) {
@@ -324,6 +354,20 @@ async function validateInstalledClaudePlugin(installPath, expectedVersion) {
       `Unable to validate installed Claude hooks ${hooksPath}: ${errorMessage(error)}`,
     );
   }
+  await validateInstalledPortableManifest("Claude install root", installPath, expectedVersion);
+}
+
+async function validateInstalledPortableManifest(label, packageRoot, expectedVersion) {
+  const manifestPath = path.join(packageRoot, "plugin.json");
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Unable to read ${label} portable manifest ${manifestPath}: ${errorMessage(error)}`,
+    );
+  }
+  validatePortableManifest(`${label} portable manifest`, manifest, expectedVersion);
 }
 
 function runJsonCommand(command, args, label) {
@@ -408,6 +452,7 @@ function createVersionPlan(state, nextVersion, codexVersion) {
     nextVersion;
   documents.get("plugins/swarm-pi-code-plugin/.claude-plugin/plugin.json").version = nextVersion;
   documents.get("plugins/swarm-pi-code-plugin/.codex-plugin/plugin.json").version = codexVersion;
+  documents.get(PORTABLE_MANIFEST).version = nextVersion;
   documents.get(".claude-plugin/marketplace.json").metadata.version = nextVersion;
   const marketplacePlugin = documents
     .get(".claude-plugin/marketplace.json")

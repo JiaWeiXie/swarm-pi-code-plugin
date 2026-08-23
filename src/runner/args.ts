@@ -708,7 +708,7 @@ function parseJson(value: string, flag: string): unknown {
 }
 
 function parseHost(value: string): Host {
-  if (value !== "claude" && value !== "codex") {
+  if (value !== "claude" && value !== "codex" && value !== "agent-plugin") {
     throw new Error(`Invalid host: ${value}`);
   }
   return value;

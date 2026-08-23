@@ -18,6 +18,7 @@ specified in [Bootstrap, Onboarding, and Workspace Hygiene](bootstrap-and-onboar
 flowchart TB
     CC[Claude Code] --> H[Host adapter]
     X[Codex CLI] --> H
+    AP[Agent Plugins-compatible client] --> H
     H --> R[Shared Pi runner]
     R --> Q{Task mode}
     Q --> O[Read-only Pi session]
@@ -44,9 +45,9 @@ flowchart TB
     W --> V
 ```
 
-Claude Code and Codex are two host surfaces for the same implementation. They
-do not run separate worker engines and they do not maintain separate model or
-project profiles.
+Claude Code, Codex, and any other Agent Plugins-compatible client are host
+surfaces for the same implementation. They do not run separate worker engines
+and they do not maintain separate model or project profiles.
 
 ## Host Adapters
 
@@ -56,11 +57,14 @@ the `/swarm-pi-code-plugin:` prefix. Its `pi-worker` and `pi-builder` agents
 classify natural-language requests and route them to the matching workflow.
 
 Codex exposes the equivalent skills under the `swarm-pi-code-plugin-` prefix.
-Every Codex skill has `agents/openai.yaml` UI metadata. Both hosts share the
-same task-specific workflow content and cross-host protocol: readiness and
-pending notifications first, supervised execution by default, durable
-continuations, active Host-first adjudication within the immutable policy,
-user fallback outside that ceiling, and host-owned verification/delivery.
+Every Codex skill has `agents/openai.yaml` UI metadata. Other Agent Plugins
+1.0-compatible clients load the same package root through `plugin.json` and the
+fixed `skills/<name>/SKILL.md` locations, and run under the `agent-plugin` Host
+identity. Every host shares the same task-specific workflow content and
+cross-host protocol: readiness and pending notifications first, supervised
+execution by default, durable continuations, active Host-first adjudication
+within the immutable policy, user fallback outside that ceiling, and host-owned
+verification/delivery.
 
 Host adapters write user-controlled prompts to temporary files outside the
 repository. They validate the runner result, inspect implementation diffs, and
@@ -71,7 +75,7 @@ remain responsible for verification, commits, pushes, and delivery decisions.
 The runner accepts these public command surfaces:
 
 ```text
-mise exec -- node scripts/pi-runner.mjs init --host <claude|codex> --json
+mise exec -- node scripts/pi-runner.mjs init --host <claude|codex|agent-plugin> --json
 mise exec -- node scripts/pi-runner.mjs models --json
 mise exec -- node scripts/pi-runner.mjs models --refresh --json
 mise exec -- node scripts/pi-runner.mjs providers --json
@@ -84,7 +88,7 @@ mise exec -- node scripts/pi-runner.mjs orchestrate --host <host> --prompt-file 
 mise exec -- node scripts/pi-runner.mjs discover --host <host> --prompt-file <file> --json
 mise exec -- node scripts/pi-runner.mjs roles list --json
 mise exec -- node scripts/pi-runner.mjs status|doctor|resume [options] --json
-mise exec -- node scripts/pi-runner.mjs scaffold|setup --host <claude|codex> [options] --json
+mise exec -- node scripts/pi-runner.mjs scaffold|setup --host <claude|codex|agent-plugin> [options] --json
 mise exec -- node scripts/pi-runner.mjs jobs <list|status|wait|watch|cancel|acknowledge|approvals|approve|deny|host-requests|host-respond|host-decline|decisions|decide|action-start|cleanup|prune|materialize|export> [options] --json
 ```
 

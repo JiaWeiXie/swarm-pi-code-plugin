@@ -1,6 +1,7 @@
 const HOST_CONTEXT = {
     claude: "Delegated Pi worker under Claude Code.",
     codex: "Delegated Pi worker under Codex.",
+    "agent-plugin": "Delegated Pi worker under an Agent Plugins-compatible client.",
 };
 const TASK_CONTEXT = {
     ask: "Resolve one question from current repository evidence. Tie each material claim to a file and line when useful; mark unsupported claims and unknowns.",

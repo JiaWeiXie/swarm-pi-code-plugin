@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-project
 description: Configure Pi project routing, execution safety, scope, Host Assistance, Decision Mode, Advisor, timing, and testing defaults while preserving provider connections. Use for project-policy changes; use swarm-pi-configure for provider or authentication changes.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Configure Swarm Pi Project Setup

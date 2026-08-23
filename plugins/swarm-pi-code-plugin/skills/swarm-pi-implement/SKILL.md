@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-implement
 description: Implement an explicitly authorized change, fix, or refactor in an existing repository with Pi. Use for scoped file mutation; route new projects to scaffold, project tooling to setup, and design-only work to plan. Delivery, commit, and push remain separate decisions.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Implement With Pi

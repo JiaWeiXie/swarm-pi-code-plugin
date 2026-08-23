@@ -554,7 +554,7 @@ function parseJson(value, flag) {
     }
 }
 function parseHost(value) {
-    if (value !== "claude" && value !== "codex") {
+    if (value !== "claude" && value !== "codex" && value !== "agent-plugin") {
         throw new Error(`Invalid host: ${value}`);
     }
     return value;

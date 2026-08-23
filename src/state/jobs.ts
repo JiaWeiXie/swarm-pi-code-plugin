@@ -1553,7 +1553,7 @@ function normalizeHostAdjudicationReceipt(input: unknown): HostAdjudicationRecei
   if (value.principal !== "host-model") {
     throw new Error("Automated adjudication requires principal host-model");
   }
-  if (value.host !== "codex" && value.host !== "claude") {
+  if (value.host !== "codex" && value.host !== "claude" && value.host !== "agent-plugin") {
     throw new Error("Host adjudication host is invalid");
   }
   if (

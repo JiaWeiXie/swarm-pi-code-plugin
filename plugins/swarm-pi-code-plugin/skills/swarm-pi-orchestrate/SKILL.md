@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-orchestrate
 description: Compare bounded read-only Pi perspectives on repository architecture, migration, tradeoffs, or risk. Use when independent perspectives materially improve a decision; route one question to ask, one change plan to plan, and file mutation to implement.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Orchestrate Pi

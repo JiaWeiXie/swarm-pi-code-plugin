@@ -39,7 +39,7 @@ This page configures a bounded delegation pipeline, not one all-powerful chatbot
 ```text
 Your request
   ↓
-Host (the active Codex or Claude conversation) retains final judgment
+Host (the active Codex, Claude, or Agent Plugins-compatible client conversation) retains final judgment
   ↓
 Job (one delegated assignment with a purpose and boundaries)
   ↓
@@ -54,7 +54,7 @@ The terms used throughout setup mean:
 
 | Keyword | Plain meaning | Concrete example |
 | --- | --- | --- |
-| **Host** | The Codex or Claude model currently talking to you and making the final decision. A background hook is not an active Host. | The Host decides whether a Worker really needs public SDK documentation. |
+| **Host** | The Codex, Claude, or other Agent Plugins-compatible client model currently talking to you and making the final decision. A background hook is not an active Host. | The Host decides whether a Worker really needs public SDK documentation. |
 | **Worker** | A delegated Pi model session with a particular responsibility and limited tools. | A reviewer Worker inspects a diff; an executor Worker may edit allowed files. |
 | **Job** | One durable assignment with its own request, settings, status, and result. | “Review this branch” and “fix the confirmed findings” are separate Jobs. |
 | **Snapshot** | An immutable copy of the relevant settings taken when a Job starts. | Changing Adaptive to Strict later does not rewrite a running Job. |

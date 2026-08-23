@@ -71,7 +71,8 @@ New projects default to `reviewMode: host-first`,
 objects missing those fields stay User-only/Context-only with gate review off
 until resaved. Every Job uses its immutable snapshot.
 
-The active Codex or Claude model reads the full record and
+The active Host model—Codex, Claude, or another Agent Plugins-compatible
+client—reads the full record and
 `adjudicationContext`, including the original intent and policy snapshot. It
 independently checks role ceiling, project roots and denies, Sandbox mode,
 fingerprint, policy hash, risk, reversibility, rollback, and verification. It

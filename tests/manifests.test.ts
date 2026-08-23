@@ -39,6 +39,119 @@ test("Claude and Codex manifests use the swarm-pi-code-plugin identity", () => {
   assert.equal(codex.skills, "./skills/");
 });
 
+test("portable manifest and skills follow the Agent Plugins 1.0.0 contract", () => {
+  const pluginRoot = path.join(repoRoot, "plugins/swarm-pi-code-plugin");
+  const version = readJson("package.json").version as string;
+  const manifest = readJson("plugins/swarm-pi-code-plugin/plugin.json");
+
+  assert.deepEqual(manifest, {
+    $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+    name: "swarm-pi-code-plugin",
+    version,
+    description:
+      "Portable Pi workflows with durable Host Assistance, discovery, review, and isolated implementation.",
+    author: { name: "JiaWei Xie" },
+    homepage: "https://github.com/JiaWeiXie/swarm-pi-code-plugin",
+    repository: "https://github.com/JiaWeiXie/swarm-pi-code-plugin",
+    license: "MIT",
+    keywords: ["agent-plugins", "agent-skills", "coding-agent", "pi"],
+  });
+
+  const skillDirectories = fs
+    .readdirSync(path.join(pluginRoot, "skills"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(skillDirectories, [
+    "swarm-pi-ask",
+    "swarm-pi-configure",
+    "swarm-pi-discover",
+    "swarm-pi-implement",
+    "swarm-pi-orchestrate",
+    "swarm-pi-plan",
+    "swarm-pi-project",
+    "swarm-pi-review",
+    "swarm-pi-scaffold",
+    "swarm-pi-setup",
+  ]);
+
+  for (const directory of skillDirectories) {
+    const file = path.join(pluginRoot, "skills", directory, "SKILL.md");
+    assert.equal(
+      fs.lstatSync(file).isFile(),
+      true,
+      `SKILL.md must be a regular file: ${directory}`,
+    );
+    const frontmatter = readFrontmatter(file);
+    assert.equal(
+      frontmatter.name,
+      directory,
+      `frontmatter name must match directory: ${directory}`,
+    );
+    const description = frontmatter.description ?? "";
+    assert.ok(
+      description.length >= 1 && description.length <= 1024,
+      `description must be 1-1024 characters: ${directory}`,
+    );
+    const compatibility = frontmatter.compatibility ?? "";
+    assert.equal(
+      compatibility,
+      "Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.",
+    );
+    assert.ok(
+      compatibility.length >= 1 && compatibility.length <= 500,
+      `compatibility must be 1-500 characters: ${directory}`,
+    );
+  }
+
+  for (const markdown of listMarkdown(pluginRoot)) {
+    const source = fs.readFileSync(markdown, "utf8");
+    for (const match of source.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const target = match[1] ?? "";
+      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("#")) continue;
+      const resolved = path.resolve(path.dirname(markdown), target.split("#")[0] ?? "");
+      assert.ok(
+        resolved.startsWith(`${pluginRoot}${path.sep}`),
+        `local reference escapes the package root: ${markdown} -> ${target}`,
+      );
+      assert.equal(
+        fs.existsSync(resolved),
+        true,
+        `local reference does not exist: ${markdown} -> ${target}`,
+      );
+    }
+  }
+});
+
+function readFrontmatter(file: string): Record<string, string> {
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  assert.equal(lines[0], "---", `missing frontmatter: ${file}`);
+  const close = lines.indexOf("---", 1);
+  assert.ok(close > 1, `unterminated frontmatter: ${file}`);
+  const fields: Record<string, string> = {};
+  for (const line of lines.slice(1, close)) {
+    const separator = line.indexOf(": ");
+    assert.ok(separator > 0, `unsupported frontmatter line in ${file}: ${line}`);
+    fields[line.slice(0, separator)] = line.slice(separator + 2);
+  }
+  return fields;
+}
+
+function listMarkdown(directory: string): string[] {
+  return fs
+    .readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const resolved = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return entry.name === "node_modules" || entry.name === "runtime"
+          ? []
+          : listMarkdown(resolved);
+      }
+      return entry.isFile() && entry.name.endsWith(".md") ? [resolved] : [];
+    })
+    .sort();
+}
+
 test("plugin package contains both host adapters and a self-contained runner", () => {
   const pluginRoot = path.join(repoRoot, "plugins/swarm-pi-code-plugin");
   const skills = [

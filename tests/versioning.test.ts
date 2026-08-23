@@ -26,6 +26,7 @@ const versionFiles = [
   "plugins/swarm-pi-code-plugin/package-lock.json",
   "plugins/swarm-pi-code-plugin/.claude-plugin/plugin.json",
   "plugins/swarm-pi-code-plugin/.codex-plugin/plugin.json",
+  "plugins/swarm-pi-code-plugin/plugin.json",
   ".claude-plugin/marketplace.json",
 ];
 
@@ -78,7 +79,10 @@ test("version check rejects a duplicate Claude hooks declaration", (context) => 
   assert.match(result.stderr, /Claude plugin manifest must not declare hooks/);
 });
 
-test("installed version check validates Claude and Codex records", (context) => {
+function createInstalledFixture(
+  context: { after(callback: () => void): void },
+  options: { portableManifest?: "current" | "missing" | "stale" } = {},
+): { fixture: string; env: Record<string, string> } {
   const fixture = createFixture(context);
   const expectedVersion = readJson(fixture, "package.json").version as string;
   const expectedCodexVersion = readJson(
@@ -98,6 +102,15 @@ test("installed version check validates Claude and Codex records", (context) => 
     path.join(repoRoot, "plugins/swarm-pi-code-plugin/hooks/hooks.json"),
     path.join(claudeInstall, "hooks/hooks.json"),
   );
+  const portable = options.portableManifest ?? "current";
+  if (portable !== "missing") {
+    const manifest = readJson(fixture, "plugins/swarm-pi-code-plugin/plugin.json");
+    if (portable === "stale") manifest.version = "0.5.1";
+    fs.writeFileSync(
+      path.join(claudeInstall, "plugin.json"),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    );
+  }
   writeExecutable(
     path.join(bin, "claude"),
     `process.stdout.write(${JSON.stringify(
@@ -126,11 +139,39 @@ test("installed version check validates Claude and Codex records", (context) => 
       }),
     )});\n`,
   );
+  return { fixture, env: { PATH: `${bin}:${process.env.PATH ?? ""}` } };
+}
 
-  const output = run(fixture, ["check", "--installed"], {
-    PATH: `${bin}:${process.env.PATH ?? ""}`,
-  });
+test("installed version check validates Claude and Codex records", (context) => {
+  const { fixture, env } = createInstalledFixture(context);
+
+  const output = run(fixture, ["check", "--installed"], env);
   assert.match(output, /Installed Claude Code and Codex plugins are current and enabled/);
+});
+
+test("installed version check reports a missing portable manifest", (context) => {
+  const { fixture, env } = createInstalledFixture(context, { portableManifest: "missing" });
+
+  const result = runFailure(fixture, ["check", "--installed"], env);
+  assert.match(result.stderr, /Unable to read Claude install root portable manifest/);
+});
+
+test("installed version check reports a stale portable manifest", (context) => {
+  const { fixture, env } = createInstalledFixture(context, { portableManifest: "stale" });
+
+  const result = runFailure(fixture, ["check", "--installed"], env);
+  assert.match(
+    result.stderr,
+    /Version drift: Claude install root portable manifest version is "0\.5\.1"/,
+  );
+});
+
+test("installed version check requires the Codex source portable manifest", (context) => {
+  const { fixture, env } = createInstalledFixture(context);
+  fs.rmSync(path.join(fixture, "plugins/swarm-pi-code-plugin/plugin.json"));
+
+  const result = runFailure(fixture, ["check", "--installed"], env);
+  assert.match(result.stderr, /Unable to read plugins\/swarm-pi-code-plugin\/plugin\.json/);
 });
 
 test("installed version check reports a stale Claude plugin", (context) => {
@@ -246,6 +287,7 @@ function assertVersionState(fixture: string, expected: string): void {
   const pluginLock = readJson(fixture, "plugins/swarm-pi-code-plugin/package-lock.json");
   const claude = readJson(fixture, "plugins/swarm-pi-code-plugin/.claude-plugin/plugin.json");
   const codex = readJson(fixture, "plugins/swarm-pi-code-plugin/.codex-plugin/plugin.json");
+  const portable = readJson(fixture, "plugins/swarm-pi-code-plugin/plugin.json");
   const marketplace = readJson(fixture, ".claude-plugin/marketplace.json");
   const marketplacePlugin = (marketplace.plugins as Array<{ name: string; version?: string }>).find(
     (entry) => entry.name === pluginName,
@@ -264,6 +306,9 @@ function assertVersionState(fixture: string, expected: string): void {
   );
   assert.equal((marketplace.metadata as { version: string }).version, expected);
   assert.equal(marketplacePlugin?.version, expected);
+  assert.equal(portable.version, expected);
+  assert.equal(portable.name, pluginName);
+  assert.equal(portable.$schema, "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
 }
 
 function snapshot(fixture: string): Record<string, string> {

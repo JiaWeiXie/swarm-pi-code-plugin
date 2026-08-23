@@ -1,4 +1,4 @@
-export type Host = "claude" | "codex";
+export type Host = "claude" | "codex" | "agent-plugin";
 
 export type TaskKind =
   | "ask"

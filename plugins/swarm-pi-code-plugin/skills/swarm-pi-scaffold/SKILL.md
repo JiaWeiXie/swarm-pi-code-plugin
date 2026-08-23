@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-scaffold
 description: Scaffold a new project through a reviewed Pi ScaffoldSpec, isolated staging, verification, and explicit materialization. Use for empty or explicitly adopted non-Git targets; route existing repositories to implement and tooling-only changes to setup.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Scaffold A Project With Pi

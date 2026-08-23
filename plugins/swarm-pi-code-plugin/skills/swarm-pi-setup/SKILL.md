@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-setup
 description: Set up reproducible project-local dependencies, build, test, lint, and development tooling with Pi's supervised environment engineer. Use for repository tooling changes; route product code to implement and new projects to scaffold. Global provisioning and deployment stay out of scope.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Configure A Development Environment With Pi

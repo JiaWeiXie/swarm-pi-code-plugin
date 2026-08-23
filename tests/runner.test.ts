@@ -159,6 +159,21 @@ test("argument parsing requires host and prompt file for ask", () => {
   assert.throws(() => parseArguments(["ask", "--host", "codex"]), /--prompt-file/);
   assert.throws(() => parseArguments(["ask", "--prompt-file", "prompt.md"]), /--host/);
   assert.deepEqual(
+    parseArguments(["ask", "--host", "agent-plugin", "--prompt-file", "/tmp/prompt.md"]),
+    {
+      command: "ask",
+      host: "agent-plugin",
+      promptFile: "/tmp/prompt.md",
+      reconfigure: false,
+      reset: false,
+      json: false,
+    },
+  );
+  assert.throws(
+    () => parseArguments(["ask", "--host", "cursor", "--prompt-file", "/tmp/prompt.md"]),
+    /Invalid host: cursor/,
+  );
+  assert.deepEqual(
     parseArguments([
       "init",
       "--reconfigure",

@@ -3,7 +3,7 @@
   "version": "0.25.0",
   "private": true,
   "type": "module",
-  "description": "Dual-host Claude Code and Codex plugin backed by the embedded Pi coding-agent SDK",
+  "description": "Claude Code, Codex, and Agent Plugins-compatible workflows backed by the embedded Pi coding-agent SDK",
   "license": "MIT",
   "engines": {
     "node": ">=24.15.0"

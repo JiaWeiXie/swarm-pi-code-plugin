@@ -125,6 +125,23 @@ test("worker prompt has a versioned stable prefix and request last", () => {
   assert.equal(projectSection.includes("Directories in scope:"), false);
 });
 
+test("worker prompt names the active host without changing the prompt version", () => {
+  const expected: Record<string, string> = {
+    claude: "Delegated Pi worker under Claude Code.",
+    codex: "Delegated Pi worker under Codex.",
+    "agent-plugin": "Delegated Pi worker under an Agent Plugins-compatible client.",
+  };
+  for (const [host, context] of Object.entries(expected)) {
+    const prompt = buildWorkerPrompt({
+      host: host as Parameters<typeof buildWorkerPrompt>[0]["host"],
+      kind: "ask",
+      prompt: "Request body.",
+    });
+    assert.match(prompt, new RegExp(`^\\[PROMPT\\]\\nversion=${WORKER_PROMPT_VERSION}`));
+    assert.ok(prompt.includes(`[HOST]\n${context}`), `missing host context: ${host}`);
+  }
+});
+
 test("worker task contracts state observable completion evidence", () => {
   const expected: Record<Parameters<typeof buildWorkerPrompt>[0]["kind"], RegExp> = {
     ask: /material claim.*file and line.*unknowns/i,

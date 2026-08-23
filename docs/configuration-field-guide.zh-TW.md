@@ -35,7 +35,7 @@ event variant 削弱本地執行邊界。
 ```text
 你提出需求
   ↓
-Host（目前與你對話的 Codex 或 Claude）先理解需求、保留決定權
+Host（目前與你對話的 Codex、Claude 或其他 Agent Plugins 相容 client）先理解需求、保留決定權
   ↓
 Job（一次有明確目的與邊界的委派工作）
   ↓
@@ -50,7 +50,7 @@ Sandbox + Policy 檢查 Worker 想用的工具、路徑與網路
 
 | Keyword | 白話意思 | 實際例子 |
 | --- | --- | --- |
-| **Host** | 目前直接和你對話、替你做最後判斷的 Codex 或 Claude。Host 不是背景 hook。 | Worker 要讀官方文件時，Host 判斷是否符合原始需求。 |
+| **Host** | 目前直接和你對話、替你做最後判斷的 Codex、Claude 或其他 Agent Plugins 相容 client。Host 不是背景 hook。 | Worker 要讀官方文件時，Host 判斷是否符合原始需求。 |
 | **Worker** | Host 委派出去執行一項工作的人員角色；這裡是受限制的 Pi model session。 | Reviewer Worker 只檢查 diff；Executor Worker 才能在允許範圍修改檔案。 |
 | **Job** | 一次委派工作的完整紀錄，有自己的需求、設定、狀態與結果。 | 「Review 目前 branch」是一個 Job；之後「修正 finding」是另一個 Job。 |
 | **Snapshot** | Job 開始時把設定拍成一份不可變副本。 | Job 開始後把 Sandbox 從 Adaptive 改成 Strict，不會改變正在執行的 Job。 |

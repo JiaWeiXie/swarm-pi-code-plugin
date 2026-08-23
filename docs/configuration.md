@@ -1,7 +1,8 @@
 # Configuration Reference
 
-This reference describes the temporary browser setup shared by Claude Code and
-Codex. For installation and common workflows, start with the
+This reference describes the temporary browser setup shared by Claude Code,
+Codex, and other Agent Plugins-compatible clients. For installation and common
+workflows, start with the
 [README](../README.md). Runtime boundaries are documented in
 [architecture.md](architecture.md), and immutable security constraints are in
 [threat-model.md](threat-model.md). The Host Assistance and Discovery contract

@@ -2,9 +2,11 @@
 
 [English](README.md)
 
-Swarm Pi 將 Claude Code 與 Codex 連接到受邊界限制的 Pi Worker，可處理以 repository
-為依據的提問、規劃、審查、Discovery、設定、Scaffold 與已授權的實作。Host 保留意圖、
-核准、驗證與交付權；Pi 不擁有 commit、merge、push、部署、訊息或交易權限。
+Swarm Pi 是符合 [Agent Plugins 1.0](https://agent-plugins.org/specification) 的可攜
+套件，並保留 Claude Code 與 Codex 原生 adapter。套件內十個 Agent Skills 將相容 client
+連接到受邊界限制的 Pi Worker，可處理以 repository 為依據的提問、規劃、審查、Discovery、
+設定、Scaffold 與已授權的實作。Host 保留意圖、核准、驗證與交付權；Pi 不擁有 commit、
+merge、push、部署、訊息或交易權限。
 
 ## 快速開始
 
@@ -23,6 +25,12 @@ codex plugin marketplace add https://github.com/JiaWeiXie/swarm-pi-code-plugin
 codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 ```
 
+其他
+[Agent Plugins 相容 client](https://agent-plugins.org/compatible-clients)
+請以其 local package 流程指向套件根目錄 `plugins/swarm-pi-code-plugin/`。Client 會讀取
+`plugin.json`，並在 `skills/<name>/SKILL.md` 發現各個 skill；一般 client 依 frontmatter
+`name` 暴露這十個 skills。安裝、啟用、權限、外層 sandbox 與 UI 仍由 client 管理。
+
 本機開發：
 
 ```bash
@@ -31,10 +39,11 @@ mise exec -- node scripts/pi-runner.mjs status --json
 mise exec -- node scripts/pi-runner.mjs configure --host codex
 ```
 
-需求為 Node.js 24.15.0 以上、支援的 Claude Code 或 Codex Host；需要 worktree-aware
-mutation 時也需要 Git repository。Credential 位於 Pi 相容的使用者儲存空間，不會進入
-repository state。Credential 的讀寫可取消；取消的寫入不會 commit，也不會留下
-殘缺檔案。
+Packaged runtime 需求為 Node.js 22.19 以上、可執行本機 shell 命令、首次執行可存取 npm
+registry，以及可寫入的 plugin 目錄以安裝固定版本依賴；mutation workflow 另需 Git 以支援
+worktree-aware 變更。唯讀的套件目錄不支援，會保留既有 bootstrap 錯誤。Repository 開發需求
+為 Node.js 24.15.0 以上。Credential 位於 Pi 相容的使用者儲存空間，不會進入 repository
+state。Credential 的讀寫可取消；取消的寫入不會 commit，也不會留下殘缺檔案。
 
 ## Skills
 
@@ -55,8 +64,9 @@ Skill。Plugin 不接受使用者自訂 graph YAML 或 JSON。
 | `setup` | 專案本機依賴與開發工具 |
 | `scaffold` | 經審查的新專案骨架 |
 
-在 Codex 使用對應的 `swarm-pi-code-plugin:swarm-pi-*`，或使用 Claude 對應 command。
-Runner CLI 仍供 Host adapter 與診斷使用。
+在 Codex 使用對應的 `swarm-pi-code-plugin:swarm-pi-*`，或使用 Claude 對應 command。其他
+Agent Plugins 相容 client 會以 frontmatter name（`swarm-pi-configure` 到
+`swarm-pi-scaffold`）暴露同樣十個 skills。Runner CLI 仍供 Host adapter 與診斷使用。
 
 ## Configuration
 
@@ -120,11 +130,13 @@ form 與既有設定。這代表外層 Host sandbox 阻擋本機 state write；�
 
 ## 使用的技術與參考專案
 
+- [Agent Plugins Specification 1.0.0](https://agent-plugins.org/specification)
+- [Agent Skills Specification](https://agentskills.io/specification)
 - [Claude Code 最新文件](https://code.claude.com/docs/en/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
 - [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.84.2`
 - [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime)，固定使用 `0.0.49`
-- [Node.js](https://nodejs.org/)，`24.15.0+`
+- [Node.js](https://nodejs.org/)，packaged runtime `22.19+`、repository 開發 `24.15.0+`
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)
 - [Playwright](https://playwright.dev/)，固定使用 `1.61.0`

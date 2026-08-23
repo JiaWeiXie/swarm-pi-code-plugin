@@ -3,6 +3,7 @@ import type { Host, TaskKind } from "../core/contracts.js";
 const HOST_CONTEXT: Record<Host, string> = {
   claude: "Delegated Pi worker under Claude Code.",
   codex: "Delegated Pi worker under Codex.",
+  "agent-plugin": "Delegated Pi worker under an Agent Plugins-compatible client.",
 };
 
 const TASK_CONTEXT: Record<TaskKind, string> = {

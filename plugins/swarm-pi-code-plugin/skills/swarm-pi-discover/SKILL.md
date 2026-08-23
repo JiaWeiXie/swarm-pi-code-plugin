@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-discover
 description: Investigate unknown requirements or unresolved technical claims through Pi's fixed research, experiment, and convergence sequence. Use when reproducible evidence and Human Decision gates are required; route one answer to ask and evidence-ready design to plan.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Discover With Pi

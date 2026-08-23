@@ -1,6 +1,7 @@
 ---
 name: swarm-pi-review
 description: Review a Git working tree or branch with read-only Pi workers. Use standard for bugs, security, regressions, and missing tests; use lean for diff-bound simplification, deletion, reuse, YAGNI, or native replacements. Route one question to ask and broader risk analysis to orchestrate.
+compatibility: Requires Node.js 22.19+, local shell command execution, and first-run npm registry access with a writable plugin directory; mutation workflows also require Git.
 ---
 
 # Review With Pi

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "swarm-pi-code-plugin",
+  "version": "0.25.0",
+  "description": "Portable Pi workflows with durable Host Assistance, discovery, review, and isolated implementation.",
+  "author": {
+    "name": "JiaWei Xie"
+  },
+  "homepage": "https://github.com/JiaWeiXie/swarm-pi-code-plugin",
+  "repository": "https://github.com/JiaWeiXie/swarm-pi-code-plugin",
+  "license": "MIT",
+  "keywords": [
+    "agent-plugins",
+    "agent-skills",
+    "coding-agent",
+    "pi"
+  ]
+}
