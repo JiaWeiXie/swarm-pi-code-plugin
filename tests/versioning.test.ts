@@ -81,7 +81,10 @@ test("version check rejects a duplicate Claude hooks declaration", (context) => 
 
 function createInstalledFixture(
   context: { after(callback: () => void): void },
-  options: { portableManifest?: "current" | "missing" | "stale" } = {},
+  options: {
+    portableManifest?: "current" | "missing" | "stale";
+    codexVersion?: "manifest" | "base";
+  } = {},
 ): { fixture: string; env: Record<string, string> } {
   const fixture = createFixture(context);
   const expectedVersion = readJson(fixture, "package.json").version as string;
@@ -89,6 +92,8 @@ function createInstalledFixture(
     fixture,
     "plugins/swarm-pi-code-plugin/.codex-plugin/plugin.json",
   ).version as string;
+  const installedCodexVersion =
+    options.codexVersion === "base" ? expectedVersion : expectedCodexVersion;
   const bin = path.join(fixture, "fake-bin");
   const claudeInstall = path.join(fixture, "claude-install");
   fs.mkdirSync(path.join(bin), { recursive: true });
@@ -131,7 +136,7 @@ function createInstalledFixture(
         installed: [
           {
             pluginId: "swarm-pi-code-plugin@swarm-pi-code-plugin-local",
-            version: expectedCodexVersion,
+            version: installedCodexVersion,
             enabled: true,
             source: { path: path.join(fixture, "plugins/swarm-pi-code-plugin") },
           },
@@ -144,6 +149,13 @@ function createInstalledFixture(
 
 test("installed version check validates Claude and Codex records", (context) => {
   const { fixture, env } = createInstalledFixture(context);
+
+  const output = run(fixture, ["check", "--installed"], env);
+  assert.match(output, /Installed Claude Code and Codex plugins are current and enabled/);
+});
+
+test("installed version check accepts Codex portable SemVer normalization", (context) => {
+  const { fixture, env } = createInstalledFixture(context, { codexVersion: "base" });
 
   const output = run(fixture, ["check", "--installed"], env);
   assert.match(output, /Installed Claude Code and Codex plugins are current and enabled/);

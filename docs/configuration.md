@@ -40,11 +40,14 @@ usable model exists. The setup layout switches to a compact stepper and
 two-row connection actions below 1280 CSS pixels, with the existing mobile
 rules continuing below 860, 760, and 480 pixels.
 
-This release pins the Pi Coding Agent SDK at `0.84.2`. Its session boundary
+This release pins the Pi Coding Agent SDK at `0.84.4`. Its session boundary
 accepts the SDK's complete event-listener shape, and the `pending` and
 `deferred` terminal reasons are both treated as incomplete responses. Partial
 streams therefore remain fail-closed and cannot be recorded as successful model
-output.
+output. The existing Worker tool allowlist and sandbox boundary remain
+Plugin-owned; Pi's optional PowerShell tool and its extension/RPC surfaces such
+as `ui_prompt_start`, `ui_prompt_end`, `session_compact_failed`, and
+`clear_queue` are not exposed by this integration.
 
 New workspace defaults use Adaptive Sandbox mode, Balance Decision Mode,
 Host Assistance on with Host-first review, a Reversible automatic ceiling,
@@ -210,8 +213,11 @@ not expose a network listener beyond loopback or accept raw telemetry input.
 - model source and runtime adapter support.
 
 Coverage tests compare the Registry with every provider exposed by the Pi
-v0.84.2 model catalog. A newly added Pi provider fails CI until it is classified; the
-UI never guesses that an unknown provider uses a simple API-key form.
+v0.84.4 model catalog. A newly added Pi provider fails CI until it is classified; the
+UI never guesses that an unknown provider uses a simple API-key form. The same
+catalog flow exposes `deepseek-v4-flash-vision-exp` from the existing DeepSeek
+connection with `input: ["text", "image"]`, so it is automatically treated as a
+vision-capable model without a new provider definition.
 
 The plugin initializes `ModelRuntime` from the configured auth and model files
 without implicit network refresh. Use `models --refresh` to explicitly update
@@ -230,13 +236,14 @@ Built-in examples include:
 | Qwen Token Plan China | OpenAI Chat Completions | API key | China token-plan endpoint |
 | Qwen Token Plan Individual | OpenAI Chat Completions | API key | individual token-plan endpoint |
 | Baseten | OpenAI Chat Completions | API key | none |
+| DeepSeek | OpenAI Chat Completions | API key | V4 Flash Vision is catalog-discovered as image-capable |
 | Azure OpenAI | Azure Responses | API key | endpoint/resource, API version, deployment map |
 | Amazon Bedrock | Bedrock Converse | ambient identity | AWS profile and region |
 | Google Vertex AI | Vertex runtime | ambient identity or API key | project and location |
 | Cloudflare | managed or Chat-compatible | API key | account and optional gateway IDs |
 
 Azure Microsoft Entra identity is shown only as a capability notice because the
-Pi v0.84.2 runtime cannot execute it. It is never marked ready.
+Pi v0.84.4 runtime cannot execute it. It is never marked ready.
 
 ## Wire Protocols
 
@@ -524,7 +531,9 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 
 ## Acceptance Criteria
 
-- Every Pi v0.84.2 provider is explicitly classified by the Registry.
+- Every Pi v0.84.4 provider is explicitly classified by the Registry.
+- The existing DeepSeek connection discovers `deepseek-v4-flash-vision-exp` with
+  both text and image input support.
 - ChatGPT subscription and OpenAI API-key connections remain separate.
 - Browser responses, localStorage, state, model config, and jobs contain no
   credential values.

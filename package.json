@@ -1,6 +1,6 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.25.0",
+  "version": "0.25.1",
   "private": true,
   "type": "module",
   "description": "Claude Code, Codex, and Agent Plugins-compatible workflows backed by the embedded Pi coding-agent SDK",
@@ -40,8 +40,8 @@
   },
   "dependencies": {
     "@carderne/sandbox-runtime": "0.0.49",
-    "@earendil-works/pi-ai": "0.84.2",
-    "@earendil-works/pi-coding-agent": "0.84.2"
+    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-coding-agent": "0.84.4"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

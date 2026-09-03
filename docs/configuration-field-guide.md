@@ -18,11 +18,13 @@ Unless a section says otherwise:
 See the [Configuration Reference](configuration.md) for storage, transaction,
 provider protocol, and server-lifecycle details.
 
-The plugin currently pins the Pi Coding Agent SDK at `0.84.2`. When Pi reports
+The plugin currently pins the Pi Coding Agent SDK at `0.84.4`. When Pi reports
 the `pending` or `deferred` stop reason, the response is incomplete and remains
 fail-closed; it is never treated as successful output. The session adapter also
 accepts the SDK's full event-listener shape so future Pi event variants do not
-weaken the local execution boundary.
+weaken the local execution boundary. The existing DeepSeek connection also
+automatically offers `deepseek-v4-flash-vision-exp` from the Pi catalog, with
+`input: ["text", "image"]`; no new provider setup is required.
 
 Quick navigation: [operating model](#mental-model) · [safe defaults](#safe-defaults) ·
 [Providers](#provider-fields) · [Models/Roles](#model-role-keywords) ·

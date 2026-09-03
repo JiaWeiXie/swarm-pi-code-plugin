@@ -52,6 +52,11 @@ requires Node.js 24.15.0+. Credentials remain in Pi-compatible user storage,
 never in repository state. Credential reads and writes are cancellable; a
 cancelled write commits nothing and leaves no partial file behind.
 
+The pinned Pi 0.84.4 catalog automatically exposes
+`deepseek-v4-flash-vision-exp` through an existing DeepSeek connection and marks
+it as image-capable. No additional provider definition or setup field is
+required.
+
 ## Skills
 
 Each entry is usable alone and is also an internal Workflow node. A Host may
@@ -154,7 +159,7 @@ Traditional Chinese focused references are paired where available.
 - [Agent Skills Specification](https://agentskills.io/specification)
 - [Claude Code current documentation](https://code.claude.com/docs/en/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.84.2`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.84.4`
 - [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime), pinned at `0.0.49`
 - [Node.js](https://nodejs.org/), `22.19+` for the packaged runtime and `24.15.0+` for repository development
 - [TypeScript](https://www.typescriptlang.org/)
