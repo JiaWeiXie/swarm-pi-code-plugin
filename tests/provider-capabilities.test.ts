@@ -29,6 +29,15 @@ test("provider capability registry covers every provider in the pinned Pi catalo
   assert.deepEqual(providerDefinitionIds(), piProviders);
 });
 
+test("Pi 0.84.4 keeps the DeepSeek V4 Flash Vision model discoverable", async () => {
+  const runtime = await ModelRuntime.create({ modelsPath: null, allowModelNetwork: false });
+  const model = runtime.getModel("deepseek", "deepseek-v4-flash-vision-exp");
+
+  assert.ok(model);
+  assert.equal(model.name, "DeepSeek V4 Flash Vision Exp");
+  assert.deepEqual(model.input, ["text", "image"]);
+});
+
 test("Pi 0.84 additions are registered with their exact catalog metadata", () => {
   const baseten = getProviderDefinition("baseten")!;
   assert.equal(baseten.name, "Baseten");

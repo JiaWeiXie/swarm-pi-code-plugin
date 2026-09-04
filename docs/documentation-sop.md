@@ -140,7 +140,10 @@ Code and Codex plugin records with the repository, verifies that the local
 Codex source is correct and enabled, and rejects a Claude manifest that declares
 the automatically loaded `hooks/hooks.json`. Use `mise run version-bump -- patch`
 for releases; it reinstalls the local Codex plugin before and after writing the
-new version so the new Codex manifest value is loaded.
+new version so the new Codex manifest value is loaded. Codex may report a local
+portable plugin using stable SemVer instead of its native cachebuster suffix;
+the installed check accepts either representation while still validating the
+source path and portable manifest.
 
 When a documentation change mentions plugin commands, skills, manifests, or
 packaged runtime behavior, also run the plugin package validator. When it

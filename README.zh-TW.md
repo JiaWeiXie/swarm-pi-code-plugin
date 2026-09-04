@@ -45,6 +45,10 @@ worktree-aware 變更。唯讀的套件目錄不支援，會保留既有 bootstr
 為 Node.js 24.15.0 以上。Credential 位於 Pi 相容的使用者儲存空間，不會進入 repository
 state。Credential 的讀寫可取消；取消的寫入不會 commit，也不會留下殘缺檔案。
 
+固定的 Pi 0.84.4 catalog 會透過既有的 DeepSeek connection 自動提供
+`deepseek-v4-flash-vision-exp`，並標示它支援影像輸入。不需要新增 Provider definition
+或 setup 欄位。
+
 ## Skills
 
 每個 Skill 都可單獨使用，也可作為內部 Workflow node。Host 可以組合
@@ -134,7 +138,7 @@ form 與既有設定。這代表外層 Host sandbox 阻擋本機 state write；�
 - [Agent Skills Specification](https://agentskills.io/specification)
 - [Claude Code 最新文件](https://code.claude.com/docs/en/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.84.2`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.84.4`
 - [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime)，固定使用 `0.0.49`
 - [Node.js](https://nodejs.org/)，packaged runtime `22.19+`、repository 開發 `24.15.0+`
 - [TypeScript](https://www.typescriptlang.org/)

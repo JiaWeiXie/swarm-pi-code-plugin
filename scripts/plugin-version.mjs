@@ -298,9 +298,10 @@ async function checkInstalledPlugins(current, cwd) {
       `Codex plugin ${CODEX_PLUGIN_ID} is not installed. Run: codex plugin add ${CODEX_PLUGIN_ID}`,
     );
   }
-  if (codex.version !== current.codexVersion) {
+  const acceptedCodexVersions = new Set([current.codexVersion, current.baseVersion]);
+  if (!acceptedCodexVersions.has(codex.version)) {
     throw new Error(
-      `Codex plugin is stale: installed ${JSON.stringify(codex.version)}, expected ${current.codexVersion}. Run: codex plugin remove ${CODEX_PLUGIN_ID} && codex plugin add ${CODEX_PLUGIN_ID}`,
+      `Codex plugin is stale: installed ${JSON.stringify(codex.version)}, expected ${current.codexVersion} or ${current.baseVersion}. Run: codex plugin remove ${CODEX_PLUGIN_ID} && codex plugin add ${CODEX_PLUGIN_ID}`,
     );
   }
   if (codex.enabled !== true) {

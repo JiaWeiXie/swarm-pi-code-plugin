@@ -1,6 +1,6 @@
 {
   "name": "swarm-pi-code-plugin",
-  "version": "0.25.0+codex.20260823141537",
+  "version": "0.25.1+codex.20260903050933",
   "description": "Portable Pi workflows with durable Host Assistance, discovery, review, and isolated implementation.",
   "author": {
     "name": "JiaWei Xie"

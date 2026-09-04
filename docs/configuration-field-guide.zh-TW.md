@@ -15,10 +15,12 @@
 儲存、交易、協定與 server lifecycle 的技術細節，請參考
 [設定參考](configuration.md)。
 
-目前 Plugin 固定使用 Pi Coding Agent SDK `0.84.2`。當 Pi 回報 `pending` 或
+目前 Plugin 固定使用 Pi Coding Agent SDK `0.84.4`。當 Pi 回報 `pending` 或
 `deferred` stop reason 時，代表回應尚未完成，會維持 fail-closed，絕不當成成功
 輸出。Session adapter 也接受 SDK 完整的 event listener 形狀，避免未來新增 Pi
-event variant 削弱本地執行邊界。
+event variant 削弱本地執行邊界。既有的 DeepSeek connection 也會從 Pi catalog
+自動提供 `deepseek-v4-flash-vision-exp`，其 `input: ["text", "image"]` 代表支援影像；
+不需要新增 Provider 設定。
 
 快速入口：[整體概念](#mental-model) · [安全預設](#safe-defaults) ·
 [Provider](#provider-fields) · [Model／Role](#model-role-keywords) ·
