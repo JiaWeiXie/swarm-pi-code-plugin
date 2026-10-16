@@ -1286,8 +1286,9 @@ async function runBackgroundJob(
       (request.requestVersion ?? 0) >= 6
         ? undefined
         : await loadState(cwd);
-    const modelConfiguration = request.modelConfiguration
-      ? parseModelConfiguration(request.modelConfiguration)
+    const submittedModelConfiguration = request.modelConfiguration;
+    const modelConfiguration = submittedModelConfiguration
+      ? parseModelConfiguration(submittedModelConfiguration)
       : await loadModelConfiguration(cwd, state!.config.modelPriority);
     if (
       request.requestVersion === 3 ||
@@ -1295,21 +1296,22 @@ async function runBackgroundJob(
       request.requestVersion === 5 ||
       (request.requestVersion ?? 0) >= 6
     ) {
-      if (!request.modelConfiguration || !request.providerSnapshotHash) {
+      if (!submittedModelConfiguration || !request.providerSnapshotHash) {
         throw new Error("Background job is missing its provider configuration snapshot");
       }
       const providerSnapshotValid =
         (request.requestVersion ?? 0) >= 6
           ? typeof request.providerRegistryRevision === "string" &&
             providerRegistryRevisionFor(
-              modelConfiguration.customProviders,
-              modelConfiguration.providerProfiles,
+              submittedModelConfiguration.customProviders,
+              submittedModelConfiguration.providerProfiles,
             ) === request.providerRegistryRevision &&
             providerConfigurationSnapshotHash(
-              modelConfiguration,
+              submittedModelConfiguration,
               request.providerRegistryRevision,
             ) === request.providerSnapshotHash
-          : modelConfigurationSnapshotHash(modelConfiguration) === request.providerSnapshotHash;
+          : modelConfigurationSnapshotHash(submittedModelConfiguration) ===
+            request.providerSnapshotHash;
       if (!providerSnapshotValid) {
         throw new Error(
           "Background job provider configuration snapshot failed integrity validation",

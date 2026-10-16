@@ -6,7 +6,7 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createPiEnvironment, customProviderHeaderVariable } from "../src/pi/environment.js";
 import { parseModelConfiguration, providerHeaderSecretRef } from "../src/state/model-config.js";
 
-test("provider profiles overlay adapter environment without mutating process.env", async () => {
+test("legacy Azure profile and credential reach the renamed Pi provider", async () => {
   const configuration = parseModelConfiguration({
     version: 1,
     primary: null,
@@ -39,7 +39,8 @@ test("provider profiles overlay adapter environment without mutating process.env
   }));
   const before = process.env.AZURE_OPENAI_RESOURCE_NAME;
   const environment = await createPiEnvironment(configuration, {}, { credentials: storage });
-  const credential = await environment.credentials.read("azure-openai-responses");
+  assert.equal(configuration.providerProfiles[0]?.provider, "azure");
+  const credential = await environment.credentials.read("azure");
 
   assert.deepEqual(credential && credential.type === "api_key" ? credential.env : undefined, {
     EXISTING: "preserved",
@@ -47,6 +48,8 @@ test("provider profiles overlay adapter environment without mutating process.env
     AZURE_OPENAI_API_VERSION: "v1",
     AZURE_OPENAI_DEPLOYMENT_NAME_MAP: "gpt-test=worker",
   });
+  const model = environment.modelRuntime.getModel("azure", "gpt-4")!;
+  assert.ok(await environment.modelRuntime.getAuth(model));
   assert.equal(process.env.AZURE_OPENAI_RESOURCE_NAME, before);
 });
 

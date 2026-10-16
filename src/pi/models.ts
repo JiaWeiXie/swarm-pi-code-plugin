@@ -1,6 +1,7 @@
 import type { CreateAgentSessionOptions } from "@earendil-works/pi-coding-agent";
 
 import type { AvailableModel, ProviderSummary } from "../core/contracts.js";
+import { canonicalModelReference } from "../providers/aliases.js";
 import { modelPriority, type ModelConfiguration } from "../state/model-config.js";
 import { createPiEnvironment } from "./environment.js";
 
@@ -96,7 +97,8 @@ export function selectModel(models: PiModel[], requested?: string): PiModel | un
     return models[0];
   }
 
-  return models.find((model) => modelId(model) === requested);
+  const canonicalRequested = canonicalModelReference(requested);
+  return models.find((model) => modelId(model) === canonicalRequested);
 }
 
 export function orderModels(
@@ -110,7 +112,7 @@ export function orderModels(
   const byId = new Map(models.map((model) => [modelId(model), model]));
   const ordered: PiModel[] = [];
   for (const id of options.priority ?? []) {
-    const model = byId.get(id);
+    const model = byId.get(canonicalModelReference(id));
     if (model && !ordered.includes(model)) ordered.push(model);
   }
   if ((options.priority?.length ?? 0) === 0 && ordered.length === 0 && models[0]) {

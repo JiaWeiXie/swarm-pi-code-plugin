@@ -11,6 +11,11 @@ import {
   type CredentialStore,
 } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import {
+  AZURE_PROVIDER_ID,
+  canonicalProviderId,
+  LEGACY_AZURE_PROVIDER_ID,
+} from "../providers/aliases.js";
 
 type CredentialData = Record<string, Credential>;
 
@@ -31,16 +36,23 @@ export class FileCredentialStore implements CredentialStore {
 
   async read(providerId: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
     const data = await this.readData(options?.signal);
-    const credential = data[providerId];
+    const canonical = canonicalProviderId(providerId);
+    const credential =
+      data[canonical] ??
+      (canonical === AZURE_PROVIDER_ID ? data[LEGACY_AZURE_PROVIDER_ID] : undefined);
     return credential ? resolveCredential(credential) : undefined;
   }
 
   async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
     const data = await this.readData(options?.signal);
-    return Object.entries(data).map(([providerId, credential]) => ({
-      providerId,
-      type: credential.type,
-    }));
+    const entries = new Map<string, CredentialInfo>();
+    for (const [providerId, credential] of Object.entries(data)) {
+      const canonical = canonicalProviderId(providerId);
+      if (!entries.has(canonical) || providerId === canonical) {
+        entries.set(canonical, { providerId: canonical, type: credential.type });
+      }
+    }
+    return [...entries.values()];
   }
 
   async modify(
@@ -49,17 +61,24 @@ export class FileCredentialStore implements CredentialStore {
     options?: AuthOperationOptions,
   ): Promise<Credential | undefined> {
     return this.withLock(async (data) => {
-      const current = cloneCredential(data[providerId]);
+      const canonical = canonicalProviderId(providerId);
+      const current = cloneCredential(
+        data[canonical] ??
+          (canonical === AZURE_PROVIDER_ID ? data[LEGACY_AZURE_PROVIDER_ID] : undefined),
+      );
       const next = await fn(current);
       if (next === undefined) return { result: current };
-      data[providerId] = structuredClone(next);
+      data[canonical] = structuredClone(next);
+      if (canonical === AZURE_PROVIDER_ID) delete data[LEGACY_AZURE_PROVIDER_ID];
       return { result: cloneCredential(next), write: true };
     }, options?.signal);
   }
 
   async delete(providerId: string, options?: AuthOperationOptions): Promise<void> {
     await this.withLock(async (data) => {
-      delete data[providerId];
+      const canonical = canonicalProviderId(providerId);
+      delete data[canonical];
+      if (canonical === AZURE_PROVIDER_ID) delete data[LEGACY_AZURE_PROVIDER_ID];
       return { result: undefined, write: true };
     }, options?.signal);
   }
@@ -113,8 +132,13 @@ export class OverlayCredentialStore implements CredentialStore {
   ) {}
 
   async read(providerId: string, options?: AuthOperationOptions): Promise<Credential | undefined> {
-    const credential = await this.delegate.read(providerId, options);
-    const overlay = this.overlays.get(providerId);
+    const canonical = canonicalProviderId(providerId);
+    const credential =
+      (await this.delegate.read(canonical, options)) ??
+      (canonical === AZURE_PROVIDER_ID
+        ? await this.delegate.read(LEGACY_AZURE_PROVIDER_ID, options)
+        : undefined);
+    const overlay = this.overlays.get(canonical);
     if (!credential && overlay) return { type: "api_key", env: { ...overlay } };
     if (!credential || !overlay) return credential;
     if (credential.type !== "api_key") return credential;
@@ -122,12 +146,17 @@ export class OverlayCredentialStore implements CredentialStore {
   }
 
   async list(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]> {
-    const entries = [...(await this.delegate.list(options))];
+    const entries = [...(await this.delegate.list(options))].map((entry) => ({
+      ...entry,
+      providerId: canonicalProviderId(entry.providerId),
+    }));
     const known = new Set(entries.map((entry) => entry.providerId));
     for (const providerId of this.overlays.keys()) {
       if (!known.has(providerId)) entries.push({ providerId, type: "api_key" });
     }
-    return entries;
+    return entries.filter(
+      (entry, index) => entries.findIndex((item) => item.providerId === entry.providerId) === index,
+    );
   }
 
   modify(

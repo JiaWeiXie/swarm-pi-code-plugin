@@ -4,6 +4,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { InMemoryCredentialStore, } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { AZURE_PROVIDER_ID, canonicalProviderId, LEGACY_AZURE_PROVIDER_ID, } from "../providers/aliases.js";
 const AUTH_FILE_MODE = 0o600;
 const AUTH_DIRECTORY_MODE = 0o700;
 const LOCK_STALE_MS = 30_000;
@@ -22,29 +23,42 @@ export class FileCredentialStore {
     }
     async read(providerId, options) {
         const data = await this.readData(options?.signal);
-        const credential = data[providerId];
+        const canonical = canonicalProviderId(providerId);
+        const credential = data[canonical] ??
+            (canonical === AZURE_PROVIDER_ID ? data[LEGACY_AZURE_PROVIDER_ID] : undefined);
         return credential ? resolveCredential(credential) : undefined;
     }
     async list(options) {
         const data = await this.readData(options?.signal);
-        return Object.entries(data).map(([providerId, credential]) => ({
-            providerId,
-            type: credential.type,
-        }));
+        const entries = new Map();
+        for (const [providerId, credential] of Object.entries(data)) {
+            const canonical = canonicalProviderId(providerId);
+            if (!entries.has(canonical) || providerId === canonical) {
+                entries.set(canonical, { providerId: canonical, type: credential.type });
+            }
+        }
+        return [...entries.values()];
     }
     async modify(providerId, fn, options) {
         return this.withLock(async (data) => {
-            const current = cloneCredential(data[providerId]);
+            const canonical = canonicalProviderId(providerId);
+            const current = cloneCredential(data[canonical] ??
+                (canonical === AZURE_PROVIDER_ID ? data[LEGACY_AZURE_PROVIDER_ID] : undefined));
             const next = await fn(current);
             if (next === undefined)
                 return { result: current };
-            data[providerId] = structuredClone(next);
+            data[canonical] = structuredClone(next);
+            if (canonical === AZURE_PROVIDER_ID)
+                delete data[LEGACY_AZURE_PROVIDER_ID];
             return { result: cloneCredential(next), write: true };
         }, options?.signal);
     }
     async delete(providerId, options) {
         await this.withLock(async (data) => {
-            delete data[providerId];
+            const canonical = canonicalProviderId(providerId);
+            delete data[canonical];
+            if (canonical === AZURE_PROVIDER_ID)
+                delete data[LEGACY_AZURE_PROVIDER_ID];
             return { result: undefined, write: true };
         }, options?.signal);
     }
@@ -99,8 +113,12 @@ export class OverlayCredentialStore {
         this.overlays = overlays;
     }
     async read(providerId, options) {
-        const credential = await this.delegate.read(providerId, options);
-        const overlay = this.overlays.get(providerId);
+        const canonical = canonicalProviderId(providerId);
+        const credential = (await this.delegate.read(canonical, options)) ??
+            (canonical === AZURE_PROVIDER_ID
+                ? await this.delegate.read(LEGACY_AZURE_PROVIDER_ID, options)
+                : undefined);
+        const overlay = this.overlays.get(canonical);
         if (!credential && overlay)
             return { type: "api_key", env: { ...overlay } };
         if (!credential || !overlay)
@@ -110,13 +128,16 @@ export class OverlayCredentialStore {
         return { ...credential, env: { ...credential.env, ...overlay } };
     }
     async list(options) {
-        const entries = [...(await this.delegate.list(options))];
+        const entries = [...(await this.delegate.list(options))].map((entry) => ({
+            ...entry,
+            providerId: canonicalProviderId(entry.providerId),
+        }));
         const known = new Set(entries.map((entry) => entry.providerId));
         for (const providerId of this.overlays.keys()) {
             if (!known.has(providerId))
                 entries.push({ providerId, type: "api_key" });
         }
-        return entries;
+        return entries.filter((entry, index) => entries.findIndex((item) => item.providerId === entry.providerId) === index);
     }
     modify(providerId, fn, options) {
         return this.delegate.modify(providerId, fn, options);

@@ -574,6 +574,44 @@ test("built-in provider forms stage credentials and return protocol-specific pro
     true,
   );
   assert.doesNotMatch(JSON.stringify(preview), new RegExp(secret));
+
+  const oauthDraft = vault.stageOAuth("openai", {
+    type: "oauth",
+    access: "openai-oauth-secret",
+    refresh: "openai-refresh-secret",
+    expires: Date.now() + 3_600_000,
+  });
+  const oauth = await configureBuiltInProvider(
+    workspace,
+    {
+      provider: "openai",
+      authMethod: "oauth",
+      fields: {},
+      credentialDraftId: oauthDraft.id,
+    },
+    vault,
+    env,
+  );
+  assert.equal(oauth.profile.auth.method, "oauth");
+  assert.equal(oauth.profile.runtimeApi, "openai-responses");
+  assert.doesNotMatch(JSON.stringify(oauth), /openai-oauth-secret|openai-refresh-secret/);
+
+  const azure = await configureBuiltInProvider(
+    workspace,
+    {
+      provider: "azure",
+      authMethod: "api-key",
+      fields: {
+        apiKey: "azure-draft-secret",
+        resourceName: "fixture-resource",
+      },
+    },
+    vault,
+    env,
+  );
+  assert.equal(azure.profile.runtimeApi, "managed-per-model");
+  assert.ok(azure.models.some((model) => model.model === "deepseek-v4-pro"));
+  assert.doesNotMatch(JSON.stringify(azure), /azure-draft-secret/);
 });
 
 test("configuration service stores credentials outside model and state files", async () => {
@@ -821,7 +859,7 @@ test("global providers are shared across workspaces and deletion removes the cre
 test("built-in provider deletion removes a stored credential when no profile exists", async () => {
   const { workspace, env } = fixture();
   const auth = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-  await auth.modify("azure-openai-responses", async () => ({
+  await auth.modify("azure", async () => ({
     type: "api_key",
     key: "azure-fixture-secret",
     env: {
@@ -832,13 +870,11 @@ test("built-in provider deletion removes a stored credential when no profile exi
 
   const before = await loadConfigurationView(workspace, env);
   assert.equal(
-    before.configuration.providerProfiles.some(
-      (profile) => profile.provider === "azure-openai-responses",
-    ),
+    before.configuration.providerProfiles.some((profile) => profile.provider === "azure"),
     false,
   );
   assert.equal(
-    before.providers.some((provider) => provider.id === "azure-openai-responses"),
+    before.providers.some((provider) => provider.id === "azure"),
     true,
   );
 
@@ -851,15 +887,15 @@ test("built-in provider deletion removes a stored credential when no profile exi
       fallbacks: [],
       customProviders: [],
       providerProfiles: [],
-      deletedProviders: ["azure-openai-responses"],
+      deletedProviders: ["azure"],
     },
     env,
   );
 
-  assert.equal(await auth.read("azure-openai-responses"), undefined);
+  assert.equal(await auth.read("azure"), undefined);
   const after = await loadConfigurationView(workspace, env);
   assert.equal(
-    after.providers.some((provider) => provider.id === "azure-openai-responses"),
+    after.providers.some((provider) => provider.id === "azure"),
     false,
   );
 });
@@ -870,7 +906,7 @@ test("built-in provider deletion promotes a fallback and cleans routed reference
   await saveModelConfiguration(
     workspace,
     {
-      primary: "azure-openai-responses/gpt-4",
+      primary: "azure/gpt-4",
       fallbacks: ["survivor/fallback-model"],
       customProviders: [survivor],
       providerProfiles: [],
@@ -880,10 +916,10 @@ test("built-in provider deletion promotes a fallback and cleans routed reference
   await updateState(
     workspace,
     (state) => {
-      state.config.modelPriority = ["azure-openai-responses/gpt-4", "survivor/fallback-model"];
-      state.config.rolePolicies = { planner: { models: ["azure-openai-responses/gpt-4"] } };
+      state.config.modelPriority = ["azure/gpt-4", "survivor/fallback-model"];
+      state.config.rolePolicies = { planner: { models: ["azure/gpt-4"] } };
       state.config.adaptivePolicy = {
-        classifierModels: ["azure-openai-responses/gpt-4"],
+        classifierModels: ["azure/gpt-4"],
         classifierThinkingLevel: "medium",
         approvalPolicy: "deny",
         trustedDomains: [],
@@ -894,7 +930,7 @@ test("built-in provider deletion promotes a fallback and cleans routed reference
     env,
   );
   const auth = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-  await auth.modify("azure-openai-responses", async () => ({
+  await auth.modify("azure", async () => ({
     type: "api_key",
     key: "azure-fixture-secret",
     env: {
@@ -909,11 +945,11 @@ test("built-in provider deletion promotes a fallback and cleans routed reference
     {
       baseRevision: before.configurationRevision,
       baseProviderRevision: before.providerRegistryRevision,
-      primary: "azure-openai-responses/gpt-4",
+      primary: "azure/gpt-4",
       fallbacks: ["survivor/fallback-model"],
       customProviders: [survivor],
       providerProfiles: [],
-      deletedProviders: ["azure-openai-responses"],
+      deletedProviders: ["azure"],
     },
     env,
   );
@@ -922,10 +958,10 @@ test("built-in provider deletion promotes a fallback and cleans routed reference
   assert.deepEqual(saved.configuration.fallbacks, []);
   assert.deepEqual(saved.rolePolicies?.planner?.models, undefined);
   assert.deepEqual(saved.adaptivePolicy?.classifierModels, ["survivor/fallback-model"]);
-  assert.equal(await auth.read("azure-openai-responses"), undefined);
+  assert.equal(await auth.read("azure"), undefined);
   assert.equal(
     (await loadConfigurationView(workspace, env)).providers.some(
-      (provider) => provider.id === "azure-openai-responses",
+      (provider) => provider.id === "azure",
     ),
     false,
   );
@@ -957,7 +993,7 @@ test("provider deletion rejects an unknown provider", async () => {
 test("provider deletion rejects a simultaneous credential draft", async () => {
   const { workspace, env } = fixture();
   const auth = createFileCredentialStore(env.SWARM_PI_CODE_PLUGIN_AUTH_FILE);
-  await auth.modify("azure-openai-responses", async () => ({
+  await auth.modify("azure", async () => ({
     type: "api_key",
     key: "azure-fixture-secret",
   }));
@@ -973,15 +1009,15 @@ test("provider deletion rejects a simultaneous credential draft", async () => {
           fallbacks: [],
           customProviders: [],
           providerProfiles: [],
-          deletedProviders: ["azure-openai-responses"],
-          credentialDrafts: [{ provider: "azure-openai-responses", draftId: "invalid" }],
+          deletedProviders: ["azure"],
+          credentialDrafts: [{ provider: "azure", draftId: "invalid" }],
         },
         env,
       ),
     (error: unknown) =>
       error instanceof ConfigurationSaveError && error.code === "provider-deletion-conflict",
   );
-  assert.ok(await auth.read("azure-openai-responses"));
+  assert.ok(await auth.read("azure"));
 });
 
 test("custom model removal clears stale role references and uses the surviving primary for Adaptive", async () => {

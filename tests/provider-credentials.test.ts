@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +9,33 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { FileCredentialStore, OverlayCredentialStore } from "../src/pi/credentials.js";
 import { customProviderHeaderVariable } from "../src/pi/environment.js";
 import { CredentialDraftVault, OAuthSessionManager } from "../src/providers/credentials.js";
+
+test("legacy Azure credentials remain usable and migrate on modification", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "swarm-pi-azure-auth-"));
+  try {
+    const authPath = path.join(root, "auth.json");
+    await writeFile(
+      authPath,
+      JSON.stringify({ "azure-openai-responses": { type: "api_key", key: "old-secret" } }),
+    );
+    const store = new FileCredentialStore(authPath);
+    assert.equal((await store.read("azure"))?.type, "api_key");
+    assert.deepEqual(await store.list(), [{ providerId: "azure", type: "api_key" }]);
+
+    await store.modify("azure", async (current) => {
+      assert.equal(current?.type === "api_key" ? current.key : undefined, "old-secret");
+      return { type: "api_key", key: "new-secret" };
+    });
+    const saved = JSON.parse(await readFile(authPath, "utf8")) as Record<string, unknown>;
+    assert.equal(saved["azure-openai-responses"], undefined);
+    assert.deepEqual(saved.azure, { type: "api_key", key: "new-secret" });
+
+    await store.delete("azure");
+    assert.deepEqual(await store.list(), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("credential drafts expose only opaque metadata", () => {
   const vault = new CredentialDraftVault();

@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   clearModelConfiguration,
+  defaultModelConfiguration,
   loadModelConfiguration,
   modelPriority,
   parseModelConfiguration,
@@ -43,6 +44,40 @@ const customProvider = {
     },
   ],
 };
+
+test("legacy Azure references and profiles normalize to Pi 1.2.0 provider IDs", () => {
+  const legacy = "azure-openai-responses/gpt-4";
+  assert.equal(defaultModelConfiguration([legacy]).primary, "azure/gpt-4");
+
+  const configuration = parseModelConfiguration({
+    version: 1,
+    primary: legacy,
+    fallbacks: ["openai/gpt-4.1"],
+    customProviders: [],
+    providerProfiles: [
+      {
+        id: "azure-openai-responses",
+        provider: "azure-openai-responses",
+        name: "Azure OpenAI",
+        connectionKind: "builtin",
+        auth: { method: "api-key", secretRef: "auth:azure-openai-responses" },
+        runtimeApi: "azure-openai-responses",
+        readiness: "verified",
+        settings: { resourceName: "fixture-resource" },
+        headers: [],
+        verifiedModel: legacy,
+      },
+    ],
+    updatedAt: null,
+  });
+
+  assert.equal(configuration.primary, "azure/gpt-4");
+  assert.equal(configuration.providerProfiles[0]?.id, "azure");
+  assert.equal(configuration.providerProfiles[0]?.provider, "azure");
+  assert.equal(configuration.providerProfiles[0]?.auth.secretRef, "auth:azure");
+  assert.equal(configuration.providerProfiles[0]?.runtimeApi, "managed-per-model");
+  assert.equal(configuration.providerProfiles[0]?.verifiedModel, "azure/gpt-4");
+});
 
 test("model.json is canonical, normalized, and written with private permissions", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-model-config-"));

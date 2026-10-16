@@ -97,8 +97,10 @@ const DEFINITIONS = [
         ...apiKeyProvider("openai", "OpenAI", "openai-responses", {
             wireProtocol: "openai-responses",
         }),
+        authMethods: ["api-key", "oauth"],
+        oauthProvider: "openai",
         fields: [
-            API_KEY_FIELD,
+            { ...API_KEY_FIELD, visibleWhen: { field: "authMethod", equals: "api-key" } },
             {
                 id: "organization",
                 label: "Organization ID",
@@ -106,6 +108,7 @@ const DEFINITIONS = [
                 required: false,
                 secret: false,
                 advanced: true,
+                visibleWhen: { field: "authMethod", equals: "api-key" },
                 placeholder: "org_...",
                 guidance: {
                     hint: "Leave blank unless the API account requires explicit organization scoping.",
@@ -121,6 +124,7 @@ const DEFINITIONS = [
                 required: false,
                 secret: false,
                 advanced: true,
+                visibleWhen: { field: "authMethod", equals: "api-key" },
                 placeholder: "proj_...",
                 guidance: {
                     hint: "Leave blank to use the credential's default project; enter an ID only when explicit project routing is required.",
@@ -252,6 +256,27 @@ const DEFINITIONS = [
     apiKeyProvider("deepseek", "DeepSeek", "openai-completions", {
         wireProtocol: "openai-chat-completions",
     }),
+    {
+        ...apiKeyProvider("meta", "Meta", "openai-responses", {
+            wireProtocol: "openai-responses",
+        }),
+        authMethods: ["api-key", "oauth"],
+        fields: [{ ...API_KEY_FIELD, visibleWhen: { field: "authMethod", equals: "api-key" } }],
+        oauthProvider: "meta",
+    },
+    {
+        id: "typesafe",
+        name: "TypeSafe",
+        category: "decision",
+        protocolMode: "fixed",
+        runtimeApis: [],
+        authMethods: ["api-key"],
+        defaultAuthMethod: "api-key",
+        fields: [],
+        modelSource: "pi-catalog",
+        configurable: false,
+        notes: ["Pi exposes TypeSafe classifier models, not chat models for worker sessions."],
+    },
     apiKeyProvider("groq", "Groq", "openai-completions", { wireProtocol: "openai-chat-completions" }),
     apiKeyProvider("xai", "xAI", "openai-completions", { wireProtocol: "openai-chat-completions" }),
     apiKeyProvider("cerebras", "Cerebras", "openai-completions", {
@@ -370,11 +395,11 @@ const DEFINITIONS = [
         ],
     },
     {
-        id: "azure-openai-responses",
+        id: "azure",
         name: "Azure OpenAI",
         category: "cloud",
-        protocolMode: "fixed",
-        runtimeApis: ["azure-openai-responses"],
+        protocolMode: "managed-per-model",
+        runtimeApis: ["azure-openai-responses", "openai-completions"],
         authMethods: ["api-key"],
         defaultAuthMethod: "api-key",
         fields: [

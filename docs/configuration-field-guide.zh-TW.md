@@ -15,12 +15,14 @@
 儲存、交易、協定與 server lifecycle 的技術細節，請參考
 [設定參考](configuration.md)。
 
-目前 Plugin 固定使用 Pi Coding Agent SDK `0.84.4`。當 Pi 回報 `pending` 或
+目前 Plugin 固定使用 Pi Coding Agent SDK `1.2.0`。當 Pi 回報 `pending` 或
 `deferred` stop reason 時，代表回應尚未完成，會維持 fail-closed，絕不當成成功
 輸出。Session adapter 也接受 SDK 完整的 event listener 形狀，避免未來新增 Pi
-event variant 削弱本地執行邊界。既有的 DeepSeek connection 也會從 Pi catalog
-自動提供 `deepseek-v4-flash-vision-exp`，其 `input: ["text", "image"]` 代表支援影像；
-不需要新增 Provider 設定。
+event variant 削弱本地執行邊界。既有的 DeepSeek connection 會提供支援影像輸入的
+`deepseek-flash`，其 `input: ["text", "image"]`。OpenAI 與 Meta 聊天連線可用 API key 或 Pi
+OAuth。舊的 Azure OpenAI `azure-openai-responses` 連線會對應至新的 `azure`
+provider ID。TypeSafe 決策模型不會列在 Worker 聊天模型清單中。
+既有的 `openai-codex` 訂閱連線仍可獨立使用。
 
 快速入口：[整體概念](#mental-model) · [安全預設](#safe-defaults) ·
 [Provider](#provider-fields) · [Model／Role](#model-role-keywords) ·
@@ -246,6 +248,8 @@ title 請使用一般應用程式名稱；兩者都不可包含憑證或使用�
 
 固定版本 runtime 的這個 adapter 使用 API key。畫面顯示 Microsoft Entra
 capability 提醒，不代表 plugin 已能執行 Entra authentication。
+Pi 會讓 Azure OpenAI 模型使用 Responses、Foundry 模型（例如
+`azure/deepseek-v4-pro`）使用 Chat Completions；不需要在表單手動選協定。
 
 <a id="cloudflare-routing"></a>
 ### Cloudflare Account 與 Gateway ID

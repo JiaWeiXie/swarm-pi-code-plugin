@@ -29,16 +29,16 @@ test("provider capability registry covers every provider in the pinned Pi catalo
   assert.deepEqual(providerDefinitionIds(), piProviders);
 });
 
-test("Pi 0.84.4 keeps the DeepSeek V4 Flash Vision model discoverable", async () => {
+test("Pi 1.2.0 exposes DeepSeek Flash with image input", async () => {
   const runtime = await ModelRuntime.create({ modelsPath: null, allowModelNetwork: false });
-  const model = runtime.getModel("deepseek", "deepseek-v4-flash-vision-exp");
+  const model = runtime.getModel("deepseek", "deepseek-flash");
 
   assert.ok(model);
-  assert.equal(model.name, "DeepSeek V4 Flash Vision Exp");
   assert.deepEqual(model.input, ["text", "image"]);
+  assert.equal(runtime.getModel("deepseek", "deepseek-v4-flash-vision-exp"), undefined);
 });
 
-test("Pi 0.84 additions are registered with their exact catalog metadata", () => {
+test("previously added providers retain their catalog metadata", () => {
   const baseten = getProviderDefinition("baseten")!;
   assert.equal(baseten.name, "Baseten");
   assert.equal(baseten.category, "common");
@@ -65,11 +65,41 @@ test("Pi 0.84 additions are registered with their exact catalog metadata", () =>
   }
 });
 
-test("subscription providers use OAuth and keep ChatGPT separate from OpenAI API keys", () => {
+test("Pi 1.2.0 provider changes distinguish chat connections from decision models", async () => {
+  const runtime = await ModelRuntime.create({ modelsPath: null, allowModelNetwork: false });
+  const azure = getProviderDefinition("azure")!;
+  assert.equal(azure.category, "cloud");
+  assert.equal(azure.protocolMode, "managed-per-model");
+  assert.deepEqual(azure.runtimeApis, ["azure-openai-responses", "openai-completions"]);
+  assert.equal(runtime.getModel("azure", "gpt-4")?.api, "azure-openai-responses");
+  assert.equal(runtime.getModel("azure", "deepseek-v4-pro")?.api, "openai-completions");
+
+  const meta = getProviderDefinition("meta")!;
+  assert.deepEqual(meta.authMethods, ["api-key", "oauth"]);
+  assert.equal(meta.oauthProvider, "meta");
+  assert.deepEqual(meta.runtimeApis, ["openai-responses"]);
+  assert.ok(runtime.getModels().some((model) => model.provider === "meta"));
+
+  const typesafe = getProviderDefinition("typesafe")!;
+  assert.equal(typesafe.category, "decision");
+  assert.equal(typesafe.configurable, false);
+  assert.deepEqual(typesafe.runtimeApis, []);
+  assert.equal(
+    runtime.getModels().some((model) => model.provider === "typesafe"),
+    false,
+  );
+});
+
+test("OpenAI supports Pi OAuth without merging API-key and legacy Codex credentials", () => {
   const openAi = getProviderDefinition("openai")!;
   const chatGpt = getProviderDefinition("openai-codex")!;
 
-  assert.deepEqual(openAi.authMethods, ["api-key"]);
+  assert.deepEqual(openAi.authMethods, ["api-key", "oauth"]);
+  assert.equal(openAi.oauthProvider, "openai");
+  assert.equal(
+    openAi.fields.every((field) => field.visibleWhen?.equals === "api-key"),
+    true,
+  );
   assert.equal(openAi.wireProtocol, "openai-responses");
   assert.deepEqual(chatGpt.authMethods, ["oauth"]);
   assert.deepEqual(chatGpt.runtimeApis, ["openai-codex-responses"]);

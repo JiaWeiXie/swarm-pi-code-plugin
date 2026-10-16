@@ -45,9 +45,11 @@ worktree-aware 變更。唯讀的套件目錄不支援，會保留既有 bootstr
 為 Node.js 24.15.0 以上。Credential 位於 Pi 相容的使用者儲存空間，不會進入 repository
 state。Credential 的讀寫可取消；取消的寫入不會 commit，也不會留下殘缺檔案。
 
-固定的 Pi 0.84.4 catalog 會透過既有的 DeepSeek connection 自動提供
-`deepseek-v4-flash-vision-exp`，並標示它支援影像輸入。不需要新增 Provider definition
-或 setup 欄位。
+固定的 Pi 1.2.0 catalog 會透過既有的 DeepSeek connection 提供支援影像輸入的
+`deepseek-flash`。OpenAI 與 Meta 的聊天模型可使用 API key 或 Pi OAuth。Azure OpenAI 的
+provider ID 已改為 `azure`；舊的 `azure-openai-responses` 連線、模型參照與憑證
+仍可使用。Azure Foundry Chat Completions 與 Responses 會依模型選擇協定。
+TypeSafe 的決策模型不會列為 Worker 聊天模型。
 
 ## Skills
 
@@ -138,7 +140,7 @@ form 與既有設定。這代表外層 Host sandbox 阻擋本機 state write；�
 - [Agent Skills Specification](https://agentskills.io/specification)
 - [Claude Code 最新文件](https://code.claude.com/docs/en/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `0.84.4`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi)，固定使用 `1.2.0`
 - [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime)，固定使用 `0.0.49`
 - [Node.js](https://nodejs.org/)，packaged runtime `22.19+`、repository 開發 `24.15.0+`
 - [TypeScript](https://www.typescriptlang.org/)

@@ -10,6 +10,11 @@ import {
   type WireProtocol,
 } from "../providers/capabilities.js";
 import {
+  canonicalModelReference,
+  canonicalProviderId,
+  LEGACY_AZURE_PROVIDER_ID,
+} from "../providers/aliases.js";
+import {
   normalizeModelsEndpoint,
   normalizeProtocolRoot,
   runtimeApiForWireProtocol,
@@ -66,7 +71,7 @@ export interface CustomModelMetadata {
   maxTokens?: ModelMetadataSource | undefined;
 }
 
-// Mirrors the Pi 0.84 OpenAI-completions compat flag. The property is omitted
+// Mirrors Pi's OpenAI-completions compat flag. The property is omitted
 // rather than set to undefined so the shape stays assignable to Pi's `compat`
 // under `exactOptionalPropertyTypes`.
 export interface CustomModelCompatibility {
@@ -151,10 +156,11 @@ export interface ModelConfigurationStorageView {
 }
 
 export function defaultModelConfiguration(priority: string[] = []): ModelConfiguration {
+  const canonicalPriority = priority.map(canonicalModelReference);
   return {
     version: 1,
-    primary: priority[0] ?? null,
-    fallbacks: unique(priority.slice(1)),
+    primary: canonicalPriority[0] ?? null,
+    fallbacks: unique(canonicalPriority.slice(1)),
     customProviders: [],
     providerProfiles: [],
     updatedAt: null,
@@ -629,20 +635,28 @@ function parseCustomProvider(value: unknown): CustomProviderConfiguration {
 
 function parseProviderProfile(value: unknown): ProviderProfile {
   const record = asRecord(value, "provider profile");
-  const id = providerIdentifier(record.id, "provider profile id");
-  const provider = providerIdentifier(record.provider, `provider for ${id}`);
+  const originalId = providerIdentifier(record.id, "provider profile id");
+  const originalProvider = providerIdentifier(record.provider, `provider for ${originalId}`);
   const connectionKind = record.connectionKind;
   if (connectionKind !== "builtin" && connectionKind !== "custom") {
-    throw new Error(`connectionKind for ${id} must be builtin or custom`);
+    throw new Error(`connectionKind for ${originalId} must be builtin or custom`);
   }
+  const id = connectionKind === "builtin" ? canonicalProviderId(originalId) : originalId;
+  const provider =
+    connectionKind === "builtin" ? canonicalProviderId(originalProvider) : originalProvider;
   const definition = getProviderDefinition(provider);
   if (connectionKind === "builtin" && !definition) {
     throw new Error(`unknown built-in provider profile: ${provider}`);
   }
-  const auth = parseProviderAuth(record.auth, provider, {
+  const parsedAuth = parseProviderAuth(record.auth, provider, {
     method: definition?.defaultAuthMethod ?? "api-key",
     secretRef: providerSecretRef(provider),
   });
+  const auth =
+    connectionKind === "builtin" &&
+    parsedAuth.secretRef === providerSecretRef(LEGACY_AZURE_PROVIDER_ID)
+      ? { ...parsedAuth, secretRef: providerSecretRef(provider) }
+      : parsedAuth;
   if (definition && !definition.authMethods.includes(auth.method)) {
     throw new Error(`provider ${provider} does not support ${auth.method} authentication`);
   }
@@ -650,7 +664,13 @@ function parseProviderProfile(value: unknown): ProviderProfile {
     record.protocol === undefined
       ? definition?.wireProtocol
       : parseWireProtocol(record.protocol, `protocol for ${id}`);
-  const runtimeApi = requiredString(record.runtimeApi, `runtimeApi for ${id}`);
+  const originalRuntimeApi = requiredString(record.runtimeApi, `runtimeApi for ${id}`);
+  const runtimeApi =
+    connectionKind === "builtin" &&
+    provider === "azure" &&
+    originalRuntimeApi === "azure-openai-responses"
+      ? "managed-per-model"
+      : originalRuntimeApi;
   if (runtimeApi !== "managed-per-model" && !isProviderRuntimeApi(runtimeApi)) {
     throw new Error(`unsupported runtime API for ${id}: ${runtimeApi}`);
   }
@@ -714,7 +734,7 @@ function parseProviderProfile(value: unknown): ProviderProfile {
     ...(modelsEndpoint ? { modelsEndpoint } : {}),
     ...(discoveredAt ? { discoveredAt } : {}),
     ...(verifiedAt ? { verifiedAt } : {}),
-    ...(verifiedModel ? { verifiedModel } : {}),
+    ...(verifiedModel ? { verifiedModel: canonicalModelReference(verifiedModel) } : {}),
   };
 }
 
@@ -891,7 +911,7 @@ function modelReference(value: unknown): string {
   }
   if (/\s/.test(reference))
     throw new Error(`model reference may not contain whitespace: ${reference}`);
-  return reference;
+  return canonicalModelReference(reference);
 }
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
