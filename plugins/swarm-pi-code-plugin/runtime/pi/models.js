@@ -1,3 +1,4 @@
+import { canonicalModelReference } from "../providers/aliases.js";
 import { modelPriority } from "../state/model-config.js";
 import { createPiEnvironment } from "./environment.js";
 export function modelId(model) {
@@ -64,7 +65,8 @@ export function selectModel(models, requested) {
     if (!requested) {
         return models[0];
     }
-    return models.find((model) => modelId(model) === requested);
+    const canonicalRequested = canonicalModelReference(requested);
+    return models.find((model) => modelId(model) === canonicalRequested);
 }
 export function orderModels(models, options = {}) {
     if (options.requested) {
@@ -74,7 +76,7 @@ export function orderModels(models, options = {}) {
     const byId = new Map(models.map((model) => [modelId(model), model]));
     const ordered = [];
     for (const id of options.priority ?? []) {
-        const model = byId.get(id);
+        const model = byId.get(canonicalModelReference(id));
         if (model && !ordered.includes(model))
             ordered.push(model);
     }

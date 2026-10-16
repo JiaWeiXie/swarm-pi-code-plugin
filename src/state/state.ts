@@ -29,6 +29,7 @@ import type {
   TaskExecutionDefaults,
   TestingPreference,
 } from "../core/contracts.js";
+import { canonicalModelReference } from "../providers/aliases.js";
 import { ProcessLocalQueue } from "./process-queue.js";
 import {
   DEFAULT_ADAPTIVE_POLICY,
@@ -684,7 +685,7 @@ async function readLegacyState(cwd: string): Promise<SwarmState | undefined> {
     const config = asRecord(legacy.config);
     const legacyProfile = asRecord(config.swarmProfile);
     const state = defaultState();
-    state.config.modelPriority = stringArray(config.modelPriority);
+    state.config.modelPriority = stringArray(config.modelPriority).map(canonicalModelReference);
     if (Object.keys(legacyProfile).length > 0) {
       state.config.profile = {
         goal: stringValue(legacyProfile.goal),
@@ -758,12 +759,16 @@ function normalizeState(value: Record<string, unknown>): SwarmState {
   const config = asRecord(value.config);
   const profile = asRecord(config.profile);
   const state = defaultState();
-  state.config.modelPriority = stringArray(config.modelPriority);
-  state.config.availableModels = stringArray(config.availableModels);
+  state.config.modelPriority = stringArray(config.modelPriority).map(canonicalModelReference);
+  state.config.availableModels = stringArray(config.availableModels).map(canonicalModelReference);
   state.config.availableModelsCheckedAt = stringValue(config.availableModelsCheckedAt) ?? null;
   state.config.sandboxMode = sandboxModeValue(config.sandboxMode);
   state.config.rolePolicies = rolePolicyOverrides(config.rolePolicies);
-  state.config.adaptivePolicy = normalizeAdaptivePolicy(asRecord(config.adaptivePolicy));
+  const adaptivePolicy = normalizeAdaptivePolicy(asRecord(config.adaptivePolicy));
+  state.config.adaptivePolicy = {
+    ...adaptivePolicy,
+    classifierModels: adaptivePolicy.classifierModels.map(canonicalModelReference),
+  };
   const background = asRecord(config.backgroundRolePolicy);
   state.config.backgroundRolePolicy = {
     mechanicalExecutor: background.mechanicalExecutor === true,
@@ -1128,7 +1133,9 @@ function rolePolicyOverrides(value: unknown): RolePolicyOverrides {
     if (!isWorkerRole(key)) continue;
     const candidate = asRecord(raw);
     result[key] = {
-      ...(stringArray(candidate.models).length ? { models: stringArray(candidate.models) } : {}),
+      ...(stringArray(candidate.models).length
+        ? { models: stringArray(candidate.models).map(canonicalModelReference) }
+        : {}),
       ...(typeof candidate.thinkingLevel === "string"
         ? { thinkingLevel: candidate.thinkingLevel as never }
         : {}),

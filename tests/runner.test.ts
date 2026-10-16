@@ -18,6 +18,7 @@ import {
   describeModels,
   describeProviders,
   modelId,
+  orderModels,
   selectModel,
   type PiModel,
 } from "../src/pi/models.js";
@@ -2654,6 +2655,65 @@ test("private background worker reconstructs and completes a durable job", async
   assert.equal("status" in result && result.status, "succeeded");
   assert.equal("output" in result && result.output, "background done");
   assert.equal((await getJob(workspace, handle.id)).job.notification, "pending");
+});
+
+test("background worker accepts a signed legacy Azure snapshot and routes its model", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-legacy-azure-worker-"));
+  const legacyModel = "azure-openai-responses/gpt-4";
+  const azureModel = { ...fakeModel, provider: "azure", id: "gpt-4" } as PiModel;
+  const legacyConfiguration = {
+    ...defaultModelConfiguration(),
+    primary: legacyModel,
+  };
+  const handle = await startJob(workspace, {
+    host: "codex",
+    kind: "ask",
+    prompt: "Legacy Azure prompt",
+    cwd: workspace,
+    executionMode: "background",
+    timeoutMs: 30_000,
+    model: legacyModel,
+    modelConfiguration: legacyConfiguration,
+  });
+  const dependencies: RunnerDependencies = {
+    catalog: { available: () => [azureModel] },
+    readFile: async () => "unused",
+    createSession: async ({ model }) => {
+      assert.equal(model, azureModel);
+      return {
+        subscribe(listener) {
+          listener({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "legacy job done" },
+          });
+          listener({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+          return () => {};
+        },
+        async prompt(prompt) {
+          assert.match(prompt, /Legacy Azure prompt/);
+        },
+        dispose() {},
+      };
+    },
+  };
+
+  assert.equal(selectModel([azureModel], legacyModel), azureModel);
+  assert.deepEqual(orderModels([azureModel], { priority: [legacyModel] }), [azureModel]);
+  const result = await runCommand(
+    {
+      command: "__worker",
+      jobId: handle.id,
+      workerToken: handle.workerToken,
+      reconfigure: false,
+      reset: false,
+      json: true,
+    },
+    workspace,
+    dependencies,
+  );
+
+  assert.equal("status" in result && result.status, "succeeded");
+  assert.equal("output" in result && result.output, "legacy job done");
 });
 
 test("background worker rejects a tampered provider configuration snapshot", async () => {

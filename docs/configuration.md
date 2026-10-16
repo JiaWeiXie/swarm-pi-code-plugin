@@ -40,7 +40,7 @@ usable model exists. The setup layout switches to a compact stepper and
 two-row connection actions below 1280 CSS pixels, with the existing mobile
 rules continuing below 860, 760, and 480 pixels.
 
-This release pins the Pi Coding Agent SDK at `0.84.4`. Its session boundary
+This release pins the Pi Coding Agent SDK at `1.2.0`. Its session boundary
 accepts the SDK's complete event-listener shape, and the `pending` and
 `deferred` terminal reasons are both treated as incomplete responses. Partial
 streams therefore remain fail-closed and cannot be recorded as successful model
@@ -48,6 +48,8 @@ output. The existing Worker tool allowlist and sandbox boundary remain
 Plugin-owned; Pi's optional PowerShell tool and its extension/RPC surfaces such
 as `ui_prompt_start`, `ui_prompt_end`, `session_compact_failed`, and
 `clear_queue` are not exposed by this integration.
+Pi 1.2.0 reports a nonzero Bash exit as a tool result with `isError`; sandbox
+denials still prevent the attempted write and are marked as tool errors.
 
 New workspace defaults use Adaptive Sandbox mode, Balance Decision Mode,
 Host Assistance on with Host-first review, a Reversible automatic ceiling,
@@ -204,7 +206,7 @@ not expose a network listener beyond loopback or accept raw telemetry input.
 
 `ProviderCapabilityRegistry` is the single source for:
 
-- provider name and Common, Subscription, Cloud, Local, or Custom category;
+- provider name and Common, Subscription, Cloud, Local, Custom, or Decision category;
 - fixed, managed-per-model, or selectable protocol behavior;
 - supported authentication methods;
 - required, optional, advanced, and conditional form fields;
@@ -212,12 +214,12 @@ not expose a network listener beyond loopback or accept raw telemetry input.
   headers, or non-secret profiles;
 - model source and runtime adapter support.
 
-Coverage tests compare the Registry with every provider exposed by the Pi
-v0.84.4 model catalog. A newly added Pi provider fails CI until it is classified; the
-UI never guesses that an unknown provider uses a simple API-key form. The same
-catalog flow exposes `deepseek-v4-flash-vision-exp` from the existing DeepSeek
-connection with `input: ["text", "image"]`, so it is automatically treated as a
-vision-capable model without a new provider definition.
+Coverage tests compare the Registry with every provider exposed by Pi 1.2.0.
+A newly added provider fails CI until it is classified; the UI does not infer
+an API-key form from an unknown provider. The existing DeepSeek connection
+discovers `deepseek-flash` with `input: ["text", "image"]`. Pi also exposes
+TypeSafe as a decision-only provider; it has no chat models and is not offered
+as a Worker connection.
 
 The plugin initializes `ModelRuntime` from the configured auth and model files
 without implicit network refresh. Use `models --refresh` to explicitly update
@@ -227,8 +229,8 @@ Built-in examples include:
 
 | Connection | Protocol/runtime | Authentication | Additional fields |
 | --- | --- | --- | --- |
-| OpenAI API | OpenAI Responses | API key | organization and project IDs |
-| ChatGPT Plus/Pro | OpenAI Codex Responses | Pi device/browser OAuth | none |
+| OpenAI | OpenAI Responses | API key or ChatGPT subscription OAuth | organization and project IDs for API keys |
+| OpenAI Codex (legacy) | OpenAI Codex Responses | Pi device/browser OAuth | none |
 | Anthropic | Anthropic Messages | API key or Pi OAuth | optional beta header |
 | GitHub Copilot | managed per model | Pi OAuth | none |
 | Radius | Pi dynamic messages | Pi OAuth or API key | gateway catalog refreshed explicitly |
@@ -236,14 +238,20 @@ Built-in examples include:
 | Qwen Token Plan China | OpenAI Chat Completions | API key | China token-plan endpoint |
 | Qwen Token Plan Individual | OpenAI Chat Completions | API key | individual token-plan endpoint |
 | Baseten | OpenAI Chat Completions | API key | none |
-| DeepSeek | OpenAI Chat Completions | API key | V4 Flash Vision is catalog-discovered as image-capable |
-| Azure OpenAI | Azure Responses | API key | endpoint/resource, API version, deployment map |
+| DeepSeek | OpenAI Chat Completions | API key | `deepseek-flash` supports image input |
+| Meta | OpenAI Responses | API key or Pi OAuth | none |
+| Azure OpenAI (`azure`) | Responses or Foundry Chat Completions, per model | API key | endpoint/resource, API version, deployment map |
 | Amazon Bedrock | Bedrock Converse | ambient identity | AWS profile and region |
 | Google Vertex AI | Vertex runtime | ambient identity or API key | project and location |
 | Cloudflare | managed or Chat-compatible | API key | account and optional gateway IDs |
 
-Azure Microsoft Entra identity is shown only as a capability notice because the
-Pi v0.84.4 runtime cannot execute it. It is never marked ready.
+Azure Microsoft Entra identity is shown only as a capability notice because
+the Pi 1.2.0 runtime does not provide it through this connection. It is never
+marked ready. The plugin maps saved `azure-openai-responses` profiles and model
+references to `azure` when loading them. Existing credentials remain readable
+under the new ID and move to the new key on the next credential change. Pi's
+`azure/deepseek-v4-pro` uses Chat Completions, while Azure OpenAI models use
+Responses; new connection profiles leave the runtime API managed per model.
 
 ## Wire Protocols
 
@@ -253,11 +261,11 @@ Custom connections select exactly one upstream protocol before discovery:
 - `openai-responses`
 - `anthropic-messages`
 
-One connection cannot change protocol per model. OpenAI Chat and Responses have
-different request, tool-call, and state semantics, so the runtime does not
-probe both and guess. Pi-specific APIs such as Google, Azure, Bedrock, Vertex,
-Mistral, and OpenAI Codex remain fixed runtime adapters and are not presented in
-the generic three-way selector.
+A custom connection cannot change protocol per model. OpenAI Chat and Responses
+have different request, tool-call, and state semantics, so the runtime does not
+probe both and guess. Pi manages Azure's Responses and Foundry Chat Completions
+adapters per catalog model. Pi-specific APIs such as Google, Bedrock, Vertex,
+Mistral, and OpenAI Codex are not presented in the generic three-way selector.
 
 OpenAI-compatible roots are stored as versioned API roots, normally ending in
 `/v1`. Anthropic stores a service root; Pi appends `/v1/messages`. A legacy
@@ -270,9 +278,9 @@ as `modelsEndpoint` and must use the same origin as the generation root.
 
 ## Custom Model Sampling and Thinking Budget
 
-The advanced per-model editor of a custom connection exposes two Pi 0.84
-settings. They are stored as non-secret model configuration and are never
-credential material.
+The advanced per-model editor of a custom connection exposes sampling and
+thinking-budget settings. They are stored as non-secret model configuration
+and are never credential material.
 
 **Sampling parameters (JSON)** must contain a JSON object. Blank means the field
 is not set, and a JSON array, `null`, or primitive is rejected without closing
@@ -355,7 +363,7 @@ session-local `CredentialDraftVault`; the response contains only an opaque draft
 ID, provider, auth method, masked flag, and expiry. Draft IDs are bound to the
 loopback setup session and are removed after save, cancel, timeout, or expiry.
 
-Every `CredentialStore` read, list, modify, and delete accepts the Pi 0.84
+Every `CredentialStore` read, list, modify, and delete accepts the Pi
 `AuthOperationOptions` cancellation signal. An aborted operation stops waiting
 for the store lock immediately instead of running out the retry ceiling, always
 releases the lock, and removes its temporary write file. The atomic rename is
@@ -383,10 +391,13 @@ profile. Reconnecting that provider in the same setup session cancels the
 pending deletion. Unknown providers, deletion plus a replacement credential,
 and an active primary with no surviving replacement fail closed.
 
-ChatGPT Plus/Pro is the `openai-codex` subscription connection. It is not an
-OpenAI API-key option. The browser drives Pi's browser or device-code OAuth with
-bounded long polling, explicit prompt responses, cancellation, and timeout.
-Anthropic and GitHub Copilot use the same generic OAuth session machinery.
+The OpenAI connection now offers Pi's ChatGPT subscription OAuth as an
+alternative to an OpenAI API key; each profile selects one credential method.
+Existing `openai-codex` subscriptions remain available as a separate legacy
+connection. ChatGPT OAuth is not an API key and does not grant API billing
+access. The browser drives Pi's browser or device-code OAuth with bounded long
+polling, explicit prompt responses, cancellation, and timeout. Anthropic and
+GitHub Copilot use the same generic OAuth session machinery.
 OAuth completes in an in-memory credential store and becomes a credential
 draft; the real CredentialStore changes only during final save.
 
@@ -531,10 +542,15 @@ mode. If browser launch fails, it stays active and returns the one-time URL.
 
 ## Acceptance Criteria
 
-- Every Pi v0.84.4 provider is explicitly classified by the Registry.
-- The existing DeepSeek connection discovers `deepseek-v4-flash-vision-exp` with
+- Every Pi 1.2.0 provider is explicitly classified by the Registry.
+- The existing DeepSeek connection discovers `deepseek-flash` with
   both text and image input support.
-- ChatGPT subscription and OpenAI API-key connections remain separate.
+- Meta supports API-key and Pi OAuth chat connections; TypeSafe remains outside
+  the Worker chat-model selector.
+- Saved Azure OpenAI connections, model references, and credentials using the
+  previous provider ID continue to work with `azure`.
+- OpenAI API-key and ChatGPT OAuth credentials remain distinct; existing
+  `openai-codex` connections remain usable.
 - Browser responses, localStorage, state, model config, and jobs contain no
   credential values.
 - Discovery never guesses among Chat, Responses, and Anthropic protocols.

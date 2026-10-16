@@ -59,6 +59,30 @@ test("legacy Host Assistance settings do not gain Host-first authority on load",
   assert.equal(loaded.config.hostAssistance?.autoApproveDiscoveryGates, false);
 });
 
+test("legacy Azure references in workspace state use Pi 1.2.0 model IDs", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-azure-state-"));
+  const legacy = "azure-openai-responses/gpt-4";
+  await updateState(workspace, (state) => {
+    state.config.modelPriority = [legacy];
+    state.config.availableModels = [legacy];
+    state.config.rolePolicies = { planner: { models: [legacy] } };
+    state.config.adaptivePolicy = {
+      classifierModels: [legacy],
+      classifierThinkingLevel: "medium",
+      approvalPolicy: "deny",
+      trustedDomains: [],
+      rules: [],
+      diagnostics: false,
+    };
+  });
+
+  const loaded = await loadState(workspace);
+  assert.deepEqual(loaded.config.modelPriority, ["azure/gpt-4"]);
+  assert.deepEqual(loaded.config.availableModels, ["azure/gpt-4"]);
+  assert.deepEqual(loaded.config.rolePolicies?.planner?.models, ["azure/gpt-4"]);
+  assert.deepEqual(loaded.config.adaptivePolicy?.classifierModels, ["azure/gpt-4"]);
+});
+
 test("legacy workflow values clamp to canonical bounds and malformed rules fail closed", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-legacy-workflow-bounds-"));
   await updateState(workspace, (state) => {

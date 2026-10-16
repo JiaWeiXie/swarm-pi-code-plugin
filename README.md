@@ -52,10 +52,12 @@ requires Node.js 24.15.0+. Credentials remain in Pi-compatible user storage,
 never in repository state. Credential reads and writes are cancellable; a
 cancelled write commits nothing and leaves no partial file behind.
 
-The pinned Pi 0.84.4 catalog automatically exposes
-`deepseek-v4-flash-vision-exp` through an existing DeepSeek connection and marks
-it as image-capable. No additional provider definition or setup field is
-required.
+The pinned Pi 1.2.0 catalog exposes `deepseek-flash` with image input through
+the existing DeepSeek connection. OpenAI and Meta chat models can use an API key
+or Pi OAuth. Azure OpenAI now uses the `azure` provider ID; saved connections, model
+references, and credentials using `azure-openai-responses` remain usable.
+Azure Foundry Chat Completions models are handled per model alongside Responses.
+TypeSafe's decision models are not offered as worker chat models.
 
 ## Skills
 
@@ -159,7 +161,7 @@ Traditional Chinese focused references are paired where available.
 - [Agent Skills Specification](https://agentskills.io/specification)
 - [Claude Code current documentation](https://code.claude.com/docs/en/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
-- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `0.84.4`
+- [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `1.2.0`
 - [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime), pinned at `0.0.49`
 - [Node.js](https://nodejs.org/), `22.19+` for the packaged runtime and `24.15.0+` for repository development
 - [TypeScript](https://www.typescriptlang.org/)

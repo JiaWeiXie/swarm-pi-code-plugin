@@ -121,15 +121,16 @@ test(
     const readonly = await createSandboxRunner({ cwd: workspace, mode: "readonly" });
     try {
       const tool = readonly.createBashTool();
-      await assert.rejects(
-        () =>
-          tool.execute(
-            "readonly",
-            { command: "printf blocked > readonly.txt" },
-            undefined,
-            undefined,
-            undefined as never,
-          ),
+      const denied = await tool.execute(
+        "readonly",
+        { command: "printf blocked > readonly.txt" },
+        undefined,
+        undefined,
+        undefined as never,
+      );
+      assert.equal(denied.isError, true);
+      assert.match(
+        JSON.stringify(denied.content),
         /exited with code|operation not permitted|permission denied/i,
       );
       assert.equal(fs.existsSync(path.join(workspace, "readonly.txt")), false);
@@ -165,15 +166,16 @@ test(
       );
       await new Promise((resolve) => setTimeout(resolve, 100));
       assert.equal(fs.existsSync(path.join(workspace, "late.txt")), false);
-      await assert.rejects(
-        () =>
-          tool.execute(
-            "outside",
-            { command: `printf blocked > ${shellQuote(outside)}` },
-            undefined,
-            undefined,
-            undefined as never,
-          ),
+      const denied = await tool.execute(
+        "outside",
+        { command: `printf blocked > ${shellQuote(outside)}` },
+        undefined,
+        undefined,
+        undefined as never,
+      );
+      assert.equal(denied.isError, true);
+      assert.match(
+        JSON.stringify(denied.content),
         /exited with code|operation not permitted|permission denied/i,
       );
       assert.equal(fs.existsSync(outside), false);

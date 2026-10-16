@@ -1977,7 +1977,7 @@ function normalizeProviderFields(
       settings[field.id] = normalized;
     }
   }
-  if (definition.id === "azure-openai-responses" && !settings.baseUrl && !settings.resourceName) {
+  if (definition.id === "azure" && !settings.baseUrl && !settings.resourceName) {
     throw new Error("Azure OpenAI requires an endpoint or resource name");
   }
   if (

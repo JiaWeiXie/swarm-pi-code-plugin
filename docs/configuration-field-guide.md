@@ -18,13 +18,16 @@ Unless a section says otherwise:
 See the [Configuration Reference](configuration.md) for storage, transaction,
 provider protocol, and server-lifecycle details.
 
-The plugin currently pins the Pi Coding Agent SDK at `0.84.4`. When Pi reports
+The plugin currently pins the Pi Coding Agent SDK at `1.2.0`. When Pi reports
 the `pending` or `deferred` stop reason, the response is incomplete and remains
 fail-closed; it is never treated as successful output. The session adapter also
 accepts the SDK's full event-listener shape so future Pi event variants do not
-weaken the local execution boundary. The existing DeepSeek connection also
-automatically offers `deepseek-v4-flash-vision-exp` from the Pi catalog, with
-`input: ["text", "image"]`; no new provider setup is required.
+weaken the local execution boundary. The existing DeepSeek connection offers
+`deepseek-flash` with `input: ["text", "image"]`. OpenAI and Meta chat connections
+accept an API key or Pi OAuth. Saved Azure OpenAI connections using
+`azure-openai-responses` are mapped to the new `azure` provider ID. TypeSafe
+decision models are not listed as Worker chat models.
+Existing `openai-codex` subscription connections remain available separately.
 
 Quick navigation: [operating model](#mental-model) · [safe defaults](#safe-defaults) ·
 [Providers](#provider-fields) · [Models/Roles](#model-role-keywords) ·
@@ -263,6 +266,8 @@ private user data in either field.
 
 The pinned runtime uses an API key for this adapter. A displayed Microsoft Entra
 capability notice does not mean this plugin can execute Entra authentication.
+Pi selects Responses for Azure OpenAI models and Chat Completions for Foundry
+models such as `azure/deepseek-v4-pro`; the form does not choose that protocol.
 
 <a id="cloudflare-routing"></a>
 ### Cloudflare account and gateway IDs
