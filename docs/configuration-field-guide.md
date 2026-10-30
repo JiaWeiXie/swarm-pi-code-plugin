@@ -444,7 +444,9 @@ Deny has priority over ask and allow.
 - **Full-access** removes the plugin's own OS Sandbox and runs the Worker's Bash
   un-wrapped, so unlike Lenient it *is* unsandboxed by this plugin; the Worker's
   reach then depends entirely on the host's own sandbox. It needs no sandbox
-  backend, so it is always selectable.
+  backend, so it is always selectable. Its command checks read the proposed
+  command text and catch mistakes, not a determined worker; see the
+  [threat model](threat-model.md#full-access-mode).
 - **Authorization** decides whether one proposed action is allowed, must ask, or
   is denied. Sandbox is the outer operating-system boundary; authorization is the
   checkpoint inside it.

@@ -104,7 +104,7 @@ hard cap 則以 `hard-limit-exceeded` 終止。明確 approval、Host、Human De
 
 ## 安全性與相容性
 
-Strict、Adaptive、Lenient、Autopilot、Full-access 保留既有邊界。Host Assistance 保持有界、
+Strict、Adaptive、Lenient、Autopilot、Full-access 保留既有邊界。Full-access 是需明確選用、沒有 OS Sandbox 的模式：其指令檢查只能攔住疏失，無法防範刻意繞過的 Worker，僅應在可接受此風險的環境使用（見[威脅模型](docs/threat-model.md#full-access-mode)）。Host Assistance 保持有界、
 correlated、consume-once，且不會擴張權限。`wait-timed-out` 只表示有界 Host 等待結束；
 請保留 Job ID 並再次檢查狀態。
 

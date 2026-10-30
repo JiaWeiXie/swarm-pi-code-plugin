@@ -121,7 +121,9 @@ See [Execution Time and Recovery](docs/execution-time-policy.md).
 ## Safety and compatibility
 
 Strict, Adaptive, Lenient, Autopilot, and Full-access preserve their existing
-boundaries. Host Assistance remains bounded, correlated, and consume-once; it
+boundaries. Full-access is an opt-in mode with no OS sandbox: its command checks
+catch mistakes, not a determined worker, so use it only where that exposure is
+acceptable (see the [threat model](docs/threat-model.md#full-access-mode)). Host Assistance remains bounded, correlated, and consume-once; it
 does not add authority. A `wait-timed-out` response means only that the bounded
 Host wait ended—retain the Job ID and inspect it again.
 

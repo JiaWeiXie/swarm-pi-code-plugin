@@ -12,9 +12,15 @@ The OS sandbox, scoped tools, canonical path checks, immutable hard-deny rules,
 state generation fencing, and postflight validation form the enforcement
 boundary. A failure in one control must not expose unrestricted host access.
 
+This boundary exists in the `strict`, `adaptive`, `lenient`, and `autopilot`
+Sandbox modes. The opt-in `full-access` mode removes the OS sandbox and is
+described separately under [Full-access mode](#full-access-mode); nothing in
+this document that relies on the OS sandbox applies to it.
+
 ## Immutable Denials
 
-Delegated workers cannot receive:
+In the modes that keep the OS sandbox (`strict`, `adaptive`, `lenient`, and
+`autopilot`), delegated workers cannot receive:
 
 - unsandboxed shell or arbitrary host process execution;
 - reads or writes outside the assigned workspace and isolated temporary root;
@@ -26,7 +32,36 @@ Delegated workers cannot receive:
 - the ability to load project or user Pi extensions in the delegated process.
 
 These denials cannot be changed by role configuration, classifier output,
-repository instructions, or a supervisor approval.
+repository instructions, or a supervisor approval. They are enforced by the OS
+sandbox, the scoped tools, and the policy engine together. Two qualifications
+apply: the explicit `autoGitWrites` and `autoDelivery` opt-ins (available under
+Autopilot and `full-access`) turn Git delivery and deployment commands from a
+denial into a human approval gate. `full-access` does not have these denials:
+with no OS sandbox, the filesystem, environment, credential, socket, and
+network items above are not enforced there.
+
+## Full-access mode
+
+`full-access` is an explicit opt-in Sandbox mode. It is never a default and
+normalization never selects it. It removes the plugin's own OS sandbox: the
+worker's shell runs with the operator's user rights and the operator's
+environment (minus the plugin's own injected variables), so its reach is
+whatever that account and the host's own sandbox allow. The plugin cannot
+detect or control the host's sandbox.
+
+In this mode the policy engine still evaluates each proposed command, and its
+checks for privilege escalation, Git delivery and deployment, host package
+provisioning, and protected paths still apply. Those checks read the text of
+the proposed command. They help catch mistakes and ordinary commands, and they
+are a guardrail, not an enforcement boundary: they must not be relied on to
+contain a worker that is following hostile instructions. Anything the
+operator's account can reach should be treated as reachable by the worker.
+
+Use `full-access` only where that exposure is acceptable, for example in a
+disposable or otherwise isolated environment, and prefer one of the sandboxed
+modes otherwise. Discovery experiment children and Host Action delivery
+children never inherit `full-access` or `autopilot`; they run as `lenient` and
+keep the OS sandbox.
 
 ## Principal Failure Cases
 
@@ -64,6 +99,8 @@ repository instructions, or a supervisor approval.
 | Logs expose source or secrets | redacted summaries by default, mode 0600 artifacts, bounded diagnostics |
 
 ## Residual Risks
+
+`full-access` has no OS sandbox by design; see [Full-access mode](#full-access-mode).
 
 Lenient mode intentionally permits outbound traffic and therefore permits
 source exfiltration visible to the worker. Adaptive classification can make a

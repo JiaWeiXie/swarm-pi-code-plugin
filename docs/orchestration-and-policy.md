@@ -309,8 +309,11 @@ commit`/`push`/`merge` and `kubectl`/`helm`/`terraform` from immutable hard-deny
 to actions the user may approve; they are never host-model auto-approved, and
 `outwardApprovalGranularity` (`each-time` or `first-then-auto`) governs the
 approval scope. sudo/su, plugin control paths, secrets, forbidden/loopback
-domains, and direct Git-metadata writes stay enforced under both `full-access`
-and Autopilot.
+domains, and direct Git-metadata writes stay denied by the policy checks under
+both `full-access` and Autopilot. Under Autopilot those checks sit inside the OS
+sandbox. Under `full-access` they read the proposed command text with no OS
+sandbox behind them, so they catch mistakes, not a determined worker; see the
+[threat model](threat-model.md#full-access-mode).
 
 Adaptive network access starts denied. Trusted domains may pass deterministic
 policy; all other destinations are evaluated by hostname, port, and resolved
