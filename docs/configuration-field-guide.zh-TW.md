@@ -409,7 +409,8 @@ ask 高於 allow。
   該模式的內建特性，而 git／deploy 仍必須通過人工核准 gate。
 - **Full-access**：移除 Plugin 自己的 OS Sandbox，讓 Worker 的 Bash 不再被包裹，因此
   與 Lenient 不同，就本 Plugin 而言它*確實*未沙盒化；Worker 的觸及範圍完全取決於 Host
-  自己的沙盒。它不需要沙盒後端，因此一律可選。
+  自己的沙盒。它不需要沙盒後端，因此一律可選。其指令檢查只讀取提議的指令文字，
+  只能攔住疏失，無法防範刻意繞過的 Worker；見[威脅模型](threat-model.md#full-access-mode)。
 - **Authorization**：針對某一個動作判斷允許、詢問或拒絕。Sandbox 是外層圍欄，
   authorization 是圍欄內的通行判斷；兩者都必須通過。
 - **Classifier**：專門閱讀「提議中的動作 + 有限 policy context」並評估風險的模型。
