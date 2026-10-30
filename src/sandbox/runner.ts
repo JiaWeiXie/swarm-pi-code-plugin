@@ -28,6 +28,15 @@ export interface SandboxRunner {
 let activeRunner = false;
 const execFileAsync = promisify(execFile);
 
+/** Addresses an allowed host name may not resolve to in adaptive mode. */
+const ADAPTIVE_DENIED_ADDRESSES = [
+  "127.0.0.0/8",
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "169.254.0.0/16",
+];
+
 export async function createSandboxRunner(options: {
   cwd: string;
   mode: WorkerMode;
@@ -177,17 +186,12 @@ export async function sandboxConfiguration(
   return {
     network: {
       allowedDomains: [],
-      deniedDomains:
-        sandboxMode === "adaptive"
-          ? [
-              "localhost",
-              "127.0.0.0/8",
-              "10.0.0.0/8",
-              "172.16.0.0/12",
-              "192.168.0.0/16",
-              "169.254.0.0/16",
-            ]
-          : [],
+      // deniedDomains matches host names exactly, so only the name belongs here. The
+      // runtime resolves an allowed name once and dials the address it checked; the
+      // ranges that name may not resolve to are listed in deniedResolvedAddresses.
+      // Private-use ranges (RFC 1918) are opt-in in the runtime, so they are listed.
+      deniedDomains: sandboxMode === "adaptive" ? ["localhost"] : [],
+      ...(sandboxMode === "adaptive" ? { deniedResolvedAddresses: ADAPTIVE_DENIED_ADDRESSES } : {}),
       allowUnixSockets: [],
       allowAllUnixSockets: false,
       allowLocalBinding: false,

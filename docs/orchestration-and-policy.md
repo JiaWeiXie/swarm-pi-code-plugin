@@ -318,7 +318,10 @@ sandbox behind them, so they catch mistakes, not a determined worker; see the
 Adaptive network access starts denied. Trusted domains may pass deterministic
 policy; all other destinations are evaluated by hostname, port, and resolved
 address. Loopback, private networks, cloud metadata, local binding, and Unix
-sockets remain hard-denied. Adaptive Bash calls are serialized within the
+sockets remain hard-denied. The sandbox runtime resolves each permitted host name once
+and dials the address it checked. Names that resolve to loopback, link-local,
+cloud-metadata, or RFC 1918 addresses are refused through the runtime's
+`network.deniedResolvedAddresses`, in addition to the policy check above. Adaptive Bash calls are serialized within the
 worker because the sandbox runtime owns process-global state.
 
 Discover never holds that process-global manager across its whole workflow.

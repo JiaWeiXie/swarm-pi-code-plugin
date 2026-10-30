@@ -7,6 +7,9 @@ import net from "node:net";
 import test from "node:test";
 
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
+// The package does not export its resolved-address guard; the test loads it from the
+// installed dist to apply the runner's own network config to an injected resolver.
+import { createResolvedAddressGuard } from "@anthropic-ai/sandbox-runtime/dist/sandbox/resolved-address-guard.js";
 
 import { detectSandboxAvailability } from "../src/sandbox/availability.js";
 import {
@@ -37,13 +40,18 @@ test("live sandbox tests are not skipped where they are required", () => {
 test("sandbox configuration parses with the installed sandbox runtime schema", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-schema-"));
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-home-"));
-  // Adaptive mode is not covered here: its deniedDomains list CIDR ranges, which the
-  // runtime's domain-pattern schema rejects and its exact-match filter never applies.
-  // The policy engine's forbidden-destination check is what denies those addresses.
   for (const mode of ["readonly", "implement"] as const) {
-    const config = await sandboxConfiguration(workspace, tempRoot, mode, process.env, "lenient");
-    const parsed = SandboxRuntimeConfigSchema.safeParse(config);
-    assert.equal(parsed.success, true, `${mode}: ${JSON.stringify(parsed.error)}`);
+    for (const sandboxMode of ["lenient", "adaptive"] as const) {
+      const config = await sandboxConfiguration(
+        workspace,
+        tempRoot,
+        mode,
+        process.env,
+        sandboxMode,
+      );
+      const parsed = SandboxRuntimeConfigSchema.safeParse(config);
+      assert.equal(parsed.success, true, `${mode}/${sandboxMode}: ${JSON.stringify(parsed.error)}`);
+    }
   }
 });
 
@@ -77,6 +85,68 @@ test("sandbox policy separates readonly and implementation write access", async 
   assert.equal(implement.network.allowAllUnixSockets, false);
   assert.deepEqual(adaptive.network.allowedDomains, []);
   assert.equal(adaptive.network.deniedDomains.includes("localhost"), true);
+});
+
+test("adaptive sandbox refuses a host name that resolves to a loopback or private address", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-resolve-"));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-home-"));
+  const config = await sandboxConfiguration(
+    workspace,
+    tempRoot,
+    "readonly",
+    process.env,
+    "adaptive",
+    ["allowed.example.test"],
+  );
+  assert.equal(config.network.deniedDomains.includes("localhost"), true);
+  assert.deepEqual(
+    config.network.deniedDomains.filter((entry) => entry.includes("/")),
+    [],
+    "deniedDomains matches names exactly, so it holds no ranges",
+  );
+  const answers = new Map<string, string>([
+    ["loopback.example.test", "127.0.0.1"],
+    ["rfc1918-a.example.test", "10.1.2.3"],
+    ["rfc1918-b.example.test", "172.20.0.5"],
+    ["rfc1918-c.example.test", "192.168.1.10"],
+    ["metadata.example.test", "169.254.169.254"],
+    ["public.example.test", "93.184.216.34"],
+  ]);
+  const guard = createResolvedAddressGuard({
+    allowedDomains: config.network.allowedDomains,
+    deniedDomains: config.network.deniedDomains,
+    deniedResolvedAddresses: config.network.deniedResolvedAddresses ?? [],
+    resolve: (
+      hostname: string,
+      _options: unknown,
+      callback: (err: Error | null, addresses: { address: string; family: number }[]) => void,
+    ) => callback(null, [{ address: answers.get(hostname) ?? "0.0.0.0", family: 4 }]),
+    localAddresses: () => [],
+  });
+  const lookup = (hostname: string) =>
+    new Promise<{ error?: { code?: string; message: string }; addresses: unknown[] }>((resolve) =>
+      guard.lookupFor(443)(hostname, { all: true }, (error: Error | null, addresses: unknown) =>
+        resolve({
+          ...(error ? { error } : {}),
+          addresses: Array.isArray(addresses) ? addresses : [],
+        }),
+      ),
+    );
+
+  for (const name of [
+    "loopback.example.test",
+    "rfc1918-a.example.test",
+    "rfc1918-b.example.test",
+    "rfc1918-c.example.test",
+    "metadata.example.test",
+  ]) {
+    const result = await lookup(name);
+    assert.equal(result.error?.code, "ERR_SRT_RESOLVED_ADDRESS_DENIED", name);
+    assert.deepEqual(result.addresses, [], name);
+  }
+  const allowed = await lookup("public.example.test");
+  assert.equal(allowed.error, undefined);
+  assert.equal(allowed.addresses.length, 1);
 });
 
 test("sandbox keeps the runtime's bundled seccomp helper readable", async () => {
