@@ -15,9 +15,10 @@ import {
   sanitizedSandboxEnvironment,
 } from "../src/sandbox/runner.js";
 
-// A job that can really create sandboxes (user namespaces on Linux, Seatbelt on
-// macOS) sets SWARM_PI_REQUIRE_LIVE_SANDBOX=1. The live tests then always run, and
-// a missing sandbox fails the suite instead of silently skipping containment checks.
+// The `live-sandbox` CI job, which prepares its disposable runner for user namespaces,
+// sets SWARM_PI_REQUIRE_LIVE_SANDBOX=1. The live tests then always run, and a missing
+// sandbox fails the suite instead of silently skipping containment checks. Other
+// GitHub-hosted Linux jobs keep skipping them, because they cannot create sandboxes.
 const liveSandboxRequired = process.env.SWARM_PI_REQUIRE_LIVE_SANDBOX === "1";
 const liveSandboxAvailable =
   detectSandboxAvailability().available &&
