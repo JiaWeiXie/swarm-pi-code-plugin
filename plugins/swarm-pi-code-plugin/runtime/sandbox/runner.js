@@ -3,8 +3,9 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { SandboxManager } from "@carderne/sandbox-runtime";
+import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 import { createBashToolDefinition, } from "@earendil-works/pi-coding-agent";
 import { resolveStateDir, resolveWorkspaceRoot } from "../state/state.js";
 import { detectSandboxAvailability } from "./availability.js";
@@ -388,8 +389,24 @@ function credentialPaths(env) {
         .filter((value) => Boolean(value))
         .map((value) => path.resolve(value));
 }
+/**
+ * The sandbox runtime launches its bundled seccomp helper from inside the sandbox,
+ * so the helper directory must stay readable even when the package is installed
+ * below the home directory, which is otherwise denied.
+ */
+function sandboxRuntimeHelperPaths() {
+    try {
+        const entry = fileURLToPath(import.meta.resolve("@anthropic-ai/sandbox-runtime"));
+        const helperDirectory = path.resolve(path.dirname(entry), "..", "vendor", "seccomp");
+        return existsSync(helperDirectory) ? [helperDirectory] : [];
+    }
+    catch {
+        return [];
+    }
+}
 function executableReadPaths(cwd) {
     return uniquePaths([
+        ...sandboxRuntimeHelperPaths(),
         path.dirname(process.execPath),
         path.join(cwd, "node_modules", ".bin"),
         ...directDeveloperToolPaths(),

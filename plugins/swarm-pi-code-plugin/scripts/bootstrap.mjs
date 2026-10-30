@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dependencies = [
   ["@earendil-works", "pi-coding-agent"],
-  ["@carderne", "sandbox-runtime"],
+  ["@anthropic-ai", "sandbox-runtime"],
 ].map((segments) => path.join(pluginRoot, "node_modules", ...segments, "package.json"));
 const installLock = path.join(pluginRoot, ".installing-runtime");
 const runtimeMarker = path.join(pluginRoot, "node_modules", ".swarm-pi-runtime-ready");

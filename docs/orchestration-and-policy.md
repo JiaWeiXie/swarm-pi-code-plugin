@@ -258,7 +258,7 @@ whole-execution-workspace behavior. Scoped Pi read and search tools enforce
 read and search roots. Raw Bash reads in adaptive, lenient, and full-access modes
 are not folder-scoped: they can read the workspace outside configured
 directories, subject only to the existing sensitive read deny paths. This is an accepted
-boundary, not an oversight: pinned `@carderne/sandbox-runtime@0.0.49` reads
+boundary, not an oversight: pinned `@anthropic-ai/sandbox-runtime@0.0.81` reads
 are allow-by-default (deny-then-allow, with `allowRead` overriding `denyRead`).
 Scoping Bash reads would require denying the workspace and re-allowing the
 policy roots plus a complete, ecosystem-specific tooling read closure (such as

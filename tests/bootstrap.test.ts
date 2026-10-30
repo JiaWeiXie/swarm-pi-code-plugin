@@ -19,7 +19,7 @@ test("plugin bootstrap retries a partial install until a success marker exists",
   const sandboxDependency = path.join(
     root,
     "node_modules",
-    "@carderne",
+    "@anthropic-ai",
     "sandbox-runtime",
     "package.json",
   );
@@ -34,7 +34,7 @@ test("plugin bootstrap retries a partial install until a success marker exists",
     path.join(scripts, "bootstrap.mjs"),
   );
   fs.writeFileSync(dependency, '{"name":"@earendil-works/pi-coding-agent"}\n');
-  fs.writeFileSync(sandboxDependency, '{"name":"@carderne/sandbox-runtime"}\n');
+  fs.writeFileSync(sandboxDependency, '{"name":"@anthropic-ai/sandbox-runtime"}\n');
   const fakeNpm = path.join(bin, "npm");
   fs.writeFileSync(
     fakeNpm,

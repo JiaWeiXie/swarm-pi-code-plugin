@@ -6,7 +6,7 @@ import path from "node:path";
 import net from "node:net";
 import test from "node:test";
 
-import { SandboxRuntimeConfigSchema } from "@carderne/sandbox-runtime";
+import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
 
 import { detectSandboxAvailability } from "../src/sandbox/availability.js";
 import {
@@ -76,6 +76,21 @@ test("sandbox policy separates readonly and implementation write access", async 
   assert.equal(implement.network.allowAllUnixSockets, false);
   assert.deepEqual(adaptive.network.allowedDomains, []);
   assert.equal(adaptive.network.deniedDomains.includes("localhost"), true);
+});
+
+test("sandbox keeps the runtime's bundled seccomp helper readable", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-helper-"));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-home-"));
+  const config = await sandboxConfiguration(workspace, tempRoot, "readonly");
+  const helper = (config.filesystem.allowRead ?? []).find(
+    (entry): entry is string =>
+      typeof entry === "string" && entry.endsWith(path.join("vendor", "seccomp")),
+  );
+  assert.ok(helper, "allowRead names the helper directory");
+  assert.equal(
+    fs.existsSync(path.join(helper, process.arch, "apply-seccomp")),
+    process.platform === "linux",
+  );
 });
 
 test("sandbox environment omits host credentials and isolates user directories", () => {

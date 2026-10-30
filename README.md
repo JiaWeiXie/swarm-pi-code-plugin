@@ -164,7 +164,7 @@ Traditional Chinese focused references are paired where available.
 - [Claude Code current documentation](https://code.claude.com/docs/en/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
 - [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `1.2.0`
-- [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime), pinned at `0.0.49`
+- [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropics/sandbox-runtime), pinned at `0.0.81`
 - [Node.js](https://nodejs.org/), `22.19+` for the packaged runtime and `24.15.0+` for repository development
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)

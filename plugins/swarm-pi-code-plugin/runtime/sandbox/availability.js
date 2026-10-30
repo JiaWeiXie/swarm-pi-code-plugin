@@ -1,4 +1,4 @@
-import { SandboxManager } from "@carderne/sandbox-runtime";
+import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 export function detectSandboxAvailability() {
     const backend = process.platform === "darwin"
         ? "macos-seatbelt"
