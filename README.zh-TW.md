@@ -107,7 +107,7 @@ hard cap 則以 `hard-limit-exceeded` 終止。明確 approval、Host、Human De
 Strict、Adaptive、Lenient、Autopilot、Full-access 保留既有邊界。Full-access 是需明確選用、沒有 OS Sandbox 的模式：其指令檢查只能攔住疏失，無法防範刻意繞過的 Worker，僅應在可接受此風險的環境使用（見[威脅模型](docs/threat-model.md#full-access-mode)）。Host Assistance 保持有界、
 correlated、consume-once，且不會擴張權限。Adaptive 模式下，sandbox runtime 對每個放行的主機名稱只解析一次，
 並連到已檢查過的那個位址；解析結果落在 loopback、link-local、雲端 metadata 或私有網段
-（RFC 1918）的名稱會被拒絕。`wait-timed-out` 只表示有界 Host 等待結束；
+（RFC 1918）或 carrier-grade NAT（100.64.0.0/10）的名稱會被拒絕。`wait-timed-out` 只表示有界 Host 等待結束；
 請保留 Job ID 並再次檢查狀態。
 
 Host Actions 0.5 已移除。舊 `hostActions` 設定只保留為已停用的 migration tombstone。

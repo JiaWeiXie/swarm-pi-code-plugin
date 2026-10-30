@@ -109,6 +109,8 @@ test("adaptive sandbox refuses a host name that resolves to a loopback or privat
     ["rfc1918-a.example.test", "10.1.2.3"],
     ["rfc1918-b.example.test", "172.20.0.5"],
     ["rfc1918-c.example.test", "192.168.1.10"],
+    ["cgnat.example.test", "100.64.0.1"],
+    ["cgnat-edge.example.test", "100.127.255.254"],
     ["metadata.example.test", "169.254.169.254"],
     ["public.example.test", "93.184.216.34"],
   ]);
@@ -138,6 +140,8 @@ test("adaptive sandbox refuses a host name that resolves to a loopback or privat
     "rfc1918-a.example.test",
     "rfc1918-b.example.test",
     "rfc1918-c.example.test",
+    "cgnat.example.test",
+    "cgnat-edge.example.test",
     "metadata.example.test",
   ]) {
     const result = await lookup(name);

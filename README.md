@@ -126,7 +126,7 @@ catch mistakes, not a determined worker, so use it only where that exposure is
 acceptable (see the [threat model](docs/threat-model.md#full-access-mode)). Host Assistance remains bounded, correlated, and consume-once; it
 does not add authority. In Adaptive mode the sandbox runtime resolves each permitted host
 name once and dials the address it checked; a name that resolves to a loopback, link-local,
-cloud-metadata, or private-use (RFC 1918) address is refused. A `wait-timed-out` response means only that the bounded
+cloud-metadata, private-use (RFC 1918), or carrier-grade NAT (100.64.0.0/10) address is refused. A `wait-timed-out` response means only that the bounded
 Host wait ended—retain the Job ID and inspect it again.
 
 Host Actions 0.5 has been removed. Old `hostActions` configuration is retained

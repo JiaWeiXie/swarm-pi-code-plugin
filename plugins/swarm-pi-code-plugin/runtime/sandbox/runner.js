@@ -11,13 +11,14 @@ import { resolveStateDir, resolveWorkspaceRoot } from "../state/state.js";
 import { detectSandboxAvailability } from "./availability.js";
 let activeRunner = false;
 const execFileAsync = promisify(execFile);
-/** Addresses an allowed host name may not resolve to in adaptive mode. */
+/** Addresses an allowed host name may not resolve to in adaptive mode (RFC 1918 and carrier-grade NAT are opt-in in the runtime). */
 const ADAPTIVE_DENIED_ADDRESSES = [
     "127.0.0.0/8",
     "10.0.0.0/8",
     "172.16.0.0/12",
     "192.168.0.0/16",
     "169.254.0.0/16",
+    "100.64.0.0/10",
 ];
 export async function createSandboxRunner(options) {
     const availability = detectSandboxAvailability();
