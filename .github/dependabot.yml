@@ -14,3 +14,11 @@ updates:
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
+    # The root manifest and plugins/swarm-pi-code-plugin/package.json pin these three packages
+    # separately, and version:check does not compare them. Dependabot watches only the root
+    # manifest, so a bump here would leave the shipped plugin runtime on the old pin. Remove
+    # these entries once the two manifests are unified.
+    ignore:
+      - dependency-name: "@carderne/sandbox-runtime"
+      - dependency-name: "@earendil-works/pi-ai"
+      - dependency-name: "@earendil-works/pi-coding-agent"
