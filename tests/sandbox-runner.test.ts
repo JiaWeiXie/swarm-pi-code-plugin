@@ -111,8 +111,11 @@ test("adaptive sandbox refuses a host name that resolves to a loopback or privat
     ["rfc1918-c.example.test", "192.168.1.10"],
     ["cgnat.example.test", "100.64.0.1"],
     ["cgnat-edge.example.test", "100.127.255.254"],
+    ["ula-fc.example.test", "fc00::1"],
+    ["ula-fd.example.test", "fdff:ffff:ffff:ffff:ffff:ffff:ffff:fffe"],
     ["metadata.example.test", "169.254.169.254"],
     ["public.example.test", "93.184.216.34"],
+    ["public-v6.example.test", "2606:4700:4700::1111"],
   ]);
   const guard = createResolvedAddressGuard({
     allowedDomains: config.network.allowedDomains,
@@ -122,7 +125,10 @@ test("adaptive sandbox refuses a host name that resolves to a loopback or privat
       hostname: string,
       _options: unknown,
       callback: (err: Error | null, addresses: { address: string; family: number }[]) => void,
-    ) => callback(null, [{ address: answers.get(hostname) ?? "0.0.0.0", family: 4 }]),
+    ) => {
+      const address = answers.get(hostname) ?? "0.0.0.0";
+      callback(null, [{ address, family: net.isIP(address) }]);
+    },
     localAddresses: () => [],
   });
   const lookup = (hostname: string) =>
@@ -142,28 +148,32 @@ test("adaptive sandbox refuses a host name that resolves to a loopback or privat
     "rfc1918-c.example.test",
     "cgnat.example.test",
     "cgnat-edge.example.test",
+    "ula-fc.example.test",
+    "ula-fd.example.test",
     "metadata.example.test",
   ]) {
     const result = await lookup(name);
     assert.equal(result.error?.code, "ERR_SRT_RESOLVED_ADDRESS_DENIED", name);
     assert.deepEqual(result.addresses, [], name);
   }
-  const allowed = await lookup("public.example.test");
-  assert.equal(allowed.error, undefined);
-  assert.equal(allowed.addresses.length, 1);
+  for (const name of ["public.example.test", "public-v6.example.test"]) {
+    const allowed = await lookup(name);
+    assert.equal(allowed.error, undefined, name);
+    assert.equal(allowed.addresses.length, 1, name);
+  }
 });
 
 test("sandbox keeps the runtime's bundled seccomp helper readable", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-helper-"));
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-home-"));
   const config = await sandboxConfiguration(workspace, tempRoot, "readonly");
-  const helper = (config.filesystem.allowRead ?? []).find(
-    (entry): entry is string =>
-      typeof entry === "string" && entry.endsWith(path.join("vendor", "seccomp")),
+  const helper = (config.filesystem.allowRead ?? []).find((entry) =>
+    (typeof entry === "string" ? entry : entry.path).endsWith(path.join("vendor", "seccomp")),
   );
-  assert.ok(helper, "allowRead names the helper directory");
+  assert.ok(helper && typeof helper !== "string", "allowRead names the helper literally");
+  assert.equal(helper.literal, true);
   assert.equal(
-    fs.existsSync(path.join(helper, process.arch, "apply-seccomp")),
+    fs.existsSync(path.join(helper.path, process.arch, "apply-seccomp")),
     process.platform === "linux",
   );
 });

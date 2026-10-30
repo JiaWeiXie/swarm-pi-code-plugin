@@ -320,8 +320,10 @@ policy; all other destinations are evaluated by hostname, port, and resolved
 address. Loopback, private networks, cloud metadata, local binding, and Unix
 sockets remain hard-denied. The sandbox runtime resolves each permitted host name once
 and dials the address it checked. Names that resolve to loopback, link-local,
-cloud-metadata, RFC 1918, or carrier-grade NAT (100.64.0.0/10) addresses are refused through the runtime's
-`network.deniedResolvedAddresses`, in addition to the policy check above. Adaptive Bash calls are serialized within the
+cloud-metadata, RFC 1918, carrier-grade NAT (100.64.0.0/10), or IPv6 unique-local
+(fc00::/7) addresses are refused through the runtime's
+`network.deniedResolvedAddresses`, in addition to the policy check above. The bundled seccomp helper
+directory is an explicit literal read grant. Adaptive Bash calls are serialized within the
 worker because the sandbox runtime owns process-global state.
 
 Discover never holds that process-global manager across its whole workflow.

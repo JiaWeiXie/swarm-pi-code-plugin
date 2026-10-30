@@ -28,7 +28,7 @@ export interface SandboxRunner {
 let activeRunner = false;
 const execFileAsync = promisify(execFile);
 
-/** Addresses an allowed host name may not resolve to in adaptive mode (RFC 1918 and carrier-grade NAT are opt-in in the runtime). */
+/** Adaptive resolved-address denials include private-use ranges that are opt-in in the runtime. */
 const ADAPTIVE_DENIED_ADDRESSES = [
   "127.0.0.0/8",
   "10.0.0.0/8",
@@ -36,6 +36,7 @@ const ADAPTIVE_DENIED_ADDRESSES = [
   "192.168.0.0/16",
   "169.254.0.0/16",
   "100.64.0.0/10",
+  "fc00::/7",
 ];
 
 export async function createSandboxRunner(options: {
@@ -184,13 +185,14 @@ export async function sandboxConfiguration(
     "/private/tmp/claude",
   ];
   const policyShellRoots = boundProjectPolicy ? [...boundProjectPolicy.roots.shell] : [];
+  const runtimeHelperPaths = new Set(sandboxRuntimeHelperPaths());
   return {
     network: {
       allowedDomains: [],
       // deniedDomains matches host names exactly, so only the name belongs here. The
       // runtime resolves an allowed name once and dials the address it checked; the
       // ranges that name may not resolve to are listed in deniedResolvedAddresses.
-      // Private-use ranges (RFC 1918) are opt-in in the runtime, so they are listed.
+      // Private-use ranges (RFC 1918, CGNAT, IPv6 ULA) are opt-in, so they are listed.
       deniedDomains: sandboxMode === "adaptive" ? ["localhost"] : [],
       ...(sandboxMode === "adaptive" ? { deniedResolvedAddresses: ADAPTIVE_DENIED_ADDRESSES } : {}),
       allowUnixSockets: [],
@@ -205,7 +207,9 @@ export async function sandboxConfiguration(
         ...executableReadPaths(cwd),
         ...policyShellRoots,
         ...(allowGitMetadataRead ? gitPaths : []),
-      ]),
+      ]).map((entry) =>
+        runtimeHelperPaths.has(entry) ? { path: entry, literal: true as const } : entry,
+      ),
       allowWrite: uniquePaths(
         mode === "implement"
           ? boundProjectPolicy
