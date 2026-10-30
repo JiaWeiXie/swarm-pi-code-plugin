@@ -3,7 +3,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import net from "node:net";
 import test from "node:test";
+
+import { SandboxRuntimeConfigSchema } from "@carderne/sandbox-runtime";
 
 import { detectSandboxAvailability } from "../src/sandbox/availability.js";
 import {
@@ -12,9 +15,36 @@ import {
   sanitizedSandboxEnvironment,
 } from "../src/sandbox/runner.js";
 
+// A job that can really create sandboxes (user namespaces on Linux, Seatbelt on
+// macOS) sets SWARM_PI_REQUIRE_LIVE_SANDBOX=1. The live tests then always run, and
+// a missing sandbox fails the suite instead of silently skipping containment checks.
+const liveSandboxRequired = process.env.SWARM_PI_REQUIRE_LIVE_SANDBOX === "1";
 const liveSandboxAvailable =
   detectSandboxAvailability().available &&
-  !(process.platform === "linux" && process.env.RUNNER_ENVIRONMENT === "github-hosted");
+  (liveSandboxRequired ||
+    !(process.platform === "linux" && process.env.RUNNER_ENVIRONMENT === "github-hosted"));
+
+test("live sandbox tests are not skipped where they are required", () => {
+  if (!liveSandboxRequired) return;
+  assert.equal(
+    liveSandboxAvailable,
+    true,
+    `live sandbox required but unavailable: ${detectSandboxAvailability().reason ?? "unknown"}`,
+  );
+});
+
+test("sandbox configuration parses with the installed sandbox runtime schema", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-schema-"));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-home-"));
+  // Adaptive mode is not covered here: its deniedDomains list CIDR ranges, which the
+  // runtime's domain-pattern schema rejects and its exact-match filter never applies.
+  // The policy engine's forbidden-destination check is what denies those addresses.
+  for (const mode of ["readonly", "implement"] as const) {
+    const config = await sandboxConfiguration(workspace, tempRoot, mode, process.env, "lenient");
+    const parsed = SandboxRuntimeConfigSchema.safeParse(config);
+    assert.equal(parsed.success, true, `${mode}: ${JSON.stringify(parsed.error)}`);
+  }
+});
 
 test("sandbox policy separates readonly and implementation write access", async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-policy-"));
@@ -182,6 +212,83 @@ test(
     } finally {
       await implement.dispose();
       fs.rmSync(outside, { force: true });
+    }
+  },
+);
+
+async function runInSandbox(
+  runner: Awaited<ReturnType<typeof createSandboxRunner>>,
+  command: string,
+) {
+  return runner
+    .createBashTool()
+    .execute("containment", { command }, undefined, undefined, undefined as never);
+}
+
+test(
+  "OS sandbox denies protected reads and writes inside an implement workspace",
+  { skip: !liveSandboxAvailable },
+  async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-contain-"));
+    const secretDir = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-secret-"));
+    const credentials = path.join(secretDir, "aws-credentials");
+    const control = path.join(secretDir, "control.txt");
+    fs.writeFileSync(credentials, "synthetic-credential-value\n");
+    fs.writeFileSync(control, "readable\n");
+    const homeProfile = [".profile", ".bashrc"]
+      .map((name) => path.join(os.homedir(), name))
+      .find((candidate) => fs.existsSync(candidate));
+
+    const runner = await createSandboxRunner({
+      cwd: workspace,
+      mode: "implement",
+      env: { ...process.env, AWS_SHARED_CREDENTIALS_FILE: credentials },
+    });
+    try {
+      const credentialRead = await runInSandbox(runner, `cat ${shellQuote(credentials)}`);
+      assert.equal(credentialRead.isError, true);
+      assert.doesNotMatch(JSON.stringify(credentialRead.content), /synthetic-credential-value/);
+
+      const controlRead = await runInSandbox(runner, `cat ${shellQuote(control)}`);
+      assert.notEqual(controlRead.isError, true);
+      assert.match(JSON.stringify(controlRead.content), /readable/);
+
+      if (homeProfile) {
+        const homeRead = await runInSandbox(runner, `cat ${shellQuote(homeProfile)}`);
+        assert.equal(homeRead.isError, true, "files in the real home directory are unreadable");
+      }
+
+      for (const target of [".env", ".env.local", ".swarm-pi-policy.json"]) {
+        const denied = await runInSandbox(runner, `printf x > ${shellQuote(target)}`);
+        assert.equal(denied.isError, true, `${target} must not be writable`);
+        assert.equal(fs.existsSync(path.join(workspace, target)), false);
+      }
+    } finally {
+      await runner.dispose();
+      fs.rmSync(secretDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "OS sandbox gives the worker no direct network path",
+  { skip: !liveSandboxAvailable },
+  async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-net-"));
+    const server = net.createServer((socket) => socket.end("hello\n"));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as net.AddressInfo;
+    const runner = await createSandboxRunner({ cwd: workspace, mode: "readonly" });
+    try {
+      const result = await runInSandbox(
+        runner,
+        `exec 3<>/dev/tcp/127.0.0.1/${port} && read -r line <&3 && printf %s "$line"`,
+      );
+      assert.equal(result.isError, true);
+      assert.doesNotMatch(JSON.stringify(result.content), /hello/);
+    } finally {
+      await runner.dispose();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   },
 );
