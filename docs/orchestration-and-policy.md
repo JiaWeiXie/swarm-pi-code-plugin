@@ -258,7 +258,7 @@ whole-execution-workspace behavior. Scoped Pi read and search tools enforce
 read and search roots. Raw Bash reads in adaptive, lenient, and full-access modes
 are not folder-scoped: they can read the workspace outside configured
 directories, subject only to the existing sensitive read deny paths. This is an accepted
-boundary, not an oversight: pinned `@carderne/sandbox-runtime@0.0.49` reads
+boundary, not an oversight: pinned `@anthropic-ai/sandbox-runtime@0.0.81` reads
 are allow-by-default (deny-then-allow, with `allowRead` overriding `denyRead`).
 Scoping Bash reads would require denying the workspace and re-allowing the
 policy roots plus a complete, ecosystem-specific tooling read closure (such as
@@ -318,7 +318,12 @@ sandbox behind them, so they catch mistakes, not a determined worker; see the
 Adaptive network access starts denied. Trusted domains may pass deterministic
 policy; all other destinations are evaluated by hostname, port, and resolved
 address. Loopback, private networks, cloud metadata, local binding, and Unix
-sockets remain hard-denied. Adaptive Bash calls are serialized within the
+sockets remain hard-denied. The sandbox runtime resolves each permitted host name once
+and dials the address it checked. Names that resolve to loopback, link-local,
+cloud-metadata, RFC 1918, carrier-grade NAT (100.64.0.0/10), or IPv6 unique-local
+(fc00::/7) addresses are refused through the runtime's
+`network.deniedResolvedAddresses`, in addition to the policy check above. The bundled seccomp helper
+directory is an explicit literal read grant. Adaptive Bash calls are serialized within the
 worker because the sandbox runtime owns process-global state.
 
 Discover never holds that process-global manager across its whole workflow.

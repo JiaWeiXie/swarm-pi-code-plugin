@@ -3,9 +3,10 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { SandboxManager, type SandboxRuntimeConfig } from "@carderne/sandbox-runtime";
+import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import {
   createBashToolDefinition,
   type BashOperations,
@@ -26,6 +27,17 @@ export interface SandboxRunner {
 
 let activeRunner = false;
 const execFileAsync = promisify(execFile);
+
+/** Adaptive resolved-address denials include private-use ranges that are opt-in in the runtime. */
+const ADAPTIVE_DENIED_ADDRESSES = [
+  "127.0.0.0/8",
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "169.254.0.0/16",
+  "100.64.0.0/10",
+  "fc00::/7",
+];
 
 export async function createSandboxRunner(options: {
   cwd: string;
@@ -173,20 +185,16 @@ export async function sandboxConfiguration(
     "/private/tmp/claude",
   ];
   const policyShellRoots = boundProjectPolicy ? [...boundProjectPolicy.roots.shell] : [];
+  const runtimeHelperPaths = new Set(sandboxRuntimeHelperPaths());
   return {
     network: {
       allowedDomains: [],
-      deniedDomains:
-        sandboxMode === "adaptive"
-          ? [
-              "localhost",
-              "127.0.0.0/8",
-              "10.0.0.0/8",
-              "172.16.0.0/12",
-              "192.168.0.0/16",
-              "169.254.0.0/16",
-            ]
-          : [],
+      // deniedDomains matches host names exactly, so only the name belongs here. The
+      // runtime resolves an allowed name once and dials the address it checked; the
+      // ranges that name may not resolve to are listed in deniedResolvedAddresses.
+      // Private-use ranges (RFC 1918, CGNAT, IPv6 ULA) are opt-in, so they are listed.
+      deniedDomains: sandboxMode === "adaptive" ? ["localhost"] : [],
+      ...(sandboxMode === "adaptive" ? { deniedResolvedAddresses: ADAPTIVE_DENIED_ADDRESSES } : {}),
       allowUnixSockets: [],
       allowAllUnixSockets: false,
       allowLocalBinding: false,
@@ -199,7 +207,9 @@ export async function sandboxConfiguration(
         ...executableReadPaths(cwd),
         ...policyShellRoots,
         ...(allowGitMetadataRead ? gitPaths : []),
-      ]),
+      ]).map((entry) =>
+        runtimeHelperPaths.has(entry) ? { path: entry, literal: true as const } : entry,
+      ),
       allowWrite: uniquePaths(
         mode === "implement"
           ? boundProjectPolicy
@@ -453,8 +463,24 @@ function credentialPaths(env: NodeJS.ProcessEnv): string[] {
     .map((value) => path.resolve(value));
 }
 
+/**
+ * The sandbox runtime launches its bundled seccomp helper from inside the sandbox,
+ * so the helper directory must stay readable even when the package is installed
+ * below the home directory, which is otherwise denied.
+ */
+function sandboxRuntimeHelperPaths(): string[] {
+  try {
+    const entry = fileURLToPath(import.meta.resolve("@anthropic-ai/sandbox-runtime"));
+    const helperDirectory = path.resolve(path.dirname(entry), "..", "vendor", "seccomp");
+    return existsSync(helperDirectory) ? [helperDirectory] : [];
+  } catch {
+    return [];
+  }
+}
+
 function executableReadPaths(cwd: string): string[] {
   return uniquePaths([
+    ...sandboxRuntimeHelperPaths(),
     path.dirname(process.execPath),
     path.join(cwd, "node_modules", ".bin"),
     ...directDeveloperToolPaths(),

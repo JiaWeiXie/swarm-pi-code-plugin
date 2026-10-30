@@ -124,7 +124,11 @@ Strict, Adaptive, Lenient, Autopilot, and Full-access preserve their existing
 boundaries. Full-access is an opt-in mode with no OS sandbox: its command checks
 catch mistakes, not a determined worker, so use it only where that exposure is
 acceptable (see the [threat model](docs/threat-model.md#full-access-mode)). Host Assistance remains bounded, correlated, and consume-once; it
-does not add authority. A `wait-timed-out` response means only that the bounded
+does not add authority. In Adaptive mode the sandbox runtime resolves each permitted host
+name once and dials the address it checked; a name that resolves to a loopback, link-local,
+cloud-metadata, private-use (RFC 1918), carrier-grade NAT (100.64.0.0/10), or
+IPv6 unique-local (fc00::/7) address is refused. The runtime's seccomp helper directory
+is granted literal read access. A `wait-timed-out` response means only that the bounded
 Host wait ended—retain the Job ID and inspect it again.
 
 Host Actions 0.5 has been removed. Old `hostActions` configuration is retained
@@ -164,7 +168,7 @@ Traditional Chinese focused references are paired where available.
 - [Claude Code current documentation](https://code.claude.com/docs/en/overview)
 - [OpenAI Codex](https://developers.openai.com/codex/)
 - [Pi Coding Agent SDK](https://github.com/earendil-works/pi), pinned at `1.2.0`
-- [`@carderne/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime), pinned at `0.0.49`
+- [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropics/sandbox-runtime), pinned at `0.0.81`
 - [Node.js](https://nodejs.org/), `22.19+` for the packaged runtime and `24.15.0+` for repository development
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)
