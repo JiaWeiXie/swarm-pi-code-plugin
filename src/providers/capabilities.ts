@@ -738,20 +738,18 @@ const DEFINITIONS: ProviderDefinition[] = [
     configurable: true,
     promptCaching: { support: "implicit-only", defaultRetention: "provider-managed" },
   },
-  ...["fireworks", "opencode", "opencode-go"].map(
-    (id): ProviderDefinition => ({
-      ...apiKeyProvider(
-        id,
-        id === "fireworks" ? "Fireworks AI" : id === "opencode" ? "OpenCode Zen" : "OpenCode Go",
-        "openai-completions",
-      ),
-      protocolMode: "managed-per-model",
-      runtimeApis:
-        id === "opencode"
-          ? ["openai-completions", "anthropic-messages", "google-generative-ai", "openai-responses"]
-          : ["openai-completions", "anthropic-messages"],
-    }),
-  ),
+  ...["fireworks", "opencode", "opencode-go"].map((id): ProviderDefinition => ({
+    ...apiKeyProvider(
+      id,
+      id === "fireworks" ? "Fireworks AI" : id === "opencode" ? "OpenCode Zen" : "OpenCode Go",
+      "openai-completions",
+    ),
+    protocolMode: "managed-per-model",
+    runtimeApis:
+      id === "opencode"
+        ? ["openai-completions", "anthropic-messages", "google-generative-ai", "openai-responses"]
+        : ["openai-completions", "anthropic-messages"],
+  })),
 ];
 
 const CUSTOM_DEFINITION: ProviderDefinition = {

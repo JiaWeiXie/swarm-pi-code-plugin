@@ -33,6 +33,8 @@ codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 
 原生 live-sandbox CI 矩陣涵蓋 Linux x64／arm64 與 macOS Intel／arm64，且要求 sandbox 必須可用。本機 UDP DNS fixture 會驗證解析位址的過濾，不使用公開 DNS，也不連向回覆中的目標。由於尚無模型金鑰，使用真實模型的端到端 worker 驗證仍未測試。
 
+開發檢查使用 `package-lock.json` 鎖定的 oxfmt 0.75.0、oxlint 1.90.0 與 Playwright 1.64.1，讓格式與瀏覽器檢查和 CI 一致。
+
 本機開發：
 
 ```bash
