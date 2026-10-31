@@ -37,6 +37,11 @@ user interface stay under client control.
 
 The native live-sandbox CI matrix runs on Linux x64/arm64 and macOS Intel/arm64, with sandbox availability required. A controlled local UDP DNS fixture checks resolved-address filtering without public DNS or destination connections.
 
+Version 0.27.1 requires the Linux sandbox runtime's Unix-socket filter helper:
+when the runtime reports it unavailable, OS-sandboxed workers refuse to start
+with a dependency reason. Restore a supported runtime installation before using
+those workers. Read and network policy are unchanged.
+
 Version 0.27.0 uses `@anthropic-ai/sandbox-runtime` `0.0.81` in place of `@carderne/sandbox-runtime` `0.0.49`. Worker end-to-end verification with a real model and update behavior on existing installations remain untested.
 
 Development checks use the locked oxfmt 0.75.0, oxlint 1.90.0 and Playwright 1.64.1 versions from `package-lock.json` to match CI formatting and browser checks.
@@ -126,10 +131,16 @@ See [Execution Time and Recovery](docs/execution-time-policy.md).
 
 ## Safety and compatibility
 
-Strict, Adaptive, Lenient, Autopilot, and Full-access preserve their existing
-boundaries. Full-access is an opt-in mode with no OS sandbox: its command checks
-catch mistakes, not a determined worker, so use it only where that exposure is
-acceptable (see the [threat model](docs/threat-model.md#full-access-mode)). Host Assistance remains bounded, correlated, and consume-once; it
+Strict exposes scoped tools without Bash. Adaptive, Lenient and Autopilot use
+OS-sandboxed shells. Full-access mutation workers run without the plugin's OS
+sandbox; read-only workers retain lenient OS isolation. The mutation-shell
+command checks are guardrails, so use it only where that exposure is acceptable
+(see the [threat model](docs/threat-model.md#full-access-mode)). Scoped tools
+enforce assigned roots; shell reads use explicit denies/exceptions and include
+intentional system/runtime reads outside the workspace. The shell runner defaults
+to Lenient when no mode is passed; new project state defaults to Adaptive.
+Lenient/Autopilot outbound policy does not add Adaptive's private-range denies.
+Host Assistance remains bounded, correlated, and consume-once; it
 does not add authority. In Adaptive mode the sandbox runtime resolves each permitted host
 name once and dials the address it checked; a name that resolves to a loopback, link-local,
 cloud-metadata, private-use (RFC 1918), carrier-grade NAT (100.64.0.0/10), or

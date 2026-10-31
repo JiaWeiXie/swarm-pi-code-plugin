@@ -20,13 +20,17 @@ export function detectSandboxAvailability() {
         };
     }
     const dependencies = SandboxManager.checkDependencies();
+    const errors = [...dependencies.errors];
+    // The pinned runtime reports its missing Linux Unix-socket filter as a warning.
+    if (backend === "linux-bubblewrap" &&
+        dependencies.warnings.includes("seccomp not available - unix socket access not restricted")) {
+        errors.push("Unix-socket filter helper is unavailable. Restore a supported sandbox runtime installation.");
+    }
     return {
-        available: dependencies.errors.length === 0,
+        available: errors.length === 0,
         backend,
         label,
-        reason: dependencies.errors.length > 0
-            ? `Sandbox dependencies are unavailable: ${dependencies.errors.join(", ")}`
-            : null,
+        reason: errors.length > 0 ? `Sandbox dependencies are unavailable: ${errors.join(", ")}` : null,
         warnings: dependencies.warnings,
     };
 }

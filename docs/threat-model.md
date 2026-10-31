@@ -12,42 +12,68 @@ The OS sandbox, scoped tools, canonical path checks, immutable hard-deny rules,
 state generation fencing, and postflight validation form the enforcement
 boundary. A failure in one control must not expose unrestricted host access.
 
-This boundary exists in the `strict`, `adaptive`, `lenient`, and `autopilot`
-Sandbox modes. The opt-in `full-access` mode removes the OS sandbox and is
-described separately under [Full-access mode](#full-access-mode); nothing in
-this document that relies on the OS sandbox applies to it.
+`strict` exposes scoped filesystem tools without a Bash runner. `adaptive`,
+`lenient`, and `autopilot` use an OS-sandboxed shell when Bash is exposed.
+`full-access` retains the lenient OS sandbox for read-only workers; mutation
+workers use an unsandboxed shell. See [Full-access mode](#full-access-mode).
 
 ## Immutable Denials
 
-In the modes that keep the OS sandbox (`strict`, `adaptive`, `lenient`, and
-`autopilot`), delegated workers cannot receive:
+Scoped filesystem tools enforce their assigned read/write roots. Shell reads
+use the runtime's deny-then-allow model instead: known credential paths, plugin
+state, job artifacts, Git metadata and unrelated home content are denied, with
+explicit read exceptions for executable/runtime paths, configured shell roots
+and optional Git reads. System files outside those denies remain readable.
+Shell reads are not a workspace-only allowlist. The sandbox write configuration
+allows the assigned shell/workspace roots and isolated temporary root as
+appropriate for the worker mode, with explicit control/Git-path write denies.
+Sandboxed shells also receive a sanitized environment rather than the host's
+credential-bearing environment.
 
-- unsandboxed shell or arbitrary host process execution;
-- reads or writes outside the assigned workspace and isolated temporary root;
-- credential stores, model tokens, SSH agent sockets, host environment secrets,
-  plugin state, job control artifacts, or unrelated home-directory content;
-- Git metadata writes, commit, branch mutation, merge, push, or deployment;
-- local listening sockets, Unix sockets, cloud metadata, loopback, private
-  network access, devices, or weaker nested sandboxes;
-- the ability to load project or user Pi extensions in the delegated process.
+The sandbox configuration disables local binding, Unix sockets and weaker
+nested/network isolation. On Linux, the required Unix-socket filter uses the
+runtime's seccomp helper. If the pinned runtime reports that helper unavailable,
+the plugin reports the sandbox unavailable and refuses to create the runner,
+before starting a worker shell. This applies whenever an OS-sandboxed shell is
+requested, including full-access read-only workers. Other runtime warnings
+remain advisory; this check is not an attestation of every kernel capability.
 
-These denials cannot be changed by role configuration, classifier output,
-repository instructions, or a supervisor approval. They are enforced by the OS
-sandbox, the scoped tools, and the policy engine together. Two qualifications
-apply: the explicit `autoGitWrites` and `autoDelivery` opt-ins (available under
-Autopilot and `full-access`) turn Git delivery and deployment commands from a
-denial into a human approval gate. `full-access` does not have these denials:
-with no OS sandbox, the filesystem, environment, credential, socket, and
-network items above are not enforced there.
+The policy engine denies recognized privilege escalation, protected-path and
+Git delivery/deployment actions before classifier or approval processing.
+The explicit `autoGitWrites` and `autoDelivery` opt-ins (Autopilot and
+`full-access`) turn matching Git delivery and deployment commands into a human
+approval gate. Workers do not load project/user Pi extensions. Full-access
+mutation shells do not have the OS filesystem/environment/socket restrictions;
+their policy checks are guardrails as described below.
+
+### Network policy by mode
+
+The shell runner defaults to `lenient` when its caller omits the mode; new
+project state defaults to `adaptive`. Autopilot and full-access read-only
+workers use the lenient shell configuration.
+
+Adaptive applies the plugin's public-target and policy checks plus explicit
+resolved-address denials for loopback, link-local, private-use, carrier-grade
+NAT and IPv6 unique-local ranges. The runtime resolves permitted hostnames once
+and dials a checked address. Lenient and Autopilot permit outbound traffic and
+do not add Adaptive's private-range deny list. The runtime's default hostname
+address checks still apply, but they are not a blanket private-network ban:
+IP literals, localhost names and resolution at a parent proxy follow the
+runtime's distinct rules. Full-access mutation shells have no plugin OS network
+isolation. These mode differences are unchanged by the 0.27.1 helper check.
 
 ## Full-access mode
 
 `full-access` is an explicit opt-in Sandbox mode. It is never a default and
-normalization never selects it. It removes the plugin's own OS sandbox: the
-worker's shell runs with the operator's user rights and the operator's
+normalization never selects it implicitly. Mutation workers remove the plugin's
+own OS sandbox: their shell runs with the operator's user rights and the operator's
 environment (minus the plugin's own injected variables), so its reach is
 whatever that account and the host's own sandbox allow. The plugin cannot
 detect or control the host's sandbox.
+
+Read-only workers that expose Bash retain the lenient OS sandbox, sanitized
+environment and read-only workspace restrictions. They require an available backend,
+including the Linux Unix-socket filter helper.
 
 In this mode the policy engine still evaluates each proposed command, and its
 checks for privilege escalation, Git delivery and deployment, host package
@@ -59,9 +85,9 @@ operator's account can reach should be treated as reachable by the worker.
 
 Use `full-access` only where that exposure is acceptable, for example in a
 disposable or otherwise isolated environment, and prefer one of the sandboxed
-modes otherwise. Discovery experiment children and Host Action delivery
-children never inherit `full-access` or `autopilot`; they run as `lenient` and
-keep the OS sandbox.
+modes otherwise. Discovery experiment children downgrade `full-access` and
+`autopilot` to `lenient` and keep the OS sandbox. Host Action execution has been
+removed; its retained policy fields and records are legacy audit data.
 
 ## Principal Failure Cases
 
@@ -78,7 +104,7 @@ keep the OS sandbox.
 | Host context injects instructions | `[UNTRUSTED_HOST_CONTEXT]`, typed bundles, policy/gate/spec precedence, secret egress hard deny |
 | Shared-recon seal is forged, replayed, or treated as authority | authenticated runtime controller capability, exact-once 1–8 schema gate, defensive seed validation, immutable in-memory clone, custom-message-only propagation, explicit untrusted-claims instruction, fixed sanitized failure, no seal telemetry/result fields |
 | Model claims an experiment replay passed | required structured fields, isolated child, changed-path validation, explicit limitation until trusted replay exists |
-| Action recommendation becomes an unapproved side effect | inert recommendation, explicit Host record/start, original mutation-intent check, isolated child, host-broker action-family lease, remote actions default off |
+| Legacy Host Action is started | action-start returns `host-actions-removed`; retained configuration is disabled and recommendation records are inert |
 | Host blocks while a worker waits for approval | managed relay, fixed 15-second parent wait, durable Job ID, bounded `jobs wait` |
 | Approval notification is left stale or acknowledged incorrectly | atomic approval/notification transaction, matching notification ID, separate terminal acknowledgement |
 | Watcher restart replays an approval | stable `eventId`, Host-side deduplication, replay is informational and never consent |
@@ -100,7 +126,8 @@ keep the OS sandbox.
 
 ## Residual Risks
 
-`full-access` has no OS sandbox by design; see [Full-access mode](#full-access-mode).
+Full-access mutation workers have no plugin OS sandbox by design; read-only
+workers retain lenient OS isolation. See [Full-access mode](#full-access-mode).
 
 Lenient mode intentionally permits outbound traffic and therefore permits
 source exfiltration visible to the worker. Adaptive classification can make a

@@ -33,6 +33,10 @@ codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 
 原生 live-sandbox CI 矩陣涵蓋 Linux x64／arm64 與 macOS Intel／arm64，且要求 sandbox 必須可用。本機 UDP DNS fixture 會驗證解析位址的過濾，不使用公開 DNS，也不連向回覆中的目標。
 
+0.27.1 要求 Linux sandbox runtime 的 Unix-socket filter helper 可用。
+若 runtime 回報 helper 不可用，需要 OS 沙箱的 worker 會拒絕啟動，並顯示依賴原因；
+使用這些 worker 前，請先恢復受支援的 runtime 安裝。讀取與網路政策維持不變。
+
 0.27.0 的沙箱依賴由 `@carderne/sandbox-runtime` `0.0.49` 改為 `@anthropic-ai/sandbox-runtime` `0.0.81`。使用真實模型的端到端 worker 驗證，以及既有安裝的更新行為，均尚未測試。
 
 開發檢查使用 `package-lock.json` 鎖定的 oxfmt 0.75.0、oxlint 1.90.0 與 Playwright 1.64.1，讓格式與瀏覽器檢查和 CI 一致。
@@ -110,7 +114,14 @@ hard cap 則以 `hard-limit-exceeded` 終止。明確 approval、Host、Human De
 
 ## 安全性與相容性
 
-Strict、Adaptive、Lenient、Autopilot、Full-access 保留既有邊界。Full-access 是需明確選用、沒有 OS Sandbox 的模式：其指令檢查只能攔住疏失，無法防範刻意繞過的 Worker，僅應在可接受此風險的環境使用（見[威脅模型](docs/threat-model.md#full-access-mode)）。Host Assistance 保持有界、
+Strict 提供限制路徑的工具，不開放 Bash；Adaptive、Lenient、Autopilot 使用 OS 沙箱中的 shell。
+Full-access 的修改型 worker 不使用 plugin 的 OS 沙箱，唯讀 worker 仍保留 lenient OS 隔離。
+修改型 shell 的指令檢查提供有限防護，僅應在可接受此暴露範圍的環境使用
+（見[威脅模型](docs/threat-model.md#full-access-mode)）。路徑工具限制指派的根目錄；
+shell 讀取則採明確拒絕與例外規則，包含工作區外必要的系統及 runtime 讀取。
+shell runner 未指定模式時預設 Lenient；新專案狀態預設 Adaptive。
+Lenient／Autopilot 的對外連線政策不加入 Adaptive 的私有網段拒絕規則。
+Host Assistance 保持有界、
 correlated、consume-once，且不會擴張權限。Adaptive 模式下，sandbox runtime 對每個放行的主機名稱只解析一次，
 並連到已檢查過的那個位址；解析結果落在 loopback、link-local、雲端 metadata 或私有網段
 （RFC 1918）、carrier-grade NAT（100.64.0.0/10）或 IPv6 unique-local（fc00::/7）的名稱會被拒絕。
