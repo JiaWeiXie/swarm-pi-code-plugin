@@ -35,7 +35,9 @@ The client reads `plugin.json` and discovers each skill at
 frontmatter `name`. Install, enable, permissions, the outer sandbox, and the
 user interface stay under client control.
 
-The native live-sandbox CI matrix runs on Linux x64/arm64 and macOS Intel/arm64, with sandbox availability required. A controlled local UDP DNS fixture checks resolved-address filtering without public DNS or destination connections. Real-model end-to-end worker verification remains untested because no model key is available.
+The native live-sandbox CI matrix runs on Linux x64/arm64 and macOS Intel/arm64, with sandbox availability required. A controlled local UDP DNS fixture checks resolved-address filtering without public DNS or destination connections.
+
+Version 0.27.0 uses `@anthropic-ai/sandbox-runtime` `0.0.81` in place of `@carderne/sandbox-runtime` `0.0.49`. Worker end-to-end verification with a real model and update behavior on existing installations remain untested.
 
 Development checks use the locked oxfmt 0.75.0, oxlint 1.90.0 and Playwright 1.64.1 versions from `package-lock.json` to match CI formatting and browser checks.
 

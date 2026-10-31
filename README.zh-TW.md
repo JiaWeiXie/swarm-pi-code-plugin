@@ -31,7 +31,9 @@ codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 `plugin.json`，並在 `skills/<name>/SKILL.md` 發現各個 skill；一般 client 依 frontmatter
 `name` 暴露這十個 skills。安裝、啟用、權限、外層 sandbox 與 UI 仍由 client 管理。
 
-原生 live-sandbox CI 矩陣涵蓋 Linux x64／arm64 與 macOS Intel／arm64，且要求 sandbox 必須可用。本機 UDP DNS fixture 會驗證解析位址的過濾，不使用公開 DNS，也不連向回覆中的目標。由於尚無模型金鑰，使用真實模型的端到端 worker 驗證仍未測試。
+原生 live-sandbox CI 矩陣涵蓋 Linux x64／arm64 與 macOS Intel／arm64，且要求 sandbox 必須可用。本機 UDP DNS fixture 會驗證解析位址的過濾，不使用公開 DNS，也不連向回覆中的目標。
+
+0.27.0 的沙箱依賴由 `@carderne/sandbox-runtime` `0.0.49` 改為 `@anthropic-ai/sandbox-runtime` `0.0.81`。使用真實模型的端到端 worker 驗證，以及既有安裝的更新行為，均尚未測試。
 
 開發檢查使用 `package-lock.json` 鎖定的 oxfmt 0.75.0、oxlint 1.90.0 與 Playwright 1.64.1，讓格式與瀏覽器檢查和 CI 一致。
 
