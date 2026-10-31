@@ -1,11 +1,59 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test, { type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 
 import { detectSandboxAvailability } from "../src/sandbox/availability.js";
 
 const missingUnixFilter = "seccomp not available - unix socket access not restricted";
+
+function assertUnixFilterDiagnostic(linuxSource: string, managerSource: string): void {
+  const diagnostic = missingUnixFilter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(
+    linuxSource,
+    new RegExp(
+      `if \\(\\!seccompConfig\\?\\.argv0 &&\\s*` +
+        `getApplySeccompBinaryPath\\(seccompConfig\\?\\.applyPath\\) === null\\) \\{\\s*` +
+        `warnings\\.push\\(['"]${diagnostic}['"]\\)`,
+    ),
+    "review the installed runtime's missing-helper diagnostic before updating availability",
+  );
+  assert.match(managerSource, /const linuxDeps = checkLinuxDependencies\(\{/);
+  assert.match(managerSource, /warnings\.push\(\.\.\.linuxDeps\.warnings\)/);
+}
+
+function installedRuntimeSources(): { linux: string; manager: string } {
+  const entry = fileURLToPath(import.meta.resolve("@anthropic-ai/sandbox-runtime"));
+  const sandbox = path.join(path.dirname(entry), "sandbox");
+  return {
+    linux: fs.readFileSync(path.join(sandbox, "linux-sandbox-utils.js"), "utf8"),
+    manager: fs.readFileSync(path.join(sandbox, "sandbox-manager.js"), "utf8"),
+  };
+}
+
+test("installed runtime keeps the missing Unix-filter warning wired to its helper check", () => {
+  const source = installedRuntimeSources();
+  assertUnixFilterDiagnostic(source.linux, source.manager);
+});
+
+test("runtime diagnostic contract rejects a renamed warning or disconnected forwarding", () => {
+  const source = installedRuntimeSources();
+  assert.throws(() =>
+    assertUnixFilterDiagnostic(
+      source.linux.replace(missingUnixFilter, "changed diagnostic"),
+      source.manager,
+    ),
+  );
+  assert.throws(() =>
+    assertUnixFilterDiagnostic(
+      source.linux,
+      source.manager.replace("...linuxDeps.warnings", "...[]"),
+    ),
+  );
+});
 
 function sandboxDependencies(
   t: TestContext,
