@@ -35,6 +35,8 @@ The client reads `plugin.json` and discovers each skill at
 frontmatter `name`. Install, enable, permissions, the outer sandbox, and the
 user interface stay under client control.
 
+The native live-sandbox CI matrix runs on Linux x64/arm64 and macOS Intel/arm64, with sandbox availability required. A controlled local UDP DNS fixture checks resolved-address filtering without public DNS or destination connections. Real-model end-to-end worker verification remains untested because no model key is available.
+
 For local development:
 
 ```bash
