@@ -172,10 +172,10 @@ test("sandbox keeps the runtime's bundled seccomp helper readable", async () => 
   );
   assert.ok(helper && typeof helper !== "string", "allowRead names the helper literally");
   assert.equal(helper.literal, true);
-  assert.equal(
-    fs.existsSync(path.join(helper.path, process.arch, "apply-seccomp")),
-    process.platform === "linux",
-  );
+  // Seccomp is required on Linux; a macOS npm install may still ship the
+  // Linux helper files, so their presence is not an OS capability assertion.
+  if (process.platform === "linux")
+    assert.equal(fs.existsSync(path.join(helper.path, process.arch, "apply-seccomp")), true);
 });
 
 test("sandbox environment omits host credentials and isolates user directories", () => {
@@ -375,17 +375,29 @@ test(
   { skip: !liveSandboxAvailable },
   async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "swarm-pi-sandbox-net-"));
-    const server = net.createServer((socket) => socket.end("hello\n"));
+    let connections = 0;
+    const server = net.createServer((socket) => {
+      connections++;
+      socket.end("hello\n");
+    });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address() as net.AddressInfo;
     const runner = await createSandboxRunner({ cwd: workspace, mode: "readonly" });
     try {
       const result = await runInSandbox(
         runner,
-        `exec 3<>/dev/tcp/127.0.0.1/${port} && read -r line <&3 && printf %s "$line"`,
+        `${shellQuote(process.execPath)} -e ${shellQuote(
+          `const s = require('node:net').connect(${port}, '127.0.0.1'); process.stdout.write('node-ready\\n'); s.setTimeout(1000, () => process.exit(74)); s.on('error', () => process.exit(73)); s.on('data', b => process.stdout.write(b)); s.on('end', () => process.exit(0));`,
+        )}`,
       );
       assert.equal(result.isError, true);
       assert.doesNotMatch(JSON.stringify(result.content), /hello/);
+      assert.match(
+        JSON.stringify(result.content),
+        /node-ready/,
+        "Node executed inside the sandbox",
+      );
+      assert.equal(connections, 0, "the sandboxed process never reached the owned listener");
     } finally {
       await runner.dispose();
       await new Promise<void>((resolve) => server.close(() => resolve()));
