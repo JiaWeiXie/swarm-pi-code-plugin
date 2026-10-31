@@ -17,6 +17,10 @@ boundary. A failure in one control must not expose unrestricted host access.
 `full-access` retains the lenient OS sandbox for read-only workers; mutation
 workers use an unsandboxed shell. See [Full-access mode](#full-access-mode).
 
+Use `strict` for sensitive work. It avoids exposing a Bash runner and keeps
+filesystem access in scoped tools. Sensitive content inside those tools' roots
+may still be read and sent to a model; `strict` is not a secret detector.
+
 ## Immutable Denials
 
 Scoped filesystem tools enforce their assigned read/write roots. Shell reads

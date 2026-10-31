@@ -131,6 +131,10 @@ See [Execution Time and Recovery](docs/execution-time-policy.md).
 
 ## Safety and compatibility
 
+Use `strict` for sensitive work: it exposes scoped filesystem tools without a
+Bash runner. It limits shell exposure but cannot make sensitive workspace
+content safe to share with a model.
+
 Strict exposes scoped tools without Bash. Adaptive, Lenient and Autopilot use
 OS-sandboxed shells. Full-access mutation workers run without the plugin's OS
 sandbox; read-only workers retain lenient OS isolation. The mutation-shell
