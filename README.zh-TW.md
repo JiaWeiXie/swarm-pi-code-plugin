@@ -114,6 +114,9 @@ hard cap 則以 `hard-limit-exceeded` 終止。明確 approval、Host、Human De
 
 ## 安全性與相容性
 
+敏感工作建議使用 `strict`：此模式提供限制路徑的檔案工具，不開放 Bash。
+這能限制 shell 的暴露範圍，但不代表可以安心將工作區中的敏感內容交給模型。
+
 Strict 提供限制路徑的工具，不開放 Bash；Adaptive、Lenient、Autopilot 使用 OS 沙箱中的 shell。
 Full-access 的修改型 worker 不使用 plugin 的 OS 沙箱，唯讀 worker 仍保留 lenient OS 隔離。
 修改型 shell 的指令檢查提供有限防護，僅應在可接受此暴露範圍的環境使用
