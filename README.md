@@ -44,7 +44,7 @@ those workers. Read and network policy are unchanged.
 
 Version 0.27.0 uses `@anthropic-ai/sandbox-runtime` `0.0.81` in place of `@carderne/sandbox-runtime` `0.0.49`. Worker end-to-end verification with a real model and update behavior on existing installations remain untested.
 
-Development checks use the locked oxfmt 0.78.0, oxlint 1.93.0 and Playwright 1.65.0 versions from `package-lock.json` to match CI formatting and browser checks.
+Development checks use the locked oxfmt 0.79.0, oxlint 1.94.0 and Playwright 1.65.1 versions from `package-lock.json` to match CI formatting and browser checks.
 
 For local development:
 
@@ -193,7 +193,7 @@ Traditional Chinese focused references are paired where available.
 - [Node.js](https://nodejs.org/), `22.19+` for the packaged runtime and `24.15.0+` for repository development
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)
-- [Playwright](https://playwright.dev/), pinned at `1.65.0`
+- [Playwright](https://playwright.dev/), pinned at `1.65.1`
 - [Git worktrees](https://git-scm.com/docs/git-worktree)
 
 The original plugin concept and Host workflow were informed by
