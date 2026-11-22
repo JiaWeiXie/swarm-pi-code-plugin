@@ -39,7 +39,7 @@ codex plugin add swarm-pi-code-plugin@swarm-pi-code-plugin-local
 
 0.27.0 的沙箱依賴由 `@carderne/sandbox-runtime` `0.0.49` 改為 `@anthropic-ai/sandbox-runtime` `0.0.81`。使用真實模型的端到端 worker 驗證，以及既有安裝的更新行為，均尚未測試。
 
-開發檢查使用 `package-lock.json` 鎖定的 oxfmt 0.75.0、oxlint 1.90.0 與 Playwright 1.64.1，讓格式與瀏覽器檢查和 CI 一致。
+開發檢查使用 `package-lock.json` 鎖定的 oxfmt 0.78.0、oxlint 1.93.0 與 Playwright 1.65.0，讓格式與瀏覽器檢查和 CI 一致。
 
 本機開發：
 
@@ -168,7 +168,7 @@ form 與既有設定。這代表外層 Host sandbox 阻擋本機 state write；�
 - [Node.js](https://nodejs.org/)，packaged runtime `22.19+`、repository 開發 `24.15.0+`
 - [TypeScript](https://www.typescriptlang.org/)
 - [mise](https://mise.jdx.dev/)
-- [Playwright](https://playwright.dev/)，固定使用 `1.61.0`
+- [Playwright](https://playwright.dev/)，固定使用 `1.65.0`
 - [Git worktrees](https://git-scm.com/docs/git-worktree)
 
 本 Plugin 的原始概念與 Host workflow 參考了
