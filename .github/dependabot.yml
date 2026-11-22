@@ -22,3 +22,8 @@ updates:
       - dependency-name: "@anthropic-ai/sandbox-runtime"
       - dependency-name: "@earendil-works/pi-ai"
       - dependency-name: "@earendil-works/pi-coding-agent"
+      # Keep @types/node on the major of the oldest supported runtime line. The packaged runtime
+      # supports Node.js 22.19+ and development pins Node.js 24, so newer majors would type-check
+      # APIs that the runtime may not have. Raise this deliberately with the Node.js baseline.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
